@@ -10,6 +10,7 @@ class RelationType(StrEnum):
     SPOUSE = "SPOUSE"
     OTHER = "OTHER"
 
+
 class Profile(models.Model):
     id = fields.UUIDField(primary_key=True)
     account_id = fields.ForeignKeyField("models.Account")
@@ -22,4 +23,3 @@ class Profile(models.Model):
 
     class Meta:
         table = "profiles"
-
