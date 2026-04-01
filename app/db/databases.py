@@ -7,6 +7,10 @@ from app.core import config
 TORTOISE_APP_MODELS = [
     "aerich.models",
     "app.models.users",
+    "app.models.refresh_tokens",
+    "app.models.push_tokens",
+    "app.models.drug_interactions_cache",
+    "app.models.prompt_semantic_cache",
 ]
 
 TORTOISE_ORM = {
