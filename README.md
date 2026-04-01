@@ -11,7 +11,7 @@
 - **AI Worker**: 모델 추론 및 학습 작업을 API 서버와 분리하여 처리.
 - **UV Package Manager**: 매우 빠른 의존성 설치 및 가상환경 관리.
 - **Tortoise ORM**: 비동기 방식의 데이터베이스 모델링 및 쿼리 관리.
-- **Docker-Compose**: MySQL, Redis, Nginx를 포함한 전체 서비스 스택을 한 번에 실행.
+- **Docker-Compose**: PostgreSQL, Redis, Nginx를 포함한 전체 서비스 스택을 한 번에 실행.
 - **CI/CD Scripts**: 코드 포맷팅(Ruff), 타입 체크(Mypy), 테스트(Pytest)를 위한 자동화 스크립트 제공.
 
 ---
@@ -50,7 +50,24 @@
 
 ---
 
-## 🛠️ 설치 및 설정
+## 개발 환경 초기 세팅 (필수)
+
+프로젝트를 Clone하거나 최신 main 브랜치를 Pull 받은 직후, 아래 명령어를 **반드시 1회 실행**해야 합니다.
+
+```bash
+uv run pre-commit install
+```
+
+이 명령어는 Git 훅(hook)을 로컬 저장소에 설치합니다. 이후 `git commit` 실행 시 자동으로 다음 검사가 수행됩니다:
+
+- **Ruff Check**: 코드 린트 검사 및 자동 수정
+- **Ruff Format**: 코드 포맷팅 자동 적용
+
+이를 통해 GitHub Actions CI에서 발생하는 린트/포맷 오류를 커밋 단계에서 사전 차단할 수 있습니다.
+
+---
+
+## 설치 및 설정
 
 ### 1. 가상환경 구축 및 의존성 설치
 
