@@ -1,7 +1,13 @@
 from enum import StrEnum
 
 from tortoise import fields, models
+"""
+Account 모델 (뼈대)
 
+TODO: 담당 팀원이 구현 예정
+- 소셜 로그인 인증 정보 저장
+- profiles, chat_sessions, refresh_tokens와 1:N 관계
+"""
 
 class AuthProvider(StrEnum):
     KAKAO = "KAKAO"
