@@ -5,7 +5,7 @@ class Medication(models.Model):
     id = fields.UUIDField(pk=True)
 
     # profiles 테이블과 연결
-    profile = fields.ForeignKeyField('models.Profile', related_name='medications')
+    profile = fields.ForeignKeyField("models.Profile", related_name="medications")
 
     medicine_name = fields.CharField(max_length=128, description="약품명")
     dose_per_intake = fields.CharField(max_length=32, null=True, description="1회 복용량 (예: 1정, 5ml)")
@@ -31,6 +31,4 @@ class Medication(models.Model):
 
     class Meta:
         table = "medications"
-        indexes = (
-            ("profile_id", "is_active"),
-        )
+        indexes = (("profile_id", "is_active"),)
