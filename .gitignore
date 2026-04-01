@@ -25,3 +25,10 @@ desktop.ini
 # 데이터베이스 (혹시 로컬에 sqlite 같은 걸 쓴다면)
 *.sqlite3
 *.db
+
+# Claude 설정
+.claude
+CLAUDE.md
+
+# 문서화 폴더
+docs/
