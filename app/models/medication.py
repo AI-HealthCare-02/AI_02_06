@@ -4,7 +4,7 @@ from tortoise import fields, models
 class Medication(models.Model):
     id = fields.UUIDField(pk=True)
 
-    # 연결고리: 이제 users가 아니라 profiles 테이블과 연결됩니다!
+    # profiles 테이블과 연결
     profile = fields.ForeignKeyField('models.Profile', related_name='medications')
 
     medicine_name = fields.CharField(max_length=128, description="약품명")
