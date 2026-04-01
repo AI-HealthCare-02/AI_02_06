@@ -86,6 +86,12 @@ jobs:
 
       - name: Run Tests with Coverage
         if: steps.check_tests.outputs.has_tests == 'true'
+        env:
+          DB_USER: root
+          DB_PASSWORD: pw1234
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: downforce_db
         run: |
           uv run coverage run -m pytest app
           uv run coverage report -m
