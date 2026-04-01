@@ -1,5 +1,7 @@
 from enum import StrEnum
+
 from tortoise import fields, models
+
 
 class RelationType(StrEnum):
     SELF = "SELF"
