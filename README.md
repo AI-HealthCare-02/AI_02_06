@@ -11,7 +11,7 @@
 - **AI Worker**: 모델 추론 및 학습 작업을 API 서버와 분리하여 처리.
 - **UV Package Manager**: 매우 빠른 의존성 설치 및 가상환경 관리.
 - **Tortoise ORM**: 비동기 방식의 데이터베이스 모델링 및 쿼리 관리.
-- **Docker-Compose**: MySQL, Redis, Nginx를 포함한 전체 서비스 스택을 한 번에 실행.
+- **Docker-Compose**: PostgreSQL, Redis, Nginx를 포함한 전체 서비스 스택을 한 번에 실행.
 - **CI/CD Scripts**: 코드 포맷팅(Ruff), 타입 체크(Mypy), 테스트(Pytest)를 위한 자동화 스크립트 제공.
 
 ---

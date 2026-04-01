@@ -32,3 +32,6 @@ CLAUDE.md
 
 # 문서화 폴더
 docs/
+
+# 보안 키
+downforce-key.pem
