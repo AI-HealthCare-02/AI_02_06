@@ -47,7 +47,7 @@ jobs:
       postgres:
         image: postgres:15-alpine
         env:
-          POSTGRES_USER: root
+          POSTGRES_USER: postgres
           POSTGRES_PASSWORD: pw1234
           POSTGRES_DB: downforce_db
         ports:
@@ -87,7 +87,7 @@ jobs:
       - name: Run Tests with Coverage
         if: steps.check_tests.outputs.has_tests == 'true'
         env:
-          DB_USER: root
+          DB_USER: postgres
           DB_PASSWORD: pw1234
           DB_HOST: localhost
           DB_PORT: 5432
