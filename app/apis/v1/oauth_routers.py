@@ -5,7 +5,12 @@ from fastapi.responses import JSONResponse as Response
 
 from app.core import config
 from app.core.config import Env
-from app.dtos.oauth import OAuthConfigResponse, OAuthErrorResponse, OAuthLoginResponse
+from app.dtos.oauth import (
+    OAuthConfigResponse,
+    OAuthErrorResponse,
+    OAuthLoginResponse,
+    TokenRefreshResponse,
+)
 from app.services.oauth import OAuthService
 from app.services.rate_limiter import RateLimiter, get_rate_limiter
 
@@ -124,6 +129,69 @@ async def kakao_callback(
     response.set_cookie(
         key="refresh_token",
         value=str(tokens["refresh_token"]),
+        httponly=True,
+        secure=config.ENV == Env.PROD,
+        samesite="lax",
+        domain=config.COOKIE_DOMAIN or None,
+        max_age=config.REFRESH_TOKEN_EXPIRE_MINUTES * 60,
+    )
+
+    return response
+
+
+@oauth_router.post(
+    "/refresh",
+    response_model=TokenRefreshResponse,
+    summary="토큰 갱신 (RTR)",
+    description="""
+Refresh Token으로 새 Access Token을 발급합니다.
+
+**RTR (Refresh Token Rotation):**
+- 기존 Refresh Token은 즉시 무효화됩니다
+- 새 Refresh Token이 쿠키로 발급됩니다
+- Grace Period(2초) 내 동시 요청은 허용됩니다
+
+**탈취 감지:**
+- Grace Period 초과 후 구 토큰 사용 시 403 응답
+- 해당 토큰만 무효화 (다른 기기 세션 유지)
+    """,
+    responses={
+        200: {"description": "토큰 갱신 성공", "model": TokenRefreshResponse},
+        401: {"description": "유효하지 않은 토큰", "model": OAuthErrorResponse},
+        403: {"description": "탈취 의심 (재로그인 필요)", "model": OAuthErrorResponse},
+    },
+)
+async def refresh_token(
+    request: Request,
+    oauth_service: Annotated[OAuthService, Depends(get_oauth_service)],
+) -> Response:
+    # 쿠키에서 refresh token 추출
+    refresh_token_str = request.cookies.get("refresh_token")
+
+    if not refresh_token_str:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "missing_token",
+                "error_description": "Refresh token이 없습니다.",
+            },
+        )
+
+    # RTR 적용 토큰 갱신
+    tokens = await oauth_service.refresh_access_token(refresh_token_str)
+
+    # 응답 생성
+    response = Response(
+        content=TokenRefreshResponse(
+            access_token=tokens["access_token"],
+        ).model_dump(),
+        status_code=status.HTTP_200_OK,
+    )
+
+    # 새 Refresh Token을 HttpOnly 쿠키로 설정
+    response.set_cookie(
+        key="refresh_token",
+        value=tokens["refresh_token"],
         httponly=True,
         secure=config.ENV == Env.PROD,
         samesite="lax",

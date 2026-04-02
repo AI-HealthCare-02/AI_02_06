@@ -193,6 +193,75 @@ class OAuthService:
             "refresh_token": refresh_token_str,
         }
 
+    async def refresh_access_token(self, refresh_token_str: str) -> dict[str, str]:
+        """
+        RTR (Refresh Token Rotation)을 적용한 토큰 갱신
+
+        1. Refresh Token 검증 (Grace Period 고려)
+        2. 새 Access Token + Refresh Token 발급
+        3. 기존 Refresh Token 무효화
+
+        Returns:
+            {"access_token": "...", "refresh_token": "..."}
+
+        Raises:
+            HTTPException 401: 토큰 만료/무효
+            HTTPException 403: 탈취 의심 (해당 토큰만 종료)
+        """
+        # 1. Grace Period를 고려한 토큰 검증
+        db_token, is_valid = await self.refresh_token_repo.validate_with_grace(refresh_token_str)
+
+        if not db_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "error": "invalid_token",
+                    "error_description": "유효하지 않은 토큰입니다.",
+                },
+            )
+
+        if not is_valid:
+            # Grace Period 초과 → 탈취 의심 (해당 토큰만 종료, 이미 revoked 상태)
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "token_compromised",
+                    "error_description": "보안을 위해 재로그인이 필요합니다.",
+                },
+            )
+
+        # 2. 계정 조회
+        account = await self.account_repo.get_by_id(db_token.account_id)
+        if not account or not account.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "account_disabled",
+                    "error_description": "비활성화된 계정입니다.",
+                },
+            )
+
+        # 3. 새 토큰 생성
+        new_access_token = AccessToken()
+        new_access_token["sub"] = str(account.id)
+        new_access_token["provider"] = account.auth_provider
+
+        new_refresh_token = RefreshToken()
+        new_refresh_token["sub"] = str(account.id)
+        new_refresh_token_str = str(new_refresh_token)
+
+        # 4. RTR: 기존 토큰 무효화 + 새 토큰 저장
+        await self.refresh_token_repo.rotate(
+            old_token=refresh_token_str,
+            account_id=account.id,
+            new_token=new_refresh_token_str,
+        )
+
+        return {
+            "access_token": str(new_access_token),
+            "refresh_token": new_refresh_token_str,
+        }
+
     async def revoke_refresh_token(self, token: str) -> bool:
         """Refresh Token 무효화 (로그아웃)"""
         return await self.refresh_token_repo.revoke(token)

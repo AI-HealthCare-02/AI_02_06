@@ -3,6 +3,7 @@ Refresh Token Repository
 
 DB에 refresh token을 저장/조회/무효화합니다.
 토큰 원본이 아닌 SHA-256 해시값만 저장합니다.
+RTR (Refresh Token Rotation) + Grace Period 지원
 """
 
 import hashlib
@@ -11,6 +12,9 @@ from uuid import UUID
 
 from app.core import config
 from app.models.refresh_tokens import RefreshToken
+
+# Grace Period: 동시 요청 대응 (RTR 후에도 구 토큰 일시 유효)
+GRACE_PERIOD_SECONDS = 2
 
 
 class RefreshTokenRepository:
@@ -42,6 +46,70 @@ class RefreshTokenRepository:
             expires_at__gt=datetime.now(),
         ).first()
 
+    async def validate_with_grace(self, token: str) -> tuple[RefreshToken | None, bool]:
+        """
+        Grace Period를 고려한 토큰 검증
+
+        Returns:
+            tuple[RefreshToken | None, bool]: (토큰 객체, 유효 여부)
+            - (token, True): 유효한 토큰
+            - (token, True): RTR되었지만 Grace Period 내 (유효)
+            - (token, False): Grace Period 초과 (탈취 의심)
+            - (None, False): 토큰 없음
+        """
+        token_hash = self._hash_token(token)
+        now = datetime.now()
+
+        # 1. 해시로 토큰 조회 (revoked 여부 무관)
+        refresh_token = await RefreshToken.filter(token_hash=token_hash).first()
+
+        if not refresh_token:
+            return None, False
+
+        # 2. 만료 확인
+        if refresh_token.expires_at < now:
+            return refresh_token, False
+
+        # 3. 아직 revoke 안 된 토큰 → 유효
+        if not refresh_token.is_revoked:
+            return refresh_token, True
+
+        # 4. Revoked 토큰 → Grace Period 확인
+        if refresh_token.rotated_at:
+            grace_deadline = refresh_token.rotated_at + timedelta(seconds=GRACE_PERIOD_SECONDS)
+            if now <= grace_deadline:
+                # Grace Period 내 → 유효 (동시 요청 허용)
+                return refresh_token, True
+
+        # 5. Grace Period 초과 → 탈취 의심
+        return refresh_token, False
+
+    async def rotate(self, old_token: str, account_id: UUID, new_token: str) -> RefreshToken:
+        """
+        토큰 교체 (RTR)
+
+        1. 기존 토큰 무효화 + rotated_at 기록
+        2. 새 토큰 생성
+        3. 기존 토큰에 replaced_by_id 기록
+
+        Returns:
+            새로 생성된 RefreshToken
+        """
+        old_token_hash = self._hash_token(old_token)
+        now = datetime.now()
+
+        # 1. 새 토큰 생성
+        new_refresh_token = await self.create(account_id, new_token)
+
+        # 2. 기존 토큰 무효화 + 교체 정보 기록
+        await RefreshToken.filter(token_hash=old_token_hash).update(
+            is_revoked=True,
+            rotated_at=now,
+            replaced_by_id=new_refresh_token.id,
+        )
+
+        return new_refresh_token
+
     async def revoke(self, token: str) -> bool:
         """토큰 무효화 (로그아웃)"""
         token_hash = self._hash_token(token)
@@ -58,3 +126,29 @@ class RefreshTokenRepository:
             is_revoked=False,
         ).update(is_revoked=True)
         return updated
+
+    async def cleanup_expired_tokens(self, days_old: int = 7) -> int:
+        """
+        만료된 토큰 정리 (DB 비대화 방지)
+
+        - expires_at이 지난 토큰 삭제
+        - days_old일 이상 지난 revoked 토큰 삭제
+        - 주기적으로 실행 권장 (cron job 또는 스케줄러)
+
+        Returns:
+            삭제된 토큰 수
+        """
+        now = datetime.now()
+        cutoff = now - timedelta(days=days_old)
+
+        # 만료되었거나, revoked 후 일정 시간 지난 토큰 삭제
+        deleted = (
+            await RefreshToken.filter(
+                # 조건 1: 만료된 토큰
+                # 조건 2: revoked이고 오래된 토큰
+            )
+            .filter(expires_at__lt=cutoff)
+            .delete()
+        )
+
+        return deleted

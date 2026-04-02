@@ -2,6 +2,7 @@
 Refresh Token 모델
 
 REQ-USR-AUT-010: 토큰 기반 인증 보안 강화
+RTR (Refresh Token Rotation) + Grace Period 지원
 """
 
 from tortoise import fields, models
@@ -14,6 +15,8 @@ class RefreshToken(models.Model):
     - 토큰 원본이 아닌 SHA-256 해시값만 저장 (보안)
     - 로그아웃 시 is_revoked = True로 즉시 무효화
     - 다중 기기 로그인 지원 (계정당 여러 토큰 가능)
+    - RTR: 토큰 사용 시 새 토큰 발급 + 기존 토큰 무효화
+    - Grace Period: 동시 요청 대응 (rotated_at 기준 2초간 유효)
     """
 
     id = fields.BigIntField(
@@ -36,7 +39,15 @@ class RefreshToken(models.Model):
     )
     is_revoked = fields.BooleanField(
         default=False,
-        description="토큰 무효화 여부 (로그아웃 시 True)",
+        description="토큰 무효화 여부 (로그아웃 또는 RTR 시 True)",
+    )
+    rotated_at = fields.DatetimeField(
+        null=True,
+        description="토큰 교체 시점 (RTR 시 기록, Grace Period 계산용)",
+    )
+    replaced_by_id = fields.BigIntField(
+        null=True,
+        description="이 토큰을 대체한 새 토큰 ID (추적용)",
     )
     created_at = fields.DatetimeField(
         auto_now_add=True,

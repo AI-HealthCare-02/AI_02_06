@@ -39,3 +39,10 @@ class OAuthErrorResponse(BaseModel):
 
     error: str = Field(description="에러 코드")
     error_description: str = Field(description="에러 상세 설명")
+
+
+class TokenRefreshResponse(BaseModel):
+    """토큰 갱신 응답 (RTR)"""
+
+    access_token: str = Field(description="새 JWT Access Token")
+    token_type: str = Field(default="Bearer", description="토큰 타입")
