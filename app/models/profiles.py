@@ -23,3 +23,4 @@ class Profile(models.Model):
 
     class Meta:
         table = "profiles"
+        indexes = (("account_id", "relation_type"),)

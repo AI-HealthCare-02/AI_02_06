@@ -29,3 +29,4 @@ class Account(models.Model):
 
     class Meta:
         table = "accounts"
+        unique_together = (("auth_provider", "provider_account_id"),)
