@@ -5,8 +5,6 @@ OAuth 인증 서비스
 운영: 실제 카카오 서버와 HTTP 통신
 """
 
-import time
-
 import httpx
 from fastapi import HTTPException, status
 
@@ -15,20 +13,22 @@ from app.core.config import Env
 from app.models.accounts import Account, AuthProvider
 from app.repositories.account_repository import AccountRepository
 from app.repositories.refresh_token_repository import RefreshTokenRepository
+from app.services.rate_limiter import RateLimiter
 from app.utils.jwt.tokens import AccessToken, RefreshToken
 
 
 class OAuthService:
     """OAuth 인증 서비스"""
 
-    # Rate limiting 추적 (IP -> (count, timestamp))
-    _rate_limit_tracker: dict[str, tuple[int, float]] = {}
-    RATE_LIMIT_MAX = 10
-    RATE_LIMIT_WINDOW = 60  # seconds
-
-    def __init__(self) -> None:
-        self.account_repo = AccountRepository()
-        self.refresh_token_repo = RefreshTokenRepository()
+    def __init__(
+        self,
+        account_repo: AccountRepository | None = None,
+        refresh_token_repo: RefreshTokenRepository | None = None,
+        rate_limiter: RateLimiter | None = None,
+    ) -> None:
+        self.account_repo = account_repo or AccountRepository()
+        self.refresh_token_repo = refresh_token_repo or RefreshTokenRepository()
+        self.rate_limiter = rate_limiter
 
         # 환경에 따른 타겟 URL 동적 할당
         if config.ENV == Env.PROD:
@@ -39,28 +39,9 @@ class OAuthService:
             self.kakao_userinfo_url = f"{config.API_BASE_URL}/api/v1/mock/kakao/v2/user/me"
 
     def _check_rate_limit(self, client_ip: str) -> None:
-        """Rate limit 체크"""
-        current_time = time.time()
-
-        if client_ip in self._rate_limit_tracker:
-            count, timestamp = self._rate_limit_tracker[client_ip]
-
-            if current_time - timestamp > self.RATE_LIMIT_WINDOW:
-                self._rate_limit_tracker[client_ip] = (1, current_time)
-                return
-
-            if count >= self.RATE_LIMIT_MAX:
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail={
-                        "error": "rate_limit_exceeded",
-                        "error_description": f"요청 횟수를 초과했습니다. {self.RATE_LIMIT_WINDOW}초 후에 다시 시도해주세요.",
-                    },
-                )
-
-            self._rate_limit_tracker[client_ip] = (count + 1, timestamp)
-        else:
-            self._rate_limit_tracker[client_ip] = (1, current_time)
+        """Rate limit 체크 (rate_limiter가 주입된 경우에만 동작)"""
+        if self.rate_limiter:
+            self.rate_limiter.check(client_ip)
 
     async def _exchange_code_for_token(self, code: str) -> dict:
         """인가 코드로 카카오(또는 Mock) 서버와 통신하여 액세스 토큰 획득"""

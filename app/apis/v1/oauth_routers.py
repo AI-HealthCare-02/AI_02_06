@@ -7,8 +7,16 @@ from app.core import config
 from app.core.config import Env
 from app.dtos.oauth import OAuthConfigResponse, OAuthErrorResponse, OAuthLoginResponse
 from app.services.oauth import OAuthService
+from app.services.rate_limiter import RateLimiter, get_rate_limiter
 
 oauth_router = APIRouter(prefix="/auth", tags=["oauth"])
+
+
+def get_oauth_service(
+    rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+) -> OAuthService:
+    """OAuthService 의존성 팩토리"""
+    return OAuthService(rate_limiter=rate_limiter)
 
 
 @oauth_router.get(
@@ -65,7 +73,7 @@ async def get_kakao_oauth_config() -> OAuthConfigResponse:
 )
 async def kakao_callback(
     request: Request,
-    oauth_service: Annotated[OAuthService, Depends(OAuthService)],
+    oauth_service: Annotated[OAuthService, Depends(get_oauth_service)],
     code: Annotated[str | None, Query(description="카카오 인가 코드")] = None,
     state: Annotated[str | None, Query(description="CSRF 방지용 상태값")] = None,
     error: Annotated[str | None, Query(description="에러 코드")] = None,
@@ -137,7 +145,7 @@ async def kakao_callback(
 )
 async def logout(
     request: Request,
-    oauth_service: Annotated[OAuthService, Depends(OAuthService)],
+    oauth_service: Annotated[OAuthService, Depends(get_oauth_service)],
 ) -> Response:
     # 쿠키에서 refresh token 추출
     refresh_token = request.cookies.get("refresh_token")
