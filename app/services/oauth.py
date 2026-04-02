@@ -142,9 +142,9 @@ class OAuthService:
         # 사용자 정보 파싱
         provider_account_id = str(user_info["id"])
         kakao_account = user_info.get("kakao_account", {})
-        email = kakao_account.get("email")
         profile = kakao_account.get("profile", {})
         nickname = profile.get("nickname", f"카카오유저_{provider_account_id[:4]}")
+        profile_image_url = profile.get("profile_image_url")
 
         # 3. DB 계정 조회
         account = await self.account_repo.get_by_provider(
@@ -168,16 +168,16 @@ class OAuthService:
             # 최신 정보로 업데이트
             await self.account_repo.update_login_info(
                 account=account,
-                email=email,
                 nickname=nickname,
+                profile_image_url=profile_image_url,
             )
         else:
             # 신규 계정 생성
             account = await self.account_repo.create(
                 provider=AuthProvider.KAKAO,
                 provider_account_id=provider_account_id,
-                email=email,
                 nickname=nickname,
+                profile_image_url=profile_image_url,
             )
             is_new_user = True
 

@@ -27,11 +27,11 @@ class OAuthLoginResponse(BaseModel):
 
 
 class OAuthUserInfo(BaseModel):
-    """카카오에서 받아온 사용자 정보 (Mock용)"""
+    """카카오에서 받아온 사용자 정보"""
 
     provider_account_id: str = Field(description="카카오 사용자 고유 ID")
-    email: str | None = Field(default=None, description="이메일")
     nickname: str = Field(description="닉네임")
+    profile_image_url: str | None = Field(default=None, description="프로필 이미지 URL")
 
 
 class OAuthErrorResponse(BaseModel):

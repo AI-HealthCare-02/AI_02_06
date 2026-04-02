@@ -31,28 +31,28 @@ class AccountRepository:
         self,
         provider: AuthProvider,
         provider_account_id: str,
-        email: str | None,
         nickname: str,
+        profile_image_url: str | None = None,
     ) -> Account:
         """새 계정 생성"""
         return await Account.create(
             id=uuid4(),
             auth_provider=provider,
             provider_account_id=provider_account_id,
-            email=email,
             nickname=nickname,
+            profile_image_url=profile_image_url,
             is_active=True,
         )
 
     async def update_login_info(
         self,
         account: Account,
-        email: str | None,
         nickname: str,
+        profile_image_url: str | None = None,
     ) -> Account:
         """로그인 시 최신 정보로 업데이트"""
-        account.email = email
         account.nickname = nickname
+        account.profile_image_url = profile_image_url
         await account.save()
         return account
 
