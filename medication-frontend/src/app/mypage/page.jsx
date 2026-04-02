@@ -1,8 +1,10 @@
 'use client'
+import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 export default function MyPage() {
-  const [activeTab, setActiveTab] = useState('기본정보')
+    const [activeTab, setActiveTab] = useState('기본정보')
+    const router = useRouter()
 
   return (
     <main className="max-w-lg mx-auto p-6 mt-10">
@@ -10,7 +12,7 @@ export default function MyPage() {
 
       {/* 탭 버튼 */}
       <div className="flex gap-6 mb-8 border-b border-gray-200">
-  {['기본정보', '건강정보', '가족목록'].map((tab) => (
+  {['기본정보', '건강정보', '가족목록'].    map((tab) => (
     <button
       key={tab}
       onClick={() => setActiveTab(tab)}
@@ -101,6 +103,19 @@ export default function MyPage() {
           </div>
         </div>
       )}
+        {/* 하단 네비게이션 */}
+    <div className="fixed bottom-0 w-full bg-white border-t border-gray-100 flex">
+        <button
+    onClick={() => router.push('/main')}
+    className="flex-1 py-4 text-gray-400 text-sm">
+    홈
+        </button>
+        <button
+    onClick={() => router.push('/mypage')}
+    className="flex-1 py-4 text-blue-500 text-sm font-semibold">
+    마이페이지
+    </button>
+    </div>
 
     </main>
   )
