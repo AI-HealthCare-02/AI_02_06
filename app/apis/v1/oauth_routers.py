@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse as Response
 
 from app.core import config
 from app.core.config import Env
-from app.dtos.oauth import OAuthConfigResponse, OAuthLoginResponse
+from app.dtos.oauth import OAuthConfigResponse, OAuthErrorResponse, OAuthLoginResponse
 from app.services.oauth import OAuthService
 
 oauth_router = APIRouter(prefix="/auth", tags=["oauth"])
@@ -55,12 +55,12 @@ async def get_kakao_oauth_config() -> OAuthConfigResponse:
 4. 서비스 자체 JWT 토큰 발급
     """,
     responses={
-        200: {"description": "로그인 성공"},
-        400: {"description": "잘못된 요청 (code 누락, 카카오 에러)"},
-        401: {"description": "인증 실패 (잘못된 code, 토큰 교환 실패)"},
-        403: {"description": "비활성화된 계정"},
+        200: {"description": "로그인 성공", "model": OAuthLoginResponse},
+        400: {"description": "잘못된 요청 (code 누락, 카카오 에러)", "model": OAuthErrorResponse},
+        401: {"description": "인증 실패 (잘못된 code, 토큰 교환 실패)", "model": OAuthErrorResponse},
+        403: {"description": "비활성화된 계정", "model": OAuthErrorResponse},
         422: {"description": "유효성 검사 실패"},
-        429: {"description": "요청 횟수 초과"},
+        429: {"description": "요청 횟수 초과", "model": OAuthErrorResponse},
     },
 )
 async def kakao_callback(
@@ -131,6 +131,9 @@ async def kakao_callback(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="로그아웃",
     description="Refresh token을 무효화하고 쿠키를 삭제합니다.",
+    responses={
+        204: {"description": "로그아웃 성공 (본문 없음)"},
+    },
 )
 async def logout(
     request: Request,
