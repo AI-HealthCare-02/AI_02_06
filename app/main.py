@@ -4,6 +4,7 @@ from fastapi.responses import ORJSONResponse
 
 from app.apis.v1 import v1_routers
 from app.db.databases import initialize_tortoise
+from app.middlewares.security import SecurityMiddleware
 
 app = FastAPI(
     default_response_class=ORJSONResponse, docs_url="/api/docs", redoc_url="/api/redoc", openapi_url="/api/openapi.json"
@@ -19,6 +20,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 보안 미들웨어 (입력값 검증 + CSP 헤더)
+app.add_middleware(SecurityMiddleware)
 
 initialize_tortoise(app)
 
