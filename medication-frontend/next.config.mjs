@@ -1,10 +1,4 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {
-  experimental: {
-    turbo: {
-      root: '.'
-    }
-  }
-};
+const nextConfig = {};
 
 export default nextConfig;
