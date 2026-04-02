@@ -1,0 +1,42 @@
+{
+  "_comment": "FE → 백엔드 /auth/kakao/callback?code=... 로 전달하는 인가코드 목록",
+  "_flow": "카카오 로그인 버튼 클릭 → 카카오 동의 화면 → 리다이렉트 URI에 code 쿼리파라미터로 전달됨",
+  "codes": [
+    {
+      "scenario": "existing_user",
+      "description": "기존 가입자 - DB에 account 레코드 존재, 로그인 성공",
+      "code": "mock_auth_code_existing_user_abc123",
+      "redirect_uri": "http://localhost:3000/auth/kakao/callback"
+    },
+    {
+      "scenario": "new_user",
+      "description": "신규 가입 예정자 - 카카오 인증 성공, DB에 account 없음 → 회원가입 프로세스 진입",
+      "code": "mock_auth_code_new_user_def456",
+      "redirect_uri": "http://localhost:3000/auth/kakao/callback"
+    },
+    {
+      "scenario": "no_email_user",
+      "description": "이메일 비공개 사용자 - 카카오 동의항목에서 이메일 제공 거부 → 필수값 누락 예외 처리",
+      "code": "mock_auth_code_no_email_ghi789",
+      "redirect_uri": "http://localhost:3000/auth/kakao/callback"
+    },
+    {
+      "scenario": "unlinked_user",
+      "description": "연결 끊긴 사용자 - 카카오 앱 연결 해제 상태, provider_account_id는 존재하나 연결 끊김",
+      "code": "mock_auth_code_unlinked_jkl012",
+      "redirect_uri": "http://localhost:3000/auth/kakao/callback"
+    },
+    {
+      "scenario": "deactivated_user",
+      "description": "비활성화 계정 - DB에 account 존재하지만 is_active=false (관리자 정지 처리)",
+      "code": "mock_auth_code_deactivated_mno345",
+      "redirect_uri": "http://localhost:3000/auth/kakao/callback"
+    },
+    {
+      "scenario": "expired_code",
+      "description": "만료된 인가코드 - 카카오 인가코드 유효시간(10분) 초과 → 토큰 교환 실패 케이스",
+      "code": "mock_auth_code_expired_pqr678",
+      "redirect_uri": "http://localhost:3000/auth/kakao/callback"
+    }
+  ]
+}
