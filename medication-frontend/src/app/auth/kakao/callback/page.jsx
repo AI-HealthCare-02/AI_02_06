@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import api, { parseApiError } from '../../../lib/api'
+import api, { parseApiError } from '../../../../lib/api'
 
 // 메인 페이지 스켈레톤 UI
 function MainSkeleton() {
@@ -49,7 +49,7 @@ function MainSkeleton() {
   )
 }
 
-export default function CallbackPage() {
+export default function KakaoCallbackPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [error, setError] = useState(null)
