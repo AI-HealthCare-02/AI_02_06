@@ -5,6 +5,7 @@ description = "AI 헬스케어 파이널 프로젝트 예시용"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "asyncpg>=0.31.0",
     "cryptography>=46.0.3",
     "httpx>=0.28.1",
     "pydantic>=2.12.5",
@@ -52,7 +53,7 @@ explicit = true
 
 [tool.aerich]
 tortoise_orm = "app.db.databases.TORTOISE_ORM"
-location = "./app/db/migrations"
+location = "app/db/migrations"
 src_folder = "./."
 
 [tool.pytest.ini_options]

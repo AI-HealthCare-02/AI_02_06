@@ -18,7 +18,7 @@ class AuthProvider(StrEnum):
 
 class Account(models.Model):
     id = fields.UUIDField(primary_key=True)
-    auth_provider = fields.CharEnumField(enum_type=AuthProvider)
+    auth_provider = fields.CharEnumField(enum_type=AuthProvider, max_length=16)
     provider_account_id = fields.CharField(max_length=128)
     email = fields.CharField(max_length=255, null=True)
     nickname = fields.CharField(max_length=32)
