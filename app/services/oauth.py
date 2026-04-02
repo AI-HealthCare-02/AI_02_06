@@ -12,8 +12,9 @@ from fastapi import HTTPException, status
 
 from app.core import config
 from app.core.config import Env
-from app.models.accounts import AuthProvider
-from app.repositories.account_repository import AccountRepository, MockAccount
+from app.models.accounts import Account, AuthProvider
+from app.repositories.account_repository import AccountRepository
+from app.repositories.refresh_token_repository import RefreshTokenRepository
 from app.utils.jwt.tokens import AccessToken, RefreshToken
 
 
@@ -27,13 +28,13 @@ class OAuthService:
 
     def __init__(self) -> None:
         self.account_repo = AccountRepository()
+        self.refresh_token_repo = RefreshTokenRepository()
 
         # 환경에 따른 타겟 URL 동적 할당
         if config.ENV == Env.PROD:
             self.kakao_token_url = "https://kauth.kakao.com/oauth/token"
             self.kakao_userinfo_url = "https://kapi.kakao.com/v2/user/me"
         else:
-            # 설정된 API_BASE_URL(예: http://localhost:8000)을 기반으로 Mock 라우터 지정
             self.kakao_token_url = f"{config.API_BASE_URL}/api/v1/mock/kakao/oauth/token"
             self.kakao_userinfo_url = f"{config.API_BASE_URL}/api/v1/mock/kakao/v2/user/me"
 
@@ -76,14 +77,12 @@ class OAuthService:
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPStatusError as e:
-                # 4xx, 5xx 등 서버에서 에러 응답을 준 경우
                 error_detail = e.response.json() if e.response.content else {"error": "token_exchange_failed"}
                 raise HTTPException(
                     status_code=e.response.status_code,
                     detail=error_detail,
                 ) from e
-            except httpx.RequestError as e:  # <--- 여기서 as e 추가
-                # 네트워크 연결 실패, 타임아웃 등 물리적 통신 실패
+            except httpx.RequestError as e:
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail={
@@ -110,7 +109,7 @@ class OAuthService:
                     status_code=e.response.status_code,
                     detail=error_detail,
                 ) from e
-            except httpx.RequestError as e:  # <--- 여기서 as e 추가
+            except httpx.RequestError as e:
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail={
@@ -119,17 +118,24 @@ class OAuthService:
                     },
                 ) from e
 
-    async def kakao_callback(self, code: str, client_ip: str) -> tuple[MockAccount, bool]:
+    async def kakao_callback(self, code: str, client_ip: str) -> tuple[Account, bool]:
         """
         카카오 콜백 처리 로직
+
+        1. 인가 코드로 액세스 토큰 교환
+        2. 액세스 토큰으로 사용자 정보 조회
+        3. 계정 생성 또는 로그인 처리
+
+        Returns:
+            tuple[Account, bool]: (계정, 신규가입 여부)
         """
         self._check_rate_limit(client_ip)
 
-        # 1. 인가 코드로 액세스 토큰 교환 (네트워크 통신)
+        # 1. 인가 코드로 액세스 토큰 교환
         token_data = await self._exchange_code_for_token(code)
         kakao_access_token = token_data["access_token"]
 
-        # 2. 액세스 토큰으로 사용자 정보 조회 (네트워크 통신)
+        # 2. 액세스 토큰으로 사용자 정보 조회
         user_info = await self._get_user_info(kakao_access_token)
 
         # 사용자 정보 파싱
@@ -139,7 +145,7 @@ class OAuthService:
         profile = kakao_account.get("profile", {})
         nickname = profile.get("nickname", f"카카오유저_{provider_account_id[:4]}")
 
-        # 3. DB 계정 조회 및 생성/업데이트 로직
+        # 3. DB 계정 조회
         account = await self.account_repo.get_by_provider(
             provider=AuthProvider.KAKAO,
             provider_account_id=provider_account_id,
@@ -148,6 +154,7 @@ class OAuthService:
         is_new_user = False
 
         if account:
+            # 기존 계정 - 활성 상태 체크
             if not account.is_active:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -157,12 +164,14 @@ class OAuthService:
                     },
                 )
 
+            # 최신 정보로 업데이트
             await self.account_repo.update_login_info(
                 account=account,
                 email=email,
                 nickname=nickname,
             )
         else:
+            # 신규 계정 생성
             account = await self.account_repo.create(
                 provider=AuthProvider.KAKAO,
                 provider_account_id=provider_account_id,
@@ -173,16 +182,35 @@ class OAuthService:
 
         return account, is_new_user
 
-    def issue_tokens(self, account: MockAccount) -> dict[str, str]:
-        """JWT 토큰 발급"""
+    async def issue_tokens(self, account: Account) -> dict[str, str]:
+        """
+        JWT 토큰 발급 및 refresh token DB 저장
+
+        Returns:
+            {"access_token": "...", "refresh_token": "..."}
+        """
+        # Access Token 생성
         access_token = AccessToken()
         access_token["sub"] = str(account.id)
         access_token["provider"] = account.auth_provider
 
+        # Refresh Token 생성
         refresh_token = RefreshToken()
         refresh_token["sub"] = str(account.id)
 
+        refresh_token_str = str(refresh_token)
+
+        # Refresh Token DB 저장
+        await self.refresh_token_repo.create(
+            account_id=account.id,
+            token=refresh_token_str,
+        )
+
         return {
             "access_token": str(access_token),
-            "refresh_token": str(refresh_token),
+            "refresh_token": refresh_token_str,
         }
+
+    async def revoke_refresh_token(self, token: str) -> bool:
+        """Refresh Token 무효화 (로그아웃)"""
+        return await self.refresh_token_repo.revoke(token)

@@ -100,8 +100,8 @@ async def kakao_callback(
         client_ip=client_ip,
     )
 
-    # 서비스 JWT 토큰 발급
-    tokens = oauth_service.issue_tokens(account)
+    # 서비스 JWT 토큰 발급 및 DB 저장
+    tokens = await oauth_service.issue_tokens(account)
 
     # 응답 생성
     response = Response(
@@ -130,9 +130,20 @@ async def kakao_callback(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="로그아웃",
-    description="Refresh token 쿠키를 삭제하여 로그아웃합니다.",
+    description="Refresh token을 무효화하고 쿠키를 삭제합니다.",
 )
-async def logout() -> Response:
+async def logout(
+    request: Request,
+    oauth_service: Annotated[OAuthService, Depends(OAuthService)],
+) -> Response:
+    # 쿠키에서 refresh token 추출
+    refresh_token = request.cookies.get("refresh_token")
+
+    # DB에서 토큰 무효화
+    if refresh_token:
+        await oauth_service.revoke_refresh_token(refresh_token)
+
+    # 쿠키 삭제
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(
         key="refresh_token",
