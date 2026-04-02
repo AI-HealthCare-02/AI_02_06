@@ -32,6 +32,11 @@ export const ERROR_CODE_MESSAGES = {
   // 인증 관련
   token_expired: '로그인이 만료되었습니다. 다시 로그인해주세요.',
   invalid_token: '유효하지 않은 인증입니다. 다시 로그인해주세요.',
+  missing_token: 'Refresh token이 없습니다. 다시 로그인해주세요.',
+  token_compromised: '보안을 위해 로그아웃되었습니다. 다시 로그인해주세요.',
+
+  // 입력값 검증
+  invalid_input: '허용되지 않는 입력입니다.',
 
   // 카카오 에러 코드
   KOE010: '인증 정보가 올바르지 않습니다.',
@@ -41,7 +46,7 @@ export const ERROR_CODE_MESSAGES = {
 // 에러 코드별 동작 정의
 export const ERROR_ACTIONS = {
   // 로그인 페이지로 리다이렉트가 필요한 에러
-  REDIRECT_TO_LOGIN: ['token_expired', 'invalid_token'],
+  REDIRECT_TO_LOGIN: ['token_expired', 'invalid_token', 'missing_token', 'token_compromised'],
 
   // 재시도 가능한 에러
   RETRYABLE: ['network_error', 'rate_limit_exceeded'],

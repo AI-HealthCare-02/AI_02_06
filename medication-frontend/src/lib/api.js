@@ -2,6 +2,7 @@
  * API 클라이언트 설정
  *
  * axios 인스턴스 생성 및 인터셉터 설정
+ * RTR (Refresh Token Rotation) + Request Deduplication 지원
  */
 
 import axios from 'axios'
@@ -26,25 +27,43 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 )
 
-// 응답 인터셉터: 에러 처리
+// 응답 인터셉터: 에러 처리 + RTR
 api.interceptors.response.use(
   // 성공 응답은 그대로 반환
   (response) => response,
 
   // 에러 응답 처리
-  (error) => {
-    const parsed = parseApiError(error)
+  async (error) => {
+    const originalRequest = error.config
+    const status = error.response?.status
 
-    // 401 Unauthorized - 토큰 만료/무효
-    if (parsed.status === 401) {
-      localStorage.removeItem('access_token')
-      // 로그인 페이지가 아닐 때만 리다이렉트
-      if (!window.location.pathname.includes('/login')) {
-        window.location.href = '/login'
+    // 401 Unauthorized - 토큰 갱신 시도
+    if (status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true
+
+      // /auth/refresh 요청 자체가 401이면 바로 로그아웃
+      if (originalRequest.url?.includes('/auth/refresh')) {
+        return Promise.reject(error)
+      }
+
+      try {
+        // 동적 import로 순환 참조 방지
+        const { refreshToken } = await import('./tokenManager')
+        const newToken = await refreshToken()
+
+        if (newToken) {
+          // 새 토큰으로 원래 요청 재시도
+          originalRequest.headers.Authorization = `Bearer ${newToken}`
+          return api.request(originalRequest)
+        }
+      } catch (refreshError) {
+        // 갱신 실패 - tokenManager에서 로그아웃 처리됨
+        return Promise.reject(refreshError)
       }
     }
 
     // 에러 객체에 파싱된 정보 첨부
+    const parsed = parseApiError(error)
     error.parsed = parsed
 
     return Promise.reject(error)
