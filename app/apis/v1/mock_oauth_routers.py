@@ -8,7 +8,7 @@ from fastapi.responses import RedirectResponse
 from app.core import config
 
 mock_router = APIRouter(prefix="/mock/kakao", tags=["mock"])
-MOCK_DATA_DIR = Path(__file__).parent.parent / "tests" / "mock_data"
+MOCK_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "tests" / "mock_data"
 
 
 @mock_router.get("/authorize")
