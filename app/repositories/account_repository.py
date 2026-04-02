@@ -1,15 +1,20 @@
 """
 Account Repository (Mock 버전)
 
-실제 DB 연동 전까지 메모리에 데이터를 저장합니다.
+JSON 파일에서 초기 데이터를 로드하고 메모리에 저장합니다.
 나중에 DB 연동 시 Tortoise ORM 버전으로 교체하면 됩니다.
 """
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from app.models.accounts import AuthProvider
+
+# Mock 데이터 경로
+MOCK_DATA_DIR = Path(__file__).parent.parent / "tests" / "mock_data"
 
 
 @dataclass
@@ -29,8 +34,34 @@ class MockAccount:
 class AccountRepository:
     """Account 메모리 저장소 (Mock)"""
 
-    # 클래스 변수로 메모리 저장소 (서버 재시작 시 초기화됨)
+    # 클래스 변수로 메모리 저장소
     _storage: dict[UUID, MockAccount] = {}
+    _initialized: bool = False
+
+    def __init__(self) -> None:
+        # 최초 1회만 JSON에서 데이터 로드
+        if not AccountRepository._initialized:
+            self._load_mock_data()
+            AccountRepository._initialized = True
+
+    def _load_mock_data(self) -> None:
+        """JSON 파일에서 초기 계정 데이터 로드"""
+        accounts_file = MOCK_DATA_DIR / "app_accounts.json"
+        if not accounts_file.exists():
+            return
+
+        data = json.loads(accounts_file.read_text(encoding="utf-8"))
+
+        for acc in data.get("accounts", []):
+            account = MockAccount(
+                id=UUID(acc["id"]),
+                auth_provider=acc["auth_provider"],
+                provider_account_id=acc["provider_account_id"],
+                email=acc.get("email"),
+                nickname=acc["nickname"],
+                is_active=acc.get("is_active", True),
+            )
+            self._storage[account.id] = account
 
     async def get_by_provider(self, provider: AuthProvider, provider_account_id: str) -> MockAccount | None:
         """소셜 로그인 정보로 계정 조회"""

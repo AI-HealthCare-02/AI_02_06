@@ -1,0 +1,104 @@
+{
+  "_comment": "가짜 카카오 서버가 GET https://kapi.kakao.com/v2/user/me 에 응답하는 데이터",
+  "_flow": "백엔드가 kakao_access_token으로 유저정보 요청 → 아래 응답으로 provider_account_id, email, nickname 추출",
+  "responses": [
+    {
+      "scenario": "existing_user",
+      "trigger_access_token": "kakao_access_token_existing_user_aaabbbccc",
+      "http_status": 200,
+      "body": {
+        "id": 1001001001,
+        "connected_at": "2023-06-15T09:00:00Z",
+        "kakao_account": {
+          "profile_nickname_needs_agreement": false,
+          "profile_image_needs_agreement": false,
+          "profile": {
+            "nickname": "김철수",
+            "thumbnail_image_url": "https://k.kakaocdn.net/dn/mock_thumb_existing/img_110x110.jpg",
+            "profile_image_url": "https://k.kakaocdn.net/dn/mock_profile_existing/img_640x640.jpg",
+            "is_default_image": false
+          },
+          "email_needs_agreement": false,
+          "is_email_valid": true,
+          "is_email_verified": true,
+          "email": "chulsoo.kim@kakao.com"
+        }
+      }
+    },
+    {
+      "scenario": "new_user",
+      "trigger_access_token": "kakao_access_token_new_user_dddeeefff",
+      "http_status": 200,
+      "body": {
+        "id": 2002002002,
+        "connected_at": "2025-01-10T14:30:00Z",
+        "kakao_account": {
+          "profile_nickname_needs_agreement": false,
+          "profile_image_needs_agreement": false,
+          "profile": {
+            "nickname": "이영희",
+            "thumbnail_image_url": "https://k.kakaocdn.net/dn/mock_thumb_new/img_110x110.jpg",
+            "profile_image_url": "https://k.kakaocdn.net/dn/mock_profile_new/img_640x640.jpg",
+            "is_default_image": true
+          },
+          "email_needs_agreement": false,
+          "is_email_valid": true,
+          "is_email_verified": true,
+          "email": "younghee.lee@gmail.com"
+        }
+      }
+    },
+    {
+      "scenario": "no_email_user",
+      "trigger_access_token": "kakao_access_token_no_email_ggghhh",
+      "http_status": 200,
+      "body": {
+        "id": 3003003003,
+        "connected_at": "2024-03-20T11:00:00Z",
+        "kakao_account": {
+          "profile_nickname_needs_agreement": false,
+          "profile_image_needs_agreement": false,
+          "profile": {
+            "nickname": "박민준",
+            "thumbnail_image_url": "https://k.kakaocdn.net/dn/mock_thumb_noemail/img_110x110.jpg",
+            "profile_image_url": "https://k.kakaocdn.net/dn/mock_profile_noemail/img_640x640.jpg",
+            "is_default_image": false
+          },
+          "email_needs_agreement": true
+        }
+      }
+    },
+    {
+      "scenario": "unlinked_user",
+      "trigger_access_token": "kakao_access_token_unlinked_jjjkkklll",
+      "http_status": 401,
+      "body": {
+        "msg": "this access token does not exist",
+        "code": -401
+      }
+    },
+    {
+      "scenario": "deactivated_user",
+      "trigger_access_token": "kakao_access_token_deactivated_mmmnooo",
+      "http_status": 200,
+      "body": {
+        "id": 4004004004,
+        "connected_at": "2022-11-01T08:00:00Z",
+        "kakao_account": {
+          "profile_nickname_needs_agreement": false,
+          "profile_image_needs_agreement": false,
+          "profile": {
+            "nickname": "최정지",
+            "thumbnail_image_url": "https://k.kakaocdn.net/dn/mock_thumb_deactivated/img_110x110.jpg",
+            "profile_image_url": "https://k.kakaocdn.net/dn/mock_profile_deactivated/img_640x640.jpg",
+            "is_default_image": false
+          },
+          "email_needs_agreement": false,
+          "is_email_valid": true,
+          "is_email_verified": true,
+          "email": "jungji.choi@naver.com"
+        }
+      }
+    }
+  ]
+}

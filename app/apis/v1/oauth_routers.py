@@ -18,7 +18,7 @@ oauth_router = APIRouter(prefix="/auth", tags=["oauth"])
     description="""
 FE에서 직접 카카오 로그인 페이지로 리다이렉트할 때 필요한 설정을 반환합니다.
 
-**FE 사용 방법 (방식 2: 직접 리다이렉트):**
+**FE 사용 방법 (직접 리다이렉트):**
 1. 이 API를 호출하여 client_id, redirect_uri, authorize_url을 받습니다.
 2. FE에서 state(랜덤 문자열)를 생성하고 sessionStorage에 저장합니다.
 3. authorize_url로 직접 리다이렉트합니다:

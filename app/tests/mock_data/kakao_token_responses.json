@@ -1,0 +1,81 @@
+{
+  "_comment": "가짜 카카오 서버가 POST https://kauth.kakao.com/oauth/token 에 응답하는 데이터",
+  "_flow": "백엔드가 인가코드를 카카오 토큰 엔드포인트로 교환 요청 → 아래 응답 반환",
+  "responses": [
+    {
+      "scenario": "existing_user",
+      "trigger_code": "mock_auth_code_existing_user_abc123",
+      "http_status": 200,
+      "body": {
+        "token_type": "bearer",
+        "access_token": "kakao_access_token_existing_user_aaabbbccc",
+        "expires_in": 21599,
+        "refresh_token": "kakao_refresh_token_existing_user_xxxyyzzz",
+        "refresh_token_expires_in": 5183999,
+        "scope": "profile_nickname profile_image account_email"
+      }
+    },
+    {
+      "scenario": "new_user",
+      "trigger_code": "mock_auth_code_new_user_def456",
+      "http_status": 200,
+      "body": {
+        "token_type": "bearer",
+        "access_token": "kakao_access_token_new_user_dddeeefff",
+        "expires_in": 21599,
+        "refresh_token": "kakao_refresh_token_new_user_aaabbbccc",
+        "refresh_token_expires_in": 5183999,
+        "scope": "profile_nickname profile_image account_email"
+      }
+    },
+    {
+      "scenario": "no_email_user",
+      "trigger_code": "mock_auth_code_no_email_ghi789",
+      "http_status": 200,
+      "body": {
+        "token_type": "bearer",
+        "access_token": "kakao_access_token_no_email_ggghhh",
+        "expires_in": 21599,
+        "refresh_token": "kakao_refresh_token_no_email_iiijjj",
+        "refresh_token_expires_in": 5183999,
+        "scope": "profile_nickname profile_image"
+      }
+    },
+    {
+      "scenario": "unlinked_user",
+      "trigger_code": "mock_auth_code_unlinked_jkl012",
+      "http_status": 200,
+      "body": {
+        "token_type": "bearer",
+        "access_token": "kakao_access_token_unlinked_jjjkkklll",
+        "expires_in": 21599,
+        "refresh_token": "kakao_refresh_token_unlinked_mmmnnnooo",
+        "refresh_token_expires_in": 5183999,
+        "scope": "profile_nickname profile_image account_email"
+      }
+    },
+    {
+      "scenario": "deactivated_user",
+      "trigger_code": "mock_auth_code_deactivated_mno345",
+      "http_status": 200,
+      "body": {
+        "token_type": "bearer",
+        "access_token": "kakao_access_token_deactivated_mmmnooo",
+        "expires_in": 21599,
+        "refresh_token": "kakao_refresh_token_deactivated_pppqqq",
+        "refresh_token_expires_in": 5183999,
+        "scope": "profile_nickname profile_image account_email"
+      }
+    },
+    {
+      "scenario": "expired_code",
+      "trigger_code": "mock_auth_code_expired_pqr678",
+      "http_status": 400,
+      "body": {
+        "error": "KOE320",
+        "error_description": "authorization code not found for the given value",
+        "error_code": "KOE320"
+      }
+    }
+  ]
+}
