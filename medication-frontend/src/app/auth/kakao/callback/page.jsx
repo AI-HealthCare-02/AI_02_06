@@ -1,7 +1,7 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import api, { parseApiError } from '../../../../lib/api'
+import api, { parseApiError, showError } from '../../../../lib/api'
 
 // 메인 페이지 스켈레톤 UI
 function MainSkeleton() {
@@ -52,8 +52,6 @@ function MainSkeleton() {
 export default function KakaoCallbackPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [error, setError] = useState(null)
-  const [isProcessing, setIsProcessing] = useState(false)
 
   useEffect(() => {
     const handleCallback = async () => {
@@ -63,31 +61,34 @@ export default function KakaoCallbackPage() {
       const errorParam = searchParams.get('error')
       const errorDescription = searchParams.get('error_description')
 
+      // 에러 발생 시 Toast + 로그인 페이지로 리다이렉트
+      const handleError = (message) => {
+        showError(message)
+        setTimeout(() => router.replace('/login'), 1500)
+      }
+
       // 카카오에서 에러 응답이 온 경우
       if (errorParam) {
-        setError(errorDescription || '카카오 로그인 중 오류가 발생했습니다.')
+        handleError(errorDescription || '카카오 로그인 중 오류가 발생했습니다.')
         return
       }
 
       // code가 없는 경우
       if (!code) {
-        setError('인가 코드가 없습니다.')
+        handleError('인가 코드가 없습니다.')
         return
       }
 
       // 2. state 검증 (CSRF 방지)
       const savedState = sessionStorage.getItem('oauth_state')
       if (!savedState || savedState !== state) {
-        setError('유효하지 않은 요청입니다. (state 불일치)')
         sessionStorage.removeItem('oauth_state')
+        handleError('유효하지 않은 요청입니다.')
         return
       }
 
       // state 사용 완료 후 삭제
       sessionStorage.removeItem('oauth_state')
-
-      // state 검증 완료 - 스켈레톤 UI 표시 시작
-      setIsProcessing(true)
 
       try {
         // 3. BE에 인가 코드 전달하여 로그인 처리
@@ -98,48 +99,18 @@ export default function KakaoCallbackPage() {
         // 4. access_token 저장
         localStorage.setItem('access_token', data.access_token)
 
-        // 5. 신규 사용자 여부에 따른 분기 (필요 시)
-        if (data.is_new_user) {
-          console.log('신규 사용자 가입 완료')
-        }
-
-        // 6. 메인 페이지로 리다이렉트
+        // 5. 메인 페이지로 리다이렉트
         router.replace('/main')
       } catch (err) {
         console.error('로그인 처리 실패:', err)
         const parsed = err.parsed || parseApiError(err)
-        setError(parsed.message)
-        setIsProcessing(false)
+        handleError(parsed.message)
       }
     }
 
     handleCallback()
   }, [searchParams, router])
 
-  // 에러 발생 시
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen gap-4">
-        <p className="text-red-500">{error}</p>
-        <button
-          onClick={() => router.replace('/login')}
-          className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
-        >
-          로그인 페이지로 돌아가기
-        </button>
-      </div>
-    )
-  }
-
-  // BE 요청 중 - 메인 페이지 스켈레톤 표시
-  if (isProcessing) {
-    return <MainSkeleton />
-  }
-
-  // state 검증 중
-  return (
-    <div className="flex items-center justify-center min-h-screen">
-      <p className="text-gray-500">로그인 처리 중...</p>
-    </div>
-  )
+  // 로딩 중 - 메인 페이지 스켈레톤 표시
+  return <MainSkeleton />
 }

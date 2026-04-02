@@ -4,7 +4,9 @@
  * BE에서 정의된 HTTP 상태 코드 및 에러 코드를 중앙에서 관리합니다.
  */
 
-// HTTP 상태 코드별 기본 메시지
+import toast from 'react-hot-toast'
+
+// HTTP 상태 코드별 사용자 메시지 (4xx만 정의, 5xx는 별도 처리)
 export const HTTP_STATUS_MESSAGES = {
   400: '잘못된 요청입니다.',
   401: '인증이 필요합니다.',
@@ -12,10 +14,10 @@ export const HTTP_STATUS_MESSAGES = {
   404: '요청한 리소스를 찾을 수 없습니다.',
   422: '입력값이 올바르지 않습니다.',
   429: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.',
-  500: '서버 오류가 발생했습니다.',
-  502: '서버와 통신할 수 없습니다.',
-  503: '서비스를 일시적으로 사용할 수 없습니다.',
 }
+
+// 5xx 서버 에러는 상세 정보 노출 금지 - 일반 메시지로 통일
+const SERVER_ERROR_MESSAGE = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'
 
 // BE에서 정의된 에러 코드별 메시지
 export const ERROR_CODE_MESSAGES = {
@@ -71,7 +73,15 @@ export function parseApiError(error) {
     return result
   }
 
-  // detail 객체에서 에러 코드 추출
+  // 5xx 서버 에러는 상세 정보 노출 금지
+  if (status >= 500) {
+    result.code = 'server_error'
+    result.message = SERVER_ERROR_MESSAGE
+    result.isRetryable = true
+    return result
+  }
+
+  // 4xx 클라이언트 에러 - detail에서 에러 코드 추출
   const detail = data?.detail
   if (detail) {
     // detail이 객체인 경우 { error, error_description }
@@ -108,11 +118,9 @@ export function parseApiError(error) {
 
 /**
  * 에러를 사용자에게 표시합니다.
- * (Toast 라이브러리 연동 시 이 함수를 수정)
  */
 export function showError(message) {
-  // TODO: Toast 라이브러리 연동 시 교체
-  alert(message)
+  toast.error(message)
 }
 
 /**

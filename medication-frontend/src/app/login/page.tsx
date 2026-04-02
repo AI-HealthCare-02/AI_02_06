@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import api, { parseApiError } from '../../lib/api'
+import api, { parseApiError, showError } from '../../lib/api'
 
 function generateState(): string {
   const array = new Uint8Array(16)
@@ -11,10 +11,8 @@ function generateState(): string {
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   const handleKakaoLogin = async () => {
-    setError(null)
     setIsLoading(true)
 
     try {
@@ -38,7 +36,7 @@ export default function LoginPage() {
     } catch (err: any) {
       console.error('카카오 로그인 설정 조회 실패:', err)
       const parsed = err.parsed || parseApiError(err)
-      setError(parsed.message)
+      showError(parsed.message)
       setIsLoading(false)
     }
   }
@@ -52,13 +50,6 @@ export default function LoginPage() {
         <div className="text-5xl mb-4">💊</div>
         <h1 className="text-2xl font-bold mb-1">복약 안내</h1>
         <p className="text-gray-400 text-sm mb-8">내 약을 안전하게 관리하세요</p>
-
-        {/* 에러 메시지 */}
-        {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl">
-            <p className="text-red-600 text-sm">{error}</p>
-          </div>
-        )}
 
         {/* 카카오 버튼 */}
         <button
