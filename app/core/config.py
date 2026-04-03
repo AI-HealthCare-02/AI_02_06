@@ -31,8 +31,14 @@ class Config(BaseSettings):
     DB_CONNECTION_POOL_MAXSIZE: int = 10
 
     COOKIE_DOMAIN: str = "localhost"
+    API_BASE_URL: str = "http://localhost:8000"
 
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 14 * 24 * 60
     JWT_LEEWAY: int = 5
+
+    # Kakao OAuth (Mock 기본값)
+    KAKAO_CLIENT_ID: str = "mock_kakao_client_id"
+    KAKAO_CLIENT_SECRET: str = "mock_kakao_client_secret"
+    KAKAO_REDIRECT_URI: str = "http://localhost:3000/auth/kakao/callback"

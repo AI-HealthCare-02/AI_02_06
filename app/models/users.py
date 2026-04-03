@@ -13,7 +13,7 @@ class User(models.Model):
     email = fields.CharField(max_length=40)
     hashed_password = fields.CharField(max_length=128)
     name = fields.CharField(max_length=20)
-    gender = fields.CharEnumField(enum_type=Gender)
+    gender = fields.CharEnumField(enum_type=Gender, max_length=16)
     birthday = fields.DateField()
     phone_number = fields.CharField(max_length=11)
     is_active = fields.BooleanField(default=True)

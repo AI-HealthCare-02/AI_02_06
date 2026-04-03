@@ -9,6 +9,13 @@ TORTOISE_APP_MODELS = [
     "app.models.users",
     "app.models.accounts",
     "app.models.refresh_tokens",
+    "app.models.profiles",
+    "app.models.medication",
+    "app.models.challenge",
+    "app.models.chat_sessions",
+    "app.models.messages",
+    "app.models.message_feedbacks",
+    "app.models.intake_log",
     "app.models.drug_interaction_cache",
     "app.models.llm_response_cache",
 ]

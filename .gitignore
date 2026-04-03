@@ -29,6 +29,8 @@ desktop.ini
 # Claude 설정
 .claude
 CLAUDE.md
+PLAN.md
+nul
 
 # 문서화 폴더
 docs/

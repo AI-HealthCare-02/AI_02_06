@@ -13,8 +13,8 @@ class RelationType(StrEnum):
 
 class Profile(models.Model):
     id = fields.UUIDField(primary_key=True)
-    account_id = fields.ForeignKeyField("models.Account")
-    relation_type = fields.CharEnumField(enum_type=RelationType)
+    account = fields.ForeignKeyField("models.Account", related_name="profiles")
+    relation_type = fields.CharEnumField(enum_type=RelationType, max_length=16)
     name = fields.CharField(max_length=32)
     health_survey = fields.JSONField(null=True)
     created_at = fields.DatetimeField(auto_now_add=True)
@@ -23,3 +23,4 @@ class Profile(models.Model):
 
     class Meta:
         table = "profiles"
+        indexes = (("account_id", "relation_type"),)

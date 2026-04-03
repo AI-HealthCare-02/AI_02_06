@@ -1,0 +1,53 @@
+{
+  "_comment": "가짜 카카오 서버가 GET https://kapi.kakao.com/v2/user/me 에 응답하는 데이터",
+  "_flow": "백엔드가 kakao_access_token으로 유저정보 요청 -> 아래 응답으로 provider_account_id, nickname, profile_image_url 추출",
+  "responses": [
+    {
+      "scenario": "existing_user",
+      "trigger_access_token": "kakao_access_token_existing_user_aaabbbccc",
+      "http_status": 200,
+      "body": {
+        "id": 1001001001,
+        "connected_at": "2023-06-15T09:00:00Z",
+        "kakao_account": {
+          "profile_nickname_needs_agreement": false,
+          "profile_image_needs_agreement": false,
+          "profile": {
+            "nickname": "김철수",
+            "thumbnail_image_url": "https://k.kakaocdn.net/dn/mock_thumb_existing/img_110x110.jpg",
+            "profile_image_url": "https://k.kakaocdn.net/dn/mock_profile_existing/img_640x640.jpg",
+            "is_default_image": false
+          }
+        }
+      }
+    },
+    {
+      "scenario": "new_user",
+      "trigger_access_token": "kakao_access_token_new_user_dddeeefff",
+      "http_status": 200,
+      "body": {
+        "id": 2002002002,
+        "connected_at": "2025-01-10T14:30:00Z",
+        "kakao_account": {
+          "profile_nickname_needs_agreement": false,
+          "profile_image_needs_agreement": false,
+          "profile": {
+            "nickname": "이영희",
+            "thumbnail_image_url": "https://k.kakaocdn.net/dn/mock_thumb_new/img_110x110.jpg",
+            "profile_image_url": "https://k.kakaocdn.net/dn/mock_profile_new/img_640x640.jpg",
+            "is_default_image": true
+          }
+        }
+      }
+    },
+    {
+      "scenario": "invalid_token",
+      "trigger_access_token": "invalid_token",
+      "http_status": 401,
+      "body": {
+        "msg": "this access token does not exist",
+        "code": -401
+      }
+    }
+  ]
+}

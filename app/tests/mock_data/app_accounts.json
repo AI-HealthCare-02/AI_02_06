@@ -1,0 +1,65 @@
+{
+  "_comment": "우리 서비스 DB accounts 테이블에 저장된 가상 데이터 (Account 모델 기반)",
+  "_model_ref": "app/models/accounts.py - Account",
+  "_note": "provider_account_id는 카카오 응답의 id 필드와 매핑됨. new_user/no_email_user/unlinked_user는 DB에 없음",
+  "accounts": [
+    {
+      "scenario": "existing_user",
+      "id": "550e8400-e29b-41d4-a716-446655440001",
+      "auth_provider": "KAKAO",
+      "provider_account_id": "1001001001",
+      "email": "chulsoo.kim@kakao.com",
+      "nickname": "김철수",
+      "is_active": true,
+      "created_at": "2023-06-15T09:05:00Z",
+      "updated_at": "2025-01-01T00:00:00Z",
+      "deleted_at": null
+    },
+    {
+      "scenario": "deactivated_user",
+      "id": "550e8400-e29b-41d4-a716-446655440004",
+      "auth_provider": "KAKAO",
+      "provider_account_id": "4004004004",
+      "email": "jungji.choi@naver.com",
+      "nickname": "최정지",
+      "is_active": false,
+      "created_at": "2022-11-01T08:05:00Z",
+      "updated_at": "2024-12-01T00:00:00Z",
+      "deleted_at": null
+    }
+  ],
+  "profiles": [
+    {
+      "_comment": "existing_user의 본인 프로필 (SELF)",
+      "id": "660e8400-e29b-41d4-a716-446655440001",
+      "account_id": "550e8400-e29b-41d4-a716-446655440001",
+      "relation_type": "SELF",
+      "name": "김철수",
+      "health_survey": {
+        "chronic_diseases": ["고혈압"],
+        "allergies": [],
+        "smoking": false,
+        "drinking": "occasionally"
+      },
+      "created_at": "2023-06-15T09:10:00Z",
+      "updated_at": "2025-01-01T00:00:00Z",
+      "deleted_at": null
+    },
+    {
+      "_comment": "existing_user가 등록한 부모 프로필 (PARENT) - 다중 프로필 케이스",
+      "id": "660e8400-e29b-41d4-a716-446655440002",
+      "account_id": "550e8400-e29b-41d4-a716-446655440001",
+      "relation_type": "PARENT",
+      "name": "김부모",
+      "health_survey": {
+        "chronic_diseases": ["당뇨", "고혈압"],
+        "allergies": ["페니실린"],
+        "smoking": false,
+        "drinking": "never"
+      },
+      "created_at": "2023-07-01T10:00:00Z",
+      "updated_at": "2025-01-01T00:00:00Z",
+      "deleted_at": null
+    }
+  ]
+}
