@@ -92,14 +92,12 @@ export default function KakaoCallbackPage() {
 
       try {
         // 3. BE에 인가 코드 전달하여 로그인 처리
-        const { data } = await api.get('/api/v1/auth/kakao/callback', {
+        // access_token은 HttpOnly 쿠키로 자동 저장됨
+        await api.get('/api/v1/auth/kakao/callback', {
           params: { code, state },
         })
 
-        // 4. access_token 저장
-        localStorage.setItem('access_token', data.access_token)
-
-        // 5. 메인 페이지로 리다이렉트
+        // 4. 메인 페이지로 리다이렉트
         router.replace('/main')
       } catch (err) {
         console.error('로그인 처리 실패:', err)

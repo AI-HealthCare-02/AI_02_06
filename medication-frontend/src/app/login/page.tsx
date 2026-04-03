@@ -3,12 +3,6 @@
 import { useState } from 'react'
 import api, { parseApiError, showError } from '../../lib/api'
 
-function generateState(): string {
-  const array = new Uint8Array(16)
-  crypto.getRandomValues(array)
-  return Array.from(array, (byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
 
@@ -16,12 +10,11 @@ export default function LoginPage() {
     setIsLoading(true)
 
     try {
-      // 1. BE에서 OAuth 설정 정보 조회
+      // 1. BE에서 OAuth 설정 정보 조회 (HMAC signed state 포함)
       const { data } = await api.get('/api/v1/auth/kakao/config')
-      const { client_id, redirect_uri, authorize_url } = data
+      const { client_id, redirect_uri, authorize_url, state } = data
 
-      // 2. CSRF 방지용 state 생성 및 저장
-      const state = generateState()
+      // 2. BE에서 받은 state 저장 (CSRF 방지)
       sessionStorage.setItem('oauth_state', state)
 
       // 3. 카카오(Mock) 인증 페이지로 리다이렉트

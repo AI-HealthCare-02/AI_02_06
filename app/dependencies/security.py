@@ -90,7 +90,9 @@ async def get_current_account(
 
 
 # 기존 User 기반 인증 (레거시 호환용)
-async def get_request_user(credential: Annotated[HTTPAuthorizationCredentials, Depends(security)]) -> User:
+async def get_request_user(credential: Annotated[HTTPAuthorizationCredentials | None, Depends(security)]) -> User:
+    if not credential:
+        raise HTTPException(detail="Authenticate Failed.", status_code=status.HTTP_401_UNAUTHORIZED)
     token = credential.credentials
     verified = JwtService().verify_jwt(token=token, token_type="access")
     user_id = verified.payload["user_id"]
