@@ -10,6 +10,8 @@ import hashlib
 from datetime import datetime, timedelta
 from uuid import UUID
 
+from tortoise.expressions import Q
+
 from app.core import config
 from app.models.refresh_tokens import RefreshToken
 
@@ -84,31 +86,44 @@ class RefreshTokenRepository:
         # 5. Grace Period 초과 → 탈취 의심
         return refresh_token, False
 
-    async def rotate(self, old_token: str, account_id: UUID, new_token: str) -> RefreshToken:
+    async def rotate(self, old_token: str, account_id: UUID, new_token: str) -> tuple[RefreshToken | None, bool]:
         """
-        토큰 교체 (RTR)
+        토큰 교체 (RTR) - 낙관적 잠금으로 Race Condition 방지
 
-        1. 기존 토큰 무효화 + rotated_at 기록
+        1. 기존 토큰이 아직 revoke 안 된 경우에만 무효화
         2. 새 토큰 생성
         3. 기존 토큰에 replaced_by_id 기록
 
         Returns:
-            새로 생성된 RefreshToken
+            tuple[RefreshToken | None, bool]: (새 토큰, 성공 여부)
+            - (new_token, True): 정상 교체
+            - (None, False): 이미 다른 요청에서 교체됨 (Race Condition)
         """
         old_token_hash = self._hash_token(old_token)
         now = datetime.now()
 
-        # 1. 새 토큰 생성
-        new_refresh_token = await self.create(account_id, new_token)
-
-        # 2. 기존 토큰 무효화 + 교체 정보 기록
-        await RefreshToken.filter(token_hash=old_token_hash).update(
+        # 1. 낙관적 잠금: is_revoked=False인 경우에만 업데이트
+        updated = await RefreshToken.filter(
+            token_hash=old_token_hash,
+            is_revoked=False,  # 아직 revoke 안 된 토큰만
+        ).update(
             is_revoked=True,
             rotated_at=now,
+        )
+
+        # 이미 다른 요청에서 교체된 경우
+        if updated == 0:
+            return None, False
+
+        # 2. 새 토큰 생성
+        new_refresh_token = await self.create(account_id, new_token)
+
+        # 3. replaced_by_id 업데이트 (추적용)
+        await RefreshToken.filter(token_hash=old_token_hash).update(
             replaced_by_id=new_refresh_token.id,
         )
 
-        return new_refresh_token
+        return new_refresh_token, True
 
     async def revoke(self, token: str) -> bool:
         """토큰 무효화 (로그아웃)"""
@@ -138,17 +153,11 @@ class RefreshTokenRepository:
         Returns:
             삭제된 토큰 수
         """
-        now = datetime.now()
-        cutoff = now - timedelta(days=days_old)
+        cutoff = datetime.now() - timedelta(days=days_old)
 
-        # 만료되었거나, revoked 후 일정 시간 지난 토큰 삭제
-        deleted = (
-            await RefreshToken.filter(
-                # 조건 1: 만료된 토큰
-                # 조건 2: revoked이고 오래된 토큰
-            )
-            .filter(expires_at__lt=cutoff)
-            .delete()
-        )
+        # 조건: 만료된 토큰 OR (revoked이고 rotated_at이 오래된 토큰)
+        deleted = await RefreshToken.filter(
+            Q(expires_at__lt=cutoff) | Q(is_revoked=True, rotated_at__lt=cutoff)
+        ).delete()
 
         return deleted

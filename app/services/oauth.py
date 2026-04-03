@@ -250,12 +250,24 @@ class OAuthService:
         new_refresh_token["sub"] = str(account.id)
         new_refresh_token_str = str(new_refresh_token)
 
-        # 4. RTR: 기존 토큰 무효화 + 새 토큰 저장
-        await self.refresh_token_repo.rotate(
+        # 4. RTR: 기존 토큰 무효화 + 새 토큰 저장 (낙관적 잠금)
+        new_db_token, success = await self.refresh_token_repo.rotate(
             old_token=refresh_token_str,
             account_id=account.id,
             new_token=new_refresh_token_str,
         )
+
+        if not success:
+            # Race Condition: 이미 다른 요청에서 토큰이 교체됨
+            # Grace Period 내이므로 새 Access Token만 발급 (Refresh Token은 기존 것 유지)
+            # 클라이언트는 이미 받은 새 Refresh Token 사용
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "token_already_rotated",
+                    "error_description": "토큰이 이미 갱신되었습니다. 잠시 후 다시 시도해주세요.",
+                },
+            )
 
         return {
             "access_token": str(new_access_token),

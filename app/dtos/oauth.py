@@ -7,6 +7,7 @@ class OAuthConfigResponse(BaseModel):
     client_id: str = Field(description="카카오 앱 Client ID")
     redirect_uri: str = Field(description="인가 코드를 받을 콜백 URL")
     authorize_url: str = Field(description="카카오 인증 페이지 URL")
+    state: str = Field(description="CSRF 방지용 서명된 상태값 (BE 생성)")
 
 
 class OAuthCallbackRequest(BaseModel):

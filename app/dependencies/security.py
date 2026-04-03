@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.models.accounts import Account
@@ -12,19 +12,45 @@ from app.services.jwt import JwtService
 from app.utils.jwt.exceptions import TokenError
 from app.utils.jwt.tokens import AccessToken
 
-security = HTTPBearer()
+# Authorization 헤더는 선택적 (쿠키 우선)
+security = HTTPBearer(auto_error=False)
+
+
+def _extract_token(request: Request, credential: HTTPAuthorizationCredentials | None) -> str:
+    """
+    토큰 추출 (쿠키 우선, Authorization 헤더 폴백)
+
+    XSS 방지를 위해 HttpOnly 쿠키를 우선 사용하고,
+    쿠키가 없으면 Authorization 헤더에서 추출 (API 클라이언트 호환)
+    """
+    # 1. 쿠키에서 access_token 확인 (우선)
+    cookie_token = request.cookies.get("access_token")
+    if cookie_token:
+        return cookie_token
+
+    # 2. Authorization 헤더에서 확인 (폴백)
+    if credential and credential.credentials:
+        return credential.credentials
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail={"error": "missing_token", "error_description": "인증 토큰이 필요합니다."},
+    )
 
 
 async def get_current_account(
-    credential: Annotated[HTTPAuthorizationCredentials, Depends(security)],
+    request: Request,
+    credential: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
 ) -> Account:
     """
     OAuth 로그인 사용자 인증 의존성
 
-    Authorization 헤더에서 JWT Access Token을 검증하고 Account 반환
+    HttpOnly 쿠키 또는 Authorization 헤더에서 JWT Access Token을 검증하고 Account 반환
     """
+    token_str = _extract_token(request, credential)
+
     try:
-        token = AccessToken(token=credential.credentials)
+        token = AccessToken(token=token_str)
     except TokenError as err:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

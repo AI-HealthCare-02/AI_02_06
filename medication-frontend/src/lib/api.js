@@ -11,19 +11,14 @@ import { parseApiError, ERROR_CODE_MESSAGES, HTTP_STATUS_MESSAGES } from './erro
 // 모든 API 요청의 기본 설정
 const api = axios.create({
   baseURL: 'http://localhost:8000',
-  withCredentials: true,  // 쿠키 자동 포함 (refresh_token용)
+  withCredentials: true,  // 쿠키 자동 포함 (access_token, refresh_token)
   timeout: 10000,         // 10초 타임아웃
 })
 
-// 요청 인터셉터: access_token 자동 첨부
+// 요청 인터셉터: 기본 헤더 설정
+// access_token은 HttpOnly 쿠키로 자동 전송됨 (XSS 방지)
 api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('access_token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
-    }
-    return config
-  },
+  (config) => config,
   (error) => Promise.reject(error)
 )
 
@@ -49,11 +44,11 @@ api.interceptors.response.use(
       try {
         // 동적 import로 순환 참조 방지
         const { refreshToken } = await import('./tokenManager')
-        const newToken = await refreshToken()
+        const refreshed = await refreshToken()
 
-        if (newToken) {
-          // 새 토큰으로 원래 요청 재시도
-          originalRequest.headers.Authorization = `Bearer ${newToken}`
+        if (refreshed) {
+          // 쿠키가 갱신되었으므로 원래 요청 재시도
+          // (access_token 쿠키가 자동으로 전송됨)
           return api.request(originalRequest)
         }
       } catch (refreshError) {

@@ -1,3 +1,7 @@
+import hashlib
+import hmac
+import secrets
+import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -16,6 +20,66 @@ from app.services.rate_limiter import RateLimiter, get_rate_limiter
 
 oauth_router = APIRouter(prefix="/auth", tags=["oauth"])
 
+# State 유효 시간 (5분)
+STATE_EXPIRY_SECONDS = 300
+
+
+def _generate_state() -> str:
+    """HMAC 서명된 state 생성 (CSRF 방지)"""
+    timestamp = str(int(time.time()))
+    nonce = secrets.token_urlsafe(16)
+    payload = f"{timestamp}.{nonce}"
+    signature = hmac.new(
+        config.SECRET_KEY.encode(),
+        payload.encode(),
+        hashlib.sha256,
+    ).hexdigest()[:16]
+    return f"{payload}.{signature}"
+
+
+def _verify_state(state: str) -> bool:
+    """State 서명 및 만료 검증"""
+    try:
+        parts = state.split(".")
+        if len(parts) != 3:
+            return False
+        timestamp, nonce, signature = parts
+
+        # 서명 검증
+        payload = f"{timestamp}.{nonce}"
+        expected_signature = hmac.new(
+            config.SECRET_KEY.encode(),
+            payload.encode(),
+            hashlib.sha256,
+        ).hexdigest()[:16]
+        if not hmac.compare_digest(signature, expected_signature):
+            return False
+
+        # 만료 검증
+        if time.time() - int(timestamp) > STATE_EXPIRY_SECONDS:
+            return False
+
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def _get_client_ip(request: Request) -> str:
+    """실제 클라이언트 IP 추출 (프록시 고려)"""
+    # X-Forwarded-For 헤더 확인 (프록시/로드밸런서)
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        # 첫 번째 IP가 실제 클라이언트
+        return forwarded_for.split(",")[0].strip()
+
+    # X-Real-IP 헤더 확인 (Nginx)
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip.strip()
+
+    # 직접 연결
+    return request.client.host if request.client else "unknown"
+
 
 def get_oauth_service(
     rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
@@ -32,12 +96,13 @@ def get_oauth_service(
 FE에서 직접 카카오 로그인 페이지로 리다이렉트할 때 필요한 설정을 반환합니다.
 
 **FE 사용 방법 (직접 리다이렉트):**
-1. 이 API를 호출하여 client_id, redirect_uri, authorize_url을 받습니다.
-2. FE에서 state(랜덤 문자열)를 생성하고 sessionStorage에 저장합니다.
+1. 이 API를 호출하여 client_id, redirect_uri, authorize_url, state를 받습니다.
+2. state를 sessionStorage에 저장합니다 (BE가 생성한 서명된 state).
 3. authorize_url로 직접 리다이렉트합니다:
    `{authorize_url}?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&state={state}`
 4. 카카오 로그인 완료 후 redirect_uri로 code, state가 전달됩니다.
-5. FE에서 state 검증 후, BE의 /auth/kakao/callback?code=xxx 호출합니다.
+5. FE에서 저장된 state와 비교 후, BE의 /auth/kakao/callback?code=xxx&state=xxx 호출합니다.
+6. BE에서 state 서명 및 만료를 검증합니다.
     """,
 )
 async def get_kakao_oauth_config() -> OAuthConfigResponse:
@@ -47,10 +112,14 @@ async def get_kakao_oauth_config() -> OAuthConfigResponse:
     else:
         authorize_url = f"{config.API_BASE_URL}/api/v1/mock/kakao/authorize"
 
+    # 서명된 state 생성 (CSRF 방지)
+    state = _generate_state()
+
     return OAuthConfigResponse(
         client_id=config.KAKAO_CLIENT_ID,
         redirect_uri=config.KAKAO_REDIRECT_URI,
         authorize_url=authorize_url,
+        state=state,
     )
 
 
@@ -104,8 +173,18 @@ async def kakao_callback(
             },
         )
 
-    # 클라이언트 IP 추출 (Rate limiting용)
-    client_ip = request.client.host if request.client else "unknown"
+    # state 검증 (CSRF 방지) - BE에서 생성한 서명된 state 검증
+    if not state or not _verify_state(state):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "invalid_state",
+                "error_description": "유효하지 않거나 만료된 state입니다.",
+            },
+        )
+
+    # 클라이언트 IP 추출 (Rate limiting용, 프록시 고려)
+    client_ip = _get_client_ip(request)
 
     # 콜백 처리 (토큰 교환 + 사용자 정보 조회 + 계정 처리)
     account, is_new_user = await oauth_service.kakao_callback(
@@ -123,6 +202,17 @@ async def kakao_callback(
             is_new_user=is_new_user,
         ).model_dump(),
         status_code=status.HTTP_200_OK,
+    )
+
+    # Access Token을 HttpOnly 쿠키로 설정 (XSS 방지)
+    response.set_cookie(
+        key="access_token",
+        value=str(tokens["access_token"]),
+        httponly=True,
+        secure=config.ENV == Env.PROD,
+        samesite="lax",
+        domain=config.COOKIE_DOMAIN or None,
+        max_age=config.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
     # Refresh token을 HttpOnly 쿠키로 설정
@@ -188,6 +278,17 @@ async def refresh_token(
         status_code=status.HTTP_200_OK,
     )
 
+    # 새 Access Token을 HttpOnly 쿠키로 설정 (XSS 방지)
+    response.set_cookie(
+        key="access_token",
+        value=tokens["access_token"],
+        httponly=True,
+        secure=config.ENV == Env.PROD,
+        samesite="lax",
+        domain=config.COOKIE_DOMAIN or None,
+        max_age=config.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+
     # 새 Refresh Token을 HttpOnly 쿠키로 설정
     response.set_cookie(
         key="refresh_token",
@@ -224,6 +325,12 @@ async def logout(
 
     # 쿠키 삭제
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    response.delete_cookie(
+        key="access_token",
+        httponly=True,
+        secure=config.ENV == Env.PROD,
+        samesite="lax",
+    )
     response.delete_cookie(
         key="refresh_token",
         httponly=True,

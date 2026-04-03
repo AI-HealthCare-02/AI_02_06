@@ -66,20 +66,18 @@ export async function refreshToken() {
   refreshAttempts++
 
   try {
-    // POST /api/v1/auth/refresh (쿠키의 refresh_token 자동 전송)
-    const { data } = await api.post('/api/v1/auth/refresh')
+    // POST /api/v1/auth/refresh (쿠키 자동 전송/수신)
+    // access_token과 refresh_token 모두 HttpOnly 쿠키로 관리됨
+    await api.post('/api/v1/auth/refresh')
 
-    // 새 access_token 저장
-    const newToken = data.access_token
-    localStorage.setItem('access_token', newToken)
-
-    // 대기 중인 요청들에게 새 토큰 전달
-    onRefreshed(newToken)
+    // 대기 중인 요청들에게 갱신 완료 알림
+    // (토큰은 쿠키로 자동 전송되므로 값 전달 불필요)
+    onRefreshed(true)
 
     // 성공 시 카운터 리셋
     refreshAttempts = 0
 
-    return newToken
+    return true
   } catch (error) {
     const status = error.response?.status
     const errorCode = error.response?.data?.detail?.error
@@ -106,10 +104,18 @@ export async function refreshToken() {
 
 /**
  * 로그아웃 처리
+ *
+ * HttpOnly 쿠키는 JS에서 삭제 불가 - BE /auth/logout 호출 필요
  */
-function handleLogout(message) {
-  localStorage.removeItem('access_token')
+async function handleLogout(message) {
   refreshAttempts = 0
+
+  // 서버에서 쿠키 삭제 요청
+  try {
+    await api.post('/api/v1/auth/logout')
+  } catch {
+    // 이미 로그아웃된 상태일 수 있음 - 무시
+  }
 
   if (message) {
     showError(message)
