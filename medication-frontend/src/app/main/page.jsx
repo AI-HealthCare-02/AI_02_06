@@ -31,7 +31,9 @@ export default function MainPage() {
         <div className="bg-white rounded-2xl shadow-sm p-6">
           <h2 className="font-bold mb-2">처방전 등록</h2>
           <p className="text-gray-400 text-sm mb-4">처방전을 업로드하세요</p>
-          <button className="w-full border-2 border-dashed border-gray-200 py-4 rounded-xl text-gray-400 text-sm cursor-pointer hover:border-blue-300">
+          <button
+          onClick = {() => router.push('/ocr')}
+          className="w-full border-2 border-dashed border-gray-200 py-4 rounded-xl text-gray-400 text-sm cursor-pointer hover:border-blue-300">
             + 업로드
           </button>
         </div>
