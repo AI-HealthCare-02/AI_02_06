@@ -1,13 +1,9 @@
 from datetime import datetime
-from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
-class SenderType(StrEnum):
-    USER = "USER"
-    ASSISTANT = "ASSISTANT"
+from app.models.messages import SenderType
 
 
 class MessageCreate(BaseModel):

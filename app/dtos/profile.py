@@ -1,17 +1,10 @@
 from datetime import datetime
-from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
-class RelationType(StrEnum):
-    SELF = "SELF"
-    PARENT = "PARENT"
-    CHILD = "CHILD"
-    SPOUSE = "SPOUSE"
-    OTHER = "OTHER"
+from app.models.profiles import RelationType
 
 
 class BaseProfile(BaseModel):
