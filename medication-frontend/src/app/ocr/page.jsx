@@ -80,6 +80,7 @@ export default function OcrPage() {
               취소
             </button>
             <button
+              onClick={() => router.push('/ocr/loading')}
               className="flex-1 bg-blue-500 text-white py-4 rounded-xl font-semibold cursor-pointer hover:bg-blue-600"
             >
               분석하기

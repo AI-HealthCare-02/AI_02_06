@@ -1,5 +1,53 @@
 'use client'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+
+function SlideShow({ router }) {
+  const [current, setCurrent] = useState(0)
+
+  const slides = [
+    { icon: '👴', title: '어르신 복약 관리', desc: '복잡한 복약 일정을 쉽게 관리해요', bg: 'bg-blue-50' },
+    { icon: '👨‍👩‍👧', title: '가족 건강 케어', desc: '가족의 복약을 한 곳에서 관리해요', bg: 'bg-green-50' },
+    { icon: '💊', title: '만성질환 관리', desc: '꾸준한 복약 습관을 만들어드려요', bg: 'bg-purple-50' },
+    { icon: '🚀', title: '지금 바로 시작해보세요!', desc: '카카오 또는 네이버로 간편하게 시작해요', bg: 'bg-yellow-50', cta: true },
+  ]
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrent(prev => (prev + 1) % slides.length)
+    }, 1500)
+    return () => clearInterval(timer)
+  }, [])
+
+  const slide = slides[current]
+
+  return (
+    <div className="text-center">
+      <div className={`${slide.bg} rounded-2xl p-16 transition-all duration-500`}>
+        <p className="text-6xl mb-6">{slide.icon}</p>
+        <h3 className="text-2xl font-bold mb-3">{slide.title}</h3>
+        <p className="text-gray-400 mb-6">{slide.desc}</p>
+        {slide.cta && (
+          <button
+            onClick={() => router.push('/login')}
+            className="bg-blue-500 text-white px-8 py-3 rounded-xl font-semibold cursor-pointer hover:bg-blue-600">
+            시작하기 →
+          </button>
+        )}
+      </div>
+      <div className="flex justify-center gap-2 mt-6">
+        {slides.map((_, i) => (
+          <button
+            key={i}
+            onClick={() => setCurrent(i)}
+            className={`h-2 rounded-full cursor-pointer transition-all duration-300
+              ${current === i ? 'bg-blue-500 w-6' : 'bg-gray-300 w-2'}`}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
 
 export default function LandingPage() {
   const router = useRouter()
@@ -42,7 +90,7 @@ export default function LandingPage() {
           </div>
         </div>
 
-        {/* 오른쪽 카드 미리보기 */}
+        {/* 오른쪽 카드 */}
         <div className="flex-1 space-y-3">
           <div className="bg-blue-50 rounded-2xl p-6">
             <p className="text-2xl mb-2">📷</p>
@@ -62,35 +110,12 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* 기능 소개 섹션 */}
+      {/* 슬라이드 섹션 */}
       <div className="bg-gray-50 py-20">
-        <div className="max-w-5xl mx-auto px-10">
+        <div className="max-w-3xl mx-auto px-10">
           <h2 className="text-2xl font-bold text-center mb-12">이런 분들에게 추천해요</h2>
-          <div className="grid grid-cols-3 gap-6">
-            {[
-              { icon: '👴', title: '어르신 복약 관리', desc: '복잡한 복약 일정을 쉽게 관리해요' },
-              { icon: '👨‍👩‍👧', title: '가족 건강 케어', desc: '가족의 복약을 한 곳에서 관리해요' },
-              { icon: '💊', title: '만성질환 관리', desc: '꾸준한 복약 습관을 만들어드려요' },
-            ].map((item, i) => (
-              <div key={i} className="bg-white rounded-2xl p-8 text-center shadow-sm">
-                <p className="text-4xl mb-4">{item.icon}</p>
-                <h3 className="font-bold mb-2">{item.title}</h3>
-                <p className="text-gray-400 text-sm">{item.desc}</p>
-              </div>
-            ))}
-          </div>
+          <SlideShow router={router} />
         </div>
-      </div>
-
-      {/* 하단 CTA */}
-      <div className="max-w-5xl mx-auto px-10 py-20 text-center">
-        <h2 className="text-2xl font-bold mb-4">지금 바로 시작해보세요</h2>
-        <p className="text-gray-400 mb-8">카카오 또는 네이버 계정으로 간편하게 시작할 수 있어요</p>
-        <button
-          onClick={() => router.push('/login')}
-          className="bg-blue-500 text-white px-10 py-4 rounded-xl font-semibold cursor-pointer hover:bg-blue-600">
-          무료로 시작하기
-        </button>
       </div>
 
     </main>
