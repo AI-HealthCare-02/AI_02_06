@@ -5,10 +5,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.models.accounts import Account
-from app.models.users import User
 from app.repositories.account_repository import AccountRepository
-from app.repositories.user_repository import UserRepository
-from app.services.jwt import JwtService
 from app.utils.jwt.exceptions import TokenError
 from app.utils.jwt.tokens import AccessToken
 
@@ -87,16 +84,3 @@ async def get_current_account(
         )
 
     return account
-
-
-# 기존 User 기반 인증 (레거시 호환용)
-async def get_request_user(credential: Annotated[HTTPAuthorizationCredentials | None, Depends(security)]) -> User:
-    if not credential:
-        raise HTTPException(detail="Authenticate Failed.", status_code=status.HTTP_401_UNAUTHORIZED)
-    token = credential.credentials
-    verified = JwtService().verify_jwt(token=token, token_type="access")
-    user_id = verified.payload["user_id"]
-    user = await UserRepository().get_user(user_id)
-    if not user:
-        raise HTTPException(detail="Authenticate Failed.", status_code=status.HTTP_401_UNAUTHORIZED)
-    return user
