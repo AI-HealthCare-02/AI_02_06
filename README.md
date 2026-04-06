@@ -188,10 +188,10 @@ chmod +x scripts/certbot.sh
 # 정적 타입 검사 (Mypy)
 ./scripts/ci/check_mypy.sh
 ```
-
+#세준 04-06일 12시 13분
 ---
 
-## 🤖 RAG 파이프라인 (AI Worker)
+##  RAG 파이프라인 (AI Worker)
 
 오늘 추가된 파일들로 구성된 복약 가이드 생성 흐름입니다.
 
@@ -230,7 +230,7 @@ APP_ENV=dev         # 배포 시 prod로 변경
 ALLOWED_IMAGE_DIR=/tmp/ocr_images  # OCR 이미지 허용 경로
 ```
 
-> ⚠️ `.env` 파일은 `.gitignore`에 포함되어 있어 Git에 업로드되지 않습니다. 절대 키를 코드에 직접 입력하지 마세요.
+>  `.env` 파일은 `.gitignore`에 포함되어 있어 Git에 업로드되지 않습니다. 절대 키를 코드에 직접 입력하지 마세요.
 
 ### 사용 예시
 
@@ -255,7 +255,7 @@ print(guide)
 
 ---
 
-## 📝 개발 가이드
+##  개발 가이드
 
 - **API 추가**: `app/apis/v1/` 아래에 새로운 라우터 파일을 생성하고 `app/apis/v1/__init__.py`에 등록하세요.
 - **DB 모델 추가**: `app/models/`에 Tortoise 모델을 정의하고 `app/db/databases.py`의 `MODELS` 리스트에 추가하세요.
