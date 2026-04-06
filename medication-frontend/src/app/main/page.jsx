@@ -1,8 +1,34 @@
 'use client'
+import { useState, useEffect } from 'react'  // ← useEffect 추가
 import { useRouter } from 'next/navigation'
+
+function MainSkeleton() {
+  return (
+    <main className="min-h-screen bg-gray-50 pb-20 animate-pulse">
+      <div className="bg-white border-b border-gray-200 px-10 py-5">
+        <div className="h-3 w-40 bg-gray-200 rounded mb-2" />
+        <div className="h-5 w-32 bg-gray-200 rounded" />
+      </div>
+      <div className="px-10 py-6 grid grid-cols-3 gap-4">
+        <div className="bg-white rounded-2xl p-6 col-span-2 row-span-2 h-64" />
+        <div className="bg-gray-200 rounded-2xl h-32" />
+        <div className="bg-white rounded-2xl h-32" />
+        <div className="bg-white rounded-2xl h-32" />
+        <div className="bg-white rounded-2xl h-32" />
+      </div>
+    </main>
+  )
+}
 
 export default function MainPage() {
   const router = useRouter()
+  const [isLoading, setIsLoading] = useState(true)  // ← 추가
+
+  useEffect(() => {
+    setTimeout(() => setIsLoading(false), 1000)  // ← 추가 (초 후 로딩 끝)
+  }, [])
+
+  if (isLoading) return <MainSkeleton />  // ← 추가
 
   const todayMeds = [
     { time: '08:00', name: '혈압약', done: true },
@@ -25,16 +51,11 @@ export default function MainPage() {
 
   return (
     <main className="min-h-screen bg-gray-50 pb-20">
-
-      {/* 상단 헤더 */}
       <div className="bg-white border-b border-gray-200 px-10 py-5">
         <p className="text-gray-400 text-sm mb-1">{greeting.sub}</p>
         <h1 className="text-xl font-bold">{greeting.msg} 홍길동님</h1>
       </div>
-
       <div className="px-10 py-6 grid grid-cols-3 gap-4">
-
-        {/* 오늘 복약 현황 */}
         <div className="bg-white rounded-2xl shadow-sm p-6 col-span-2 row-span-2">
           <div className="flex justify-between items-center mb-4 pb-3 border-b border-gray-100">
             <h2 className="font-bold">오늘 복약 현황</h2>
@@ -59,27 +80,17 @@ export default function MainPage() {
             ))}
           </div>
         </div>
-
-        {/* 챗봇 버튼 */}
-        <div
-          onClick={() => router.push('/chat')}
-          className="bg-blue-500 rounded-2xl p-6 text-white cursor-pointer hover:bg-blue-600">
+        <div onClick={() => router.push('/chat')} className="bg-blue-500 rounded-2xl p-6 text-white cursor-pointer hover:bg-blue-600">
           <p className="text-xs mb-2 opacity-80">궁금한 게 있으신가요?</p>
           <h2 className="font-bold">💊 복약 AI 상담하기</h2>
           <p className="text-xs mt-3 opacity-60">약 복용 방법, 부작용 등</p>
         </div>
-
-        {/* 처방전 업로드 */}
         <div className="bg-white rounded-2xl shadow-sm p-6">
           <h2 className="font-bold mb-2">처방전 등록</h2>
-          <button
-            onClick={() => router.push('/ocr')}
-            className="w-full border-2 border-dashed border-gray-200 py-3 rounded-xl text-gray-400 text-sm cursor-pointer hover:border-blue-300 mt-2">
+          <button onClick={() => router.push('/ocr')} className="w-full border-2 border-dashed border-gray-200 py-3 rounded-xl text-gray-400 text-sm cursor-pointer hover:border-blue-300 mt-2">
             + 업로드
           </button>
         </div>
-
-        {/* 챌린지 현황 */}
         <div className="bg-white rounded-2xl shadow-sm p-6">
           <h2 className="font-bold mb-3">챌린지 현황</h2>
           <div className="flex items-center gap-2 mb-2">
@@ -92,8 +103,6 @@ export default function MainPage() {
           </div>
           <p className="text-xs text-gray-400 mt-1">{challenge.days}/{challenge.target}일</p>
         </div>
-
-        {/* 최근 처방전 */}
         <div className="bg-white rounded-2xl shadow-sm p-6">
           <h2 className="font-bold mb-3">최근 처방전</h2>
           <div className="flex items-center justify-between">
@@ -104,23 +113,11 @@ export default function MainPage() {
             <span className="text-xs text-blue-500 cursor-pointer">보기</span>
           </div>
         </div>
-
       </div>
-
-      {/* 하단 네비게이션 */}
       <div className="fixed bottom-0 w-full bg-white border-t border-gray-100 flex">
-        <button
-          onClick={() => router.push('/main')}
-          className="flex-1 py-4 text-blue-500 text-sm font-semibold">
-          홈
-        </button>
-        <button
-          onClick={() => router.push('/mypage')}
-          className="flex-1 py-4 text-gray-400 text-sm">
-          마이페이지
-        </button>
+        <button onClick={() => router.push('/main')} className="flex-1 py-4 text-blue-500 text-sm font-semibold">홈</button>
+        <button onClick={() => router.push('/mypage')} className="flex-1 py-4 text-gray-400 text-sm">마이페이지</button>
       </div>
-
     </main>
   )
 }
