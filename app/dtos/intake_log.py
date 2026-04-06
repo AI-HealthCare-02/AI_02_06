@@ -1,5 +1,4 @@
 from datetime import date, datetime, time
-from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -9,7 +8,7 @@ class BaseIntakeLog(BaseModel):
     scheduled_date: date = Field(..., description="복용 예정 날짜")
     scheduled_time: time = Field(..., description="복용 예정 시간")
     intake_status: str = Field("SCHEDULED", max_length=16, description="복용 상태 (예: SCHEDULED, TAKEN, MISSED)")
-    taken_at: Optional[datetime] = Field(None, description="실제 복용 완료 시간")
+    taken_at: datetime | None = Field(None, description="실제 복용 완료 시간")
 
 
 class IntakeLogCreate(BaseIntakeLog):
@@ -18,10 +17,10 @@ class IntakeLogCreate(BaseIntakeLog):
 
 
 class IntakeLogUpdate(BaseModel):
-    scheduled_date: Optional[date] = Field(None, description="복용 예정 날짜")
-    scheduled_time: Optional[time] = Field(None, description="복용 예정 시간")
-    intake_status: Optional[str] = Field(None, max_length=16, description="복용 상태")
-    taken_at: Optional[datetime] = Field(None, description="실제 복용 완료 시간")
+    scheduled_date: date | None = Field(None, description="복용 예정 날짜")
+    scheduled_time: time | None = Field(None, description="복용 예정 시간")
+    intake_status: str | None = Field(None, max_length=16, description="복용 상태")
+    taken_at: datetime | None = Field(None, description="실제 복용 완료 시간")
 
 
 class IntakeLogResponse(BaseIntakeLog):
