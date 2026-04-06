@@ -69,7 +69,9 @@ export default function MainPage() {
               <div key={i} className="flex items-center justify-between py-3 border-b border-gray-50">
                 <div className="flex items-center gap-4">
                   <span className="text-gray-400 text-sm w-12">{med.time}</span>
-                  <span className={`text-sm font-semibold ${med.done ? 'text-gray-400 line-through' : 'text-black'}`}>
+                  <span
+                    onClick={() => router.push('/medication')}
+                    className={`text-sm font-semibold cursor-pointer hover:text-blue-500 ...`}>
                     💊 {med.name}
                   </span>
                 </div>
@@ -91,7 +93,7 @@ export default function MainPage() {
             + 업로드
           </button>
         </div>
-        <div className="bg-white rounded-2xl shadow-sm p-6">
+        <div onClick={() => router.push('/challenge')} className="bg-white rounded-2xl shadow-sm p-6 cursor-pointer hover:shadow-md">
           <h2 className="font-bold mb-3">챌린지 현황</h2>
           <div className="flex items-center gap-2 mb-2">
             <span className="text-xl">🏆</span>
