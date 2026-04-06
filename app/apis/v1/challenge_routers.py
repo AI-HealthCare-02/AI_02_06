@@ -1,9 +1,10 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, status
 
 from app.dtos.challenge import ChallengeCreate, ChallengeResponse, ChallengeUpdate
 from app.models.challenge import Challenge
+from app.utils.common import get_object_or_404
 
 router = APIRouter(prefix="/challenges", tags=["Challenges"])
 
@@ -22,29 +23,22 @@ async def list_challenges():
 
 @router.get("/{challenge_id}", response_model=ChallengeResponse)
 async def get_challenge(challenge_id: UUID):
-    challenge = await Challenge.get_or_none(id=challenge_id)
-    if not challenge:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Challenge not found")
+    challenge = await get_object_or_404(Challenge, id=challenge_id)
     return ChallengeResponse.model_validate(challenge)
 
 
 @router.patch("/{challenge_id}", response_model=ChallengeResponse)
 async def update_challenge(challenge_id: UUID, data: ChallengeUpdate):
-    challenge = await Challenge.get_or_none(id=challenge_id)
-    if not challenge:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Challenge not found")
+    challenge = await get_object_or_404(Challenge, id=challenge_id)
 
     update_data = data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(challenge, key, value)
-    await challenge.save()
+    await challenge.update_from_dict(update_data).save()
     return ChallengeResponse.model_validate(challenge)
 
 
 @router.delete("/{challenge_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_challenge(challenge_id: UUID):
-    challenge = await Challenge.get_or_none(id=challenge_id)
-    if not challenge:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Challenge not found")
+    challenge = await get_object_or_404(Challenge, id=challenge_id)
     await challenge.delete()
     return None
+
