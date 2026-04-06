@@ -32,9 +32,11 @@ app = [
     "bcrypt<=4.0.1",
     "fastapi[standard]>=0.128.0",
     "httpx>=0.28.1",
+    "openai>=1.0.0",
     "orjson>=3.11.5",
     "passlib[bcrypt]>=1.7.4",
     "pyjwt>=2.10.1",
+    "requests>=2.28.0",
     "tortoise-orm>=0.25.3",
     "uvicorn>=0.40.0",
 ]
