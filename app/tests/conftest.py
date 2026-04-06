@@ -6,11 +6,13 @@ from unittest.mock import Mock, patch
 import pytest
 import pytest_asyncio
 from _pytest.fixtures import FixtureRequest
+from httpx import ASGITransport, AsyncClient
 from tortoise import generate_config
 from tortoise.contrib.test import finalizer, initializer
 
 from app.core import config
 from app.db.databases import TORTOISE_APP_MODELS
+from app.main import app
 
 TEST_BASE_URL = "http://test"
 TEST_DB_LABEL = "models"
@@ -18,8 +20,9 @@ TEST_DB_TZ = "Asia/Seoul"
 
 
 def get_test_db_config() -> dict[str, Any]:
+    # CI 환경의 DB 설정 사용 (testing=True로 test_ prefix DB 자동 생성)
     tortoise_config = generate_config(
-        db_url=f"postgres://{config.DB_USER}:{config.DB_PASSWORD}@{config.DB_HOST}:{config.DB_PORT}/test",
+        db_url=f"postgres://{config.DB_USER}:{config.DB_PASSWORD}@{config.DB_HOST}:{config.DB_PORT}/{config.DB_NAME}",
         app_modules={TEST_DB_LABEL: TORTOISE_APP_MODELS},
         connection_label=TEST_DB_LABEL,
         testing=True,
@@ -40,6 +43,16 @@ def initialize(request: FixtureRequest) -> Generator[None, None]:
     loop.close()
 
 
-@pytest_asyncio.fixture(autouse=True, scope="session")  # type: ignore[type-var]
+@pytest_asyncio.fixture(autouse=True, scope="session")
 def event_loop() -> None:
     pass
+
+
+@pytest_asyncio.fixture
+async def client() -> AsyncClient:
+    """비동기 테스트 클라이언트"""
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url=TEST_BASE_URL,
+    ) as ac:
+        yield ac
