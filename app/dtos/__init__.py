@@ -9,6 +9,9 @@ from .oauth import (
     OAuthUserInfo,
     TokenRefreshResponse,
 )
+from .profile import ProfileCreate, ProfileResponse, ProfileUpdate
+from .chat_session import ChatSessionCreate, ChatSessionResponse
+from .message import MessageCreate, MessageResponse
 
 __all__ = [
     "ChallengeCreate",
@@ -26,4 +29,11 @@ __all__ = [
     "OAuthLoginResponse",
     "OAuthUserInfo",
     "TokenRefreshResponse",
+    "ProfileCreate",
+    "ProfileResponse",
+    "ProfileUpdate",
+    "ChatSessionCreate",
+    "ChatSessionResponse",
+    "MessageCreate",
+    "MessageResponse",
 ]
