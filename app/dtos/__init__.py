@@ -2,7 +2,14 @@ from .auth import LoginRequest, LoginResponse, SignUpRequest, TokenRefreshRespon
 from .challenge import ChallengeCreate, ChallengeResponse, ChallengeUpdate
 from .intake_log import IntakeLogCreate, IntakeLogResponse, IntakeLogUpdate
 from .medication import MedicationCreate, MedicationResponse, MedicationUpdate
-from .oauth import OAuthLoginRequest, OAuthTokenResponse
+from .oauth import (
+    OAuthCallbackRequest,
+    OAuthConfigResponse,
+    OAuthErrorResponse,
+    OAuthLoginResponse,
+    OAuthUserInfo,
+    TokenRefreshResponse as OAuthTokenRefreshResponse,
+)
 from .users import UserInfoResponse, UserUpdateRequest
 
 __all__ = [
@@ -19,8 +26,12 @@ __all__ = [
     "MedicationCreate",
     "MedicationResponse",
     "MedicationUpdate",
-    "OAuthLoginRequest",
-    "OAuthTokenResponse",
+    "OAuthCallbackRequest",
+    "OAuthConfigResponse",
+    "OAuthErrorResponse",
+    "OAuthLoginResponse",
+    "OAuthUserInfo",
+    "OAuthTokenRefreshResponse",
     "UserInfoResponse",
     "UserUpdateRequest",
 ]
