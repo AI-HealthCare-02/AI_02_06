@@ -1,0 +1,51 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+
+# IDE & Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.github/
+
+# Environment
+.env
+envs/
+*.env
+
+# Docker (prevent recursive copy)
+docker-compose*.yml
+Dockerfile
+
+# Frontend (separate build context)
+medication-frontend/
+
+# Nginx (mounted separately)
+nginx/
+
+# Documentation
+README.md
+docs/
+csv/
+
+# Tests (not needed in production image)
+app/tests/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+.gitignore
+.dockerignore
+*.log
