@@ -1,55 +1,65 @@
+"""테스트 설정 - Tortoise ORM 초기화 및 공통 fixture"""
+
 import asyncio
-from collections.abc import Generator
-from typing import Any
-from unittest.mock import Mock, patch
+from collections.abc import AsyncGenerator, Generator
 
 import pytest
 import pytest_asyncio
-from _pytest.fixtures import FixtureRequest
 from httpx import ASGITransport, AsyncClient
-from tortoise import generate_config
-from tortoise.contrib.test import finalizer, initializer
+from tortoise import Tortoise
 
 from app.core import config
 from app.db.databases import TORTOISE_APP_MODELS
 from app.main import app
 
 TEST_BASE_URL = "http://test"
-TEST_DB_LABEL = "models"
-TEST_DB_TZ = "Asia/Seoul"
 
 
-def get_test_db_config() -> dict[str, Any]:
-    # CI 환경의 DB 설정 사용 (testing=True로 test_ prefix DB 자동 생성)
-    tortoise_config = generate_config(
-        db_url=f"postgres://{config.DB_USER}:{config.DB_PASSWORD}@{config.DB_HOST}:{config.DB_PORT}/{config.DB_NAME}",
-        app_modules={TEST_DB_LABEL: TORTOISE_APP_MODELS},
-        connection_label=TEST_DB_LABEL,
-        testing=True,
-    )
-    tortoise_config["timezone"] = TEST_DB_TZ
+def get_test_tortoise_config() -> dict:
+    """CI 환경용 Tortoise ORM 설정"""
+    return {
+        "connections": {
+            "default": {
+                "engine": "tortoise.backends.asyncpg",
+                "credentials": {
+                    "host": config.DB_HOST,
+                    "port": config.DB_PORT,
+                    "user": config.DB_USER,
+                    "password": config.DB_PASSWORD,
+                    "database": config.DB_NAME,
+                },
+            },
+        },
+        "apps": {
+            "models": {
+                "models": TORTOISE_APP_MODELS,
+                "default_connection": "default",
+            },
+        },
+        "timezone": "Asia/Seoul",
+    }
 
-    return tortoise_config
 
-
-@pytest.fixture(scope="session", autouse=True)
-def initialize(request: FixtureRequest) -> Generator[None, None]:
+@pytest.fixture(scope="session")
+def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
+    """세션 스코프 이벤트 루프"""
     loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    with patch("tortoise.contrib.test.getDBConfig", Mock(return_value=get_test_db_config())):
-        initializer(modules=TORTOISE_APP_MODELS)
-    yield
-    finalizer()
+    yield loop
     loop.close()
 
 
-@pytest_asyncio.fixture(autouse=True, scope="session")
-def event_loop() -> None:
-    pass
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def initialize_db() -> AsyncGenerator[None, None]:
+    """테스트 DB 초기화 (세션 스코프)"""
+    tortoise_config = get_test_tortoise_config()
+    await Tortoise.init(config=tortoise_config)
+    await Tortoise.generate_schemas()
+    yield
+    await Tortoise.close_connections()
 
 
 @pytest_asyncio.fixture
-async def client() -> AsyncClient:
+async def client() -> AsyncGenerator[AsyncClient, None]:
     """비동기 테스트 클라이언트"""
     async with AsyncClient(
         transport=ASGITransport(app=app),

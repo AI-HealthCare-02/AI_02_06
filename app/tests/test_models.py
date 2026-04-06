@@ -23,7 +23,7 @@ class TestDatabaseSchema:
     @pytest.mark.asyncio
     async def test_all_tables_created(self):
         """모든 테이블이 DB에 생성되었는지 확인"""
-        conn = Tortoise.get_connection("models")
+        conn = Tortoise.get_connection("default")
 
         # 테이블 목록 조회
         result = await conn.execute_query(
