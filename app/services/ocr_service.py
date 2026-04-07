@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -10,7 +11,8 @@ import requests
 from fastapi import UploadFile
 from openai import OpenAI, OpenAIError
 
-_UPLOAD_DIR = Path(os.environ.get("ALLOWED_IMAGE_DIR", "/tmp/ocr_images"))
+# 환경변수 우선, 없으면 OS 기본 임시 디렉토리 사용 (보안상 /tmp 하드코딩 방지)
+_UPLOAD_DIR = Path(os.environ.get("ALLOWED_IMAGE_DIR", tempfile.gettempdir())) / "ocr_images"
 _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 _MEDICINES_PATH = Path(__file__).parent.parent.parent / "ai_worker" / "data" / "medicines.json"
