@@ -29,6 +29,16 @@ class ProfileService:
             )
         return profile
 
+    async def get_profile_with_owner_check(self, profile_id: UUID, account_id: UUID) -> Profile:
+        """소유권 검증 후 프로필 조회"""
+        profile = await self.get_profile(profile_id)
+        if profile.account_id != account_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="해당 프로필에 대한 접근 권한이 없습니다.",
+            )
+        return profile
+
     async def get_profiles_by_account(self, account_id: UUID) -> list[Profile]:
         """계정의 모든 프로필 조회"""
         return await self.repository.get_all_by_account(account_id)
@@ -71,7 +81,23 @@ class ProfileService:
         update_data = data.model_dump(exclude_unset=True)
         return await self.repository.update(profile, **update_data)
 
+    async def update_profile_with_owner_check(
+        self,
+        profile_id: UUID,
+        account_id: UUID,
+        data: ProfileUpdate,
+    ) -> Profile:
+        """소유권 검증 후 프로필 수정"""
+        profile = await self.get_profile_with_owner_check(profile_id, account_id)
+        update_data = data.model_dump(exclude_unset=True)
+        return await self.repository.update(profile, **update_data)
+
     async def delete_profile(self, profile_id: UUID) -> None:
         """프로필 삭제 (soft delete)"""
         profile = await self.get_profile(profile_id)
+        await self.repository.soft_delete(profile)
+
+    async def delete_profile_with_owner_check(self, profile_id: UUID, account_id: UUID) -> None:
+        """소유권 검증 후 프로필 삭제 (soft delete)"""
+        profile = await self.get_profile_with_owner_check(profile_id, account_id)
         await self.repository.soft_delete(profile)

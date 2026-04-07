@@ -9,7 +9,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 
+from app.dependencies.security import get_current_account
 from app.dtos.profile import ProfileCreate, ProfileResponse, ProfileUpdate
+from app.models.accounts import Account
 from app.services.profile_service import ProfileService
 
 router = APIRouter(prefix="/profiles", tags=["Profiles"])
@@ -20,6 +22,7 @@ def get_profile_service() -> ProfileService:
 
 
 ProfileServiceDep = Annotated[ProfileService, Depends(get_profile_service)]
+CurrentAccount = Annotated[Account, Depends(get_current_account)]
 
 
 @router.post(
@@ -30,10 +33,12 @@ ProfileServiceDep = Annotated[ProfileService, Depends(get_profile_service)]
 )
 async def create_profile(
     data: ProfileCreate,
+    current_account: CurrentAccount,
     service: ProfileServiceDep,
 ):
     """새로운 사용자 프로필을 생성합니다."""
-    profile = await service.create_profile(data.account_id, data)
+    # 인증된 계정 ID를 사용 (요청 body의 account_id 무시)
+    profile = await service.create_profile(current_account.id, data)
     return ProfileResponse.model_validate(profile)
 
 
@@ -44,10 +49,11 @@ async def create_profile(
 )
 async def get_profile(
     profile_id: UUID,
+    current_account: CurrentAccount,
     service: ProfileServiceDep,
 ):
     """특정 프로필의 상세 정보를 조회합니다."""
-    profile = await service.get_profile(profile_id)
+    profile = await service.get_profile_with_owner_check(profile_id, current_account.id)
     return ProfileResponse.model_validate(profile)
 
 
@@ -57,16 +63,11 @@ async def get_profile(
     summary="프로필 목록 조회",
 )
 async def list_profiles(
+    current_account: CurrentAccount,
     service: ProfileServiceDep,
-    account_id: UUID | None = None,
 ):
-    """모든 프로필 목록을 조회합니다. 특정 계정으로 필터링이 가능합니다."""
-    if account_id:
-        profiles = await service.get_profiles_by_account(account_id)
-    else:
-        from app.models.profiles import Profile
-
-        profiles = await Profile.filter(deleted_at__isnull=True).all()
+    """현재 계정의 모든 프로필 목록을 조회합니다."""
+    profiles = await service.get_profiles_by_account(current_account.id)
     return [ProfileResponse.model_validate(p) for p in profiles]
 
 
@@ -78,10 +79,11 @@ async def list_profiles(
 async def update_profile(
     profile_id: UUID,
     data: ProfileUpdate,
+    current_account: CurrentAccount,
     service: ProfileServiceDep,
 ):
     """프로필 정보를 수정합니다."""
-    profile = await service.update_profile(profile_id, data)
+    profile = await service.update_profile_with_owner_check(profile_id, current_account.id, data)
     return ProfileResponse.model_validate(profile)
 
 
@@ -92,8 +94,9 @@ async def update_profile(
 )
 async def delete_profile(
     profile_id: UUID,
+    current_account: CurrentAccount,
     service: ProfileServiceDep,
 ):
     """프로필을 삭제합니다."""
-    await service.delete_profile(profile_id)
+    await service.delete_profile_with_owner_check(profile_id, current_account.id)
     return None
