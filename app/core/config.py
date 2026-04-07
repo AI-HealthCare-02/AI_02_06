@@ -74,3 +74,7 @@ class Config(BaseSettings):
                 raise ValueError(f"Production configuration errors: {'; '.join(errors)}")
 
         return self
+
+
+# 싱글톤 인스턴스
+config = Config()
