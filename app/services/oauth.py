@@ -100,6 +100,27 @@ class OAuthService:
                     },
                 ) from e
 
+    async def dev_test_login(self) -> tuple[Account, bool]:
+        """개발용 즉시 로그인 (테스트유저 고정)"""
+        nickname = "테스트유저"
+        provider_account_id = "test_dev_id_12345"
+
+        account = await self.account_repo.get_by_provider(
+            provider=AuthProvider.KAKAO,
+            provider_account_id=provider_account_id,
+        )
+
+        is_new_user = False
+        if not account:
+            account = await self.account_repo.create(
+                provider=AuthProvider.KAKAO,
+                provider_account_id=provider_account_id,
+                nickname=nickname,
+            )
+            is_new_user = True
+        
+        return account, is_new_user
+
     async def kakao_callback(self, code: str, client_ip: str) -> tuple[Account, bool]:
         """
         카카오 콜백 처리 로직

@@ -70,7 +70,7 @@ export default function ChatPage() {
       {/* 입력창 - 하단 고정 */}
       <div className="fixed bottom-0 w-full bg-white border-t border-gray-100 px-6 py-5 z-40">
         <div className="max-w-3xl mx-auto flex gap-3 items-center">
-          className="w-11 h-11 bg-gray-50 text-gray-400 rounded-full flex items-center justify-center shrink-0 hover:bg-gray-100 transition-all border border-gray-100 cursor-pointer active:scale-[0.98] transition-transform duration-150"
+          <button className="w-11 h-11 bg-gray-50 text-gray-400 rounded-full flex items-center justify-center shrink-0 hover:bg-gray-100 transition-all border border-gray-100 cursor-pointer active:scale-[0.98] transition-transform duration-150">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M5 12h14m-7-7v14"/>
             </svg>
@@ -101,8 +101,5 @@ export default function ChatPage() {
         </div>
       </div>
     </main>
-  )
-}
-main>
   )
 }

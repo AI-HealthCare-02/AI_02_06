@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Header from '../../components/Header'
 import BottomNav from '../../components/BottomNav'
 import EmptyState from '../../components/EmptyState'
+import api from '../../lib/api'
 
 function MainSkeleton() {
   return (
@@ -192,13 +193,46 @@ export default function MainPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [showSurvey, setShowSurvey] = useState(false)
   const [showChat, setShowChat] = useState(false)
+  const [userName, setUserName] = useState('사용자')
+  const [greeting, setGreeting] = useState({ msg: '반가워요!', sub: '오늘 하루도 건강하게 시작해봐요' })
 
   useEffect(() => {
-    setTimeout(() => {
-      setIsLoading(false)
-      setShowSurvey(true)
-    }, 1000)
+    const initPage = async () => {
+      try {
+        setIsLoading(true)
+        
+        // 1. 사용자 정보 로드
+        const profileRes = await api.get('/api/v1/profiles/')
+        if (profileRes.data && profileRes.data.length > 0) {
+          const selfProfile = profileRes.data.find(p => p.relation_type === 'SELF') || profileRes.data[0]
+          setUserName(selfProfile.name.split('(')[0])
+        }
+
+        // 2. 클라이언트 사이드에서만 시간 기반 인사말 설정 (Hydration Error 방지)
+        const hour = new Date().getHours()
+        if (hour >= 5 && hour < 12) setGreeting({ msg: '좋은 아침이에요! ☀️', sub: '오늘 하루도 건강하게 시작해봐요' })
+        else if (hour >= 12 && hour < 17) setGreeting({ msg: '좋은 오후예요! 🌤️', sub: '점심 식사 후 약 챙기셨나요?' })
+        else if (hour >= 17 && hour < 21) setGreeting({ msg: '좋은 저녁이에요! 🌇', sub: '저녁 복약 시간을 확인해보세요' })
+        else setGreeting({ msg: '잠들기 전 확인해요! 🌙', sub: '오늘 복약을 모두 완료했나요?' })
+
+      } catch (err) {
+        console.error('데이터 로드 실패:', err)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    initPage()
   }, [])
+
+  const handleLogout = async () => {
+    try {
+      await api.post('/api/v1/auth/logout')
+      router.push('/')
+    } catch (err) {
+      console.error('로그아웃 실패:', err)
+      router.push('/')
+    }
+  }
 
   if (isLoading) return <MainSkeleton />
 
@@ -210,15 +244,6 @@ export default function MainPage() {
   const challenge = { title: '금연 챌린지', days: 3, target: 30 }
   const recentPrescription = { date: '2024.03.31', hospital: '내과' }
 
-  const getGreeting = () => {
-    const hour = new Date().getHours()
-    if (hour >= 5 && hour < 12) return { msg: '좋은 아침이에요! ☀️', sub: '오늘 하루도 건강하게 시작해봐요' }
-    if (hour >= 12 && hour < 17) return { msg: '좋은 오후예요! 🌤️', sub: '점심 식사 후 약 챙기셨나요?' }
-    if (hour >= 17 && hour < 21) return { msg: '좋은 저녁이에요! 🌇', sub: '저녁 복약 시간을 확인해보세요' }
-    return { msg: '잠들기 전 확인해요! 🌙', sub: '오늘 복약을 모두 완료했나요?' }
-  }
-  const greeting = getGreeting()
-
   return (
     <>
       {/* 설문 모달 */}
@@ -229,30 +254,30 @@ export default function MainPage() {
 
       <main className="max-w-[1400px] mx-auto w-full px-8 py-12 min-h-screen bg-slate-50 relative overflow-x-hidden">
         
-        {/* 상단 인사말 헤더 (와이드 레이아웃 적용) */}
+        {/* 상단 인사말 헤더 */}
         <div className="w-full flex justify-between items-end mb-10 bg-white p-10 rounded-[40px] shadow-sm border border-white">
           <div>
             <p className="text-gray-400 text-sm font-bold mb-2 px-1">{greeting.sub}</p>
             <h1 className="text-4xl font-black text-gray-900 leading-tight">
-              {greeting.msg.split('!')[0]}! <span className="text-blue-500">홍길동님</span> 반가워요
+              {greeting.msg.split('!')[0]}! <span className="text-blue-500">{userName}님</span> 반가워요
             </h1>
           </div>
           
-          {/* PC용 네비게이션 메뉴 (간격 대확장) */}
-          <div className="hidden md:flex items-center gap-12 mb-2">
-            <button onClick={() => router.push('/main')} className="flex items-center gap-2 text-blue-500 font-black text-lg hover:opacity-80 transition-all">
-              <span className="text-2xl">🏠</span> 홈
+          <div className="flex items-center gap-6 md:gap-10 mb-2">
+            <button onClick={() => router.push('/main')} className="flex items-center gap-2 text-blue-500 font-black text-sm md:text-lg hover:opacity-80 transition-all">
+              <span className="text-xl md:text-2xl">🏠</span> 홈
             </button>
-            <button onClick={() => router.push('/mypage')} className="flex items-center gap-2 text-gray-400 font-bold text-lg hover:text-gray-600 transition-all">
-              <span className="text-2xl">👤</span> 마이페이지
+            <button onClick={() => router.push('/mypage')} className="flex items-center gap-2 text-gray-400 font-bold text-sm md:text-lg hover:text-blue-500 transition-all">
+              <span className="text-xl md:text-2xl">👤</span> 마이페이지
+            </button>
+            <button onClick={handleLogout} className="flex items-center gap-2 text-gray-400 font-bold text-sm md:text-lg hover:text-red-500 transition-all">
+              <span className="text-xl md:text-2xl">🚪</span> 로그아웃
             </button>
           </div>
         </div>
 
-        {/* 메인 콘텐츠 대시보드 그리드 */}
+        {/* 대시보드 그리드 */}
         <div className="grid md:grid-cols-12 gap-8">
-          
-          {/* 좌측 메인 (8칸): 오늘 복약 현황 (너비 봉인 해제) */}
           <div className="md:col-span-8 w-full h-full">
             <div className="bg-white rounded-[40px] shadow-sm p-10 border border-white/50 w-full h-full animate-in fade-in slide-in-from-left-3 duration-500">
               <div className="flex justify-between items-center mb-10">
@@ -263,7 +288,7 @@ export default function MainPage() {
                 <span className="bg-blue-50 text-blue-600 text-sm font-black px-5 py-2 rounded-2xl">2/3 완료</span>
               </div>
               <div className="w-full bg-gray-100 rounded-full h-4 mb-12 overflow-hidden shadow-inner">
-                <div className="bg-gradient-to-r from-blue-400 to-blue-600 h-4 rounded-full shadow-[0_0_15px_rgba(59,130,246,0.4)] transition-all duration-1000" style={{width: '66%'}} />
+                <div className="bg-gradient-to-r from-blue-400 to-blue-600 h-4 rounded-full shadow-[0_0_15px_rgba(59,130,246,0.4)]" style={{width: '66%'}} />
               </div>
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {todayMeds.map((med, i) => (
@@ -273,12 +298,12 @@ export default function MainPage() {
                     <div className="flex justify-between items-start w-full">
                       <span className="text-gray-400 text-xs font-black">{med.time}</span>
                       {med.done ? (
-                        <span className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white text-sm shadow-md">✓</span>
+                        <span className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white text-sm">✓</span>
                       ) : (
-                        <span className="w-8 h-8 bg-white text-blue-500 rounded-full flex items-center justify-center text-xs font-black border-2 border-blue-100 shadow-sm">...</span>
+                        <span className="w-8 h-8 bg-white text-blue-500 rounded-full flex items-center justify-center text-xs font-black border-2 border-blue-100">...</span>
                       )}
                     </div>
-                    <span className={`text-lg font-black mt-4 transition-all ${med.done ? 'text-gray-300 line-through' : 'text-gray-800 group-hover:text-blue-600'}`}>
+                    <span className={`text-lg font-black mt-4 ${med.done ? 'text-gray-300 line-through' : 'text-gray-800'}`}>
                       {med.name}
                     </span>
                   </div>
@@ -287,11 +312,10 @@ export default function MainPage() {
             </div>
           </div>
 
-          {/* 우측 사이드 (4칸): AI 상담 & 처방전 등록 (너비 봉인 해제) */}
           <div className="md:col-span-4 flex flex-col space-y-8 w-full h-full">
             <div onClick={() => setShowChat(true)}
-              className="flex-1 bg-blue-500 rounded-[40px] p-10 text-white shadow-2xl shadow-blue-100 cursor-pointer active:scale-[0.96] transition-all duration-200 relative overflow-hidden group min-h-[220px]">
-              <div className="absolute -right-4 -bottom-4 opacity-20 group-hover:scale-110 transition-transform duration-500">
+              className="flex-1 bg-blue-500 rounded-[40px] p-10 text-white shadow-2xl cursor-pointer active:scale-[0.96] transition-all duration-200 relative overflow-hidden group min-h-[220px]">
+              <div className="absolute -right-4 -bottom-4 opacity-20 group-hover:scale-110 transition-transform">
                 <svg width="140" height="140" viewBox="0 0 24 24" fill="white"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
               </div>
               <p className="text-sm font-black opacity-80 mb-3">복약 궁금증 해소</p>
@@ -299,7 +323,7 @@ export default function MainPage() {
             </div>
 
             <div onClick={() => router.push('/ocr')}
-              className="flex-1 bg-white rounded-[40px] p-10 border border-gray-100 shadow-sm cursor-pointer active:scale-[0.96] transition-all duration-200 relative overflow-hidden group min-h-[220px] flex flex-col justify-center">
+              className="flex-1 bg-white rounded-[40px] p-10 border border-gray-100 shadow-sm cursor-pointer active:scale-[0.96] transition-all relative overflow-hidden group min-h-[220px] flex flex-col justify-center">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-black text-gray-400 mb-3">스마트한 등록</p>
@@ -310,7 +334,6 @@ export default function MainPage() {
             </div>
           </div>
 
-          {/* 하단 영역 (각 6칸): 챌린지 & 최근 처방전 (너비 봉인 해제) */}
           <div className="md:col-span-6 w-full h-full">
             <div onClick={() => router.push('/challenge')}
               className="bg-white rounded-[40px] shadow-sm p-10 border border-gray-100 cursor-pointer active:scale-[0.98] transition-all group h-full">
@@ -318,21 +341,19 @@ export default function MainPage() {
                 <h2 className="text-xl font-black text-gray-900 flex items-center gap-3">
                   <span className="text-2xl">🏆</span> 챌린지 현황
                 </h2>
-                <div className="w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center text-gray-400 group-hover:bg-blue-500 group-hover:text-white transition-all duration-300 shadow-sm">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="group-hover:translate-x-0.5 transition-transform">
-                    <path d="m9 18 6-6-6-6"/>
-                  </svg>
+                <div className="w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center text-gray-400 group-hover:bg-blue-500 group-hover:text-white transition-all shadow-sm">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
                 </div>
               </div>
               <div className="flex items-center gap-6 mb-8">
-                <div className="bg-orange-50 w-20 h-20 rounded-[28px] flex items-center justify-center text-4xl shadow-md border border-orange-100 animate-bounce-subtle">🔥</div>
+                <div className="bg-orange-50 w-20 h-20 rounded-[28px] flex items-center justify-center text-4xl shadow-md border border-orange-100">🔥</div>
                 <div className="flex-1">
                   <span className="font-black text-xl text-gray-800">{challenge.title}</span>
                   <p className="text-orange-500 text-sm font-black mt-1.5">{challenge.days}일째 연속 성공!</p>
                 </div>
               </div>
               <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden shadow-inner">
-                <div className="bg-gradient-to-r from-orange-400 to-orange-500 h-3 rounded-full shadow-[0_0_10px_rgba(251,146,60,0.4)] transition-all duration-1000" style={{width: `${(challenge.days/challenge.target)*100}%`}} />
+                <div className="bg-orange-400 h-3 rounded-full" style={{width: `${(challenge.days/challenge.target)*100}%`}} />
               </div>
             </div>
           </div>
@@ -345,9 +366,9 @@ export default function MainPage() {
                 </h2>
                 <button className="text-xs font-black text-blue-500 hover:bg-blue-50 px-4 py-2 rounded-2xl transition-all border border-blue-100">전체보기</button>
               </div>
-              <div className="bg-slate-50/80 rounded-[32px] p-6 flex items-center justify-between border border-gray-100 hover:bg-white hover:shadow-2xl hover:shadow-slate-200 transition-all cursor-pointer group">
+              <div className="bg-slate-50/80 rounded-[32px] p-6 flex items-center justify-between border border-gray-100 hover:bg-white hover:shadow-2xl transition-all cursor-pointer group">
                 <div className="flex items-center gap-5">
-                  <div className="bg-white w-16 h-16 rounded-[24px] flex items-center justify-center text-3xl shadow-sm group-hover:bg-blue-50 transition-colors">📄</div>
+                  <div className="bg-white w-16 h-16 rounded-[24px] flex items-center justify-center text-3xl shadow-sm">📄</div>
                   <div>
                     <p className="text-lg font-black text-gray-800">{recentPrescription.hospital} 처방</p>
                     <p className="text-sm text-gray-400 font-bold mt-1">{recentPrescription.date}</p>
@@ -357,21 +378,15 @@ export default function MainPage() {
               </div>
             </div>
           </div>
-
         </div>
 
-        {/* 하단 네비게이션 (모바일에서만 표시) */}
         <div className="md:hidden fixed bottom-0 left-0 w-full bg-white/90 backdrop-blur-lg border-t border-gray-100 flex py-5 px-8 z-40 shadow-[0_-5px_30px_rgba(0,0,0,0.08)] rounded-t-[40px]">
-          <button 
-            onClick={() => router.push('/main')} 
-            className="flex-1 flex flex-col items-center gap-2 group">
-            <span className="text-2xl group-active:scale-90 transition-transform">🏠</span>
+          <button onClick={() => router.push('/main')} className="flex-1 flex flex-col items-center gap-2">
+            <span className="text-2xl">🏠</span>
             <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Home</span>
           </button>
-          <button 
-            onClick={() => router.push('/mypage')} 
-            className="flex-1 flex flex-col items-center gap-2 group">
-            <span className="text-2xl group-active:scale-90 transition-transform opacity-40 group-hover:opacity-100">👤</span>
+          <button onClick={() => router.push('/mypage')} className="flex-1 flex flex-col items-center gap-2">
+            <span className="text-2xl opacity-40">👤</span>
             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">My</span>
           </button>
         </div>

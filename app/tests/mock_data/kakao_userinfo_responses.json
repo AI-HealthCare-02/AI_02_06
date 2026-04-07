@@ -7,13 +7,13 @@
       "trigger_access_token": "kakao_access_token_existing_user_aaabbbccc",
       "http_status": 200,
       "body": {
-        "id": 1001001001,
+        "id": "mock_user_1234",
         "connected_at": "2023-06-15T09:00:00Z",
         "kakao_account": {
           "profile_nickname_needs_agreement": false,
           "profile_image_needs_agreement": false,
           "profile": {
-            "nickname": "김철수",
+            "nickname": "테스트유저",
             "thumbnail_image_url": "https://k.kakaocdn.net/dn/mock_thumb_existing/img_110x110.jpg",
             "profile_image_url": "https://k.kakaocdn.net/dn/mock_profile_existing/img_640x640.jpg",
             "is_default_image": false
