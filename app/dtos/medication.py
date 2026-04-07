@@ -10,7 +10,7 @@ class BaseMedication(BaseModel):
     intake_instruction: str | None = Field(None, max_length=256, description="복용 지시사항")
     intake_times: list[str] = Field(..., description="일일 복용 시간 목록 (예: ['08:00', '13:00'])")
     total_intake_count: int = Field(..., description="처방된 총 복용 횟수")
-    remaining_intake_count: int = Field(..., description="남은 복용 횟수")
+    remaining_intake_count: int | None = Field(None, description="남은 복용 횟수 (미입력 시 총 복용 횟수와 동일)")
     start_date: date = Field(..., description="복용 시작일")
     end_date: date | None = Field(None, description="복용 종료 예정일")
     dispensed_date: date | None = Field(None, description="약품 조제일")
