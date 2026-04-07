@@ -40,6 +40,7 @@ class Config(BaseSettings):
 
     COOKIE_DOMAIN: str = "localhost"
     API_BASE_URL: str = "http://localhost:8000"
+    FRONTEND_URL: str = "http://localhost:3000"  # CORS 허용 도메인
 
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
