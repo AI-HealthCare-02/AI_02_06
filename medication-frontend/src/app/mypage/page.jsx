@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { User, Activity, Users, Home, Trash2 } from 'lucide-react'
 import Header from '../../components/Header'
 import BottomNav from '../../components/BottomNav'
 import EmptyState from '../../components/EmptyState'
@@ -43,9 +44,9 @@ export default function MyPage() {
   if (isLoading) return <MyPageSkeleton />
 
   const menuItems = [
-    { id: '기본정보', label: '기본 정보', icon: '👤' },
-    { id: '건강정보', label: '건강 정보', icon: '🏥' },
-    { id: '가족관리', label: '가족 관리', icon: '👨‍👩‍👧‍👦' },
+    { id: '기본정보', label: '기본 정보', icon: <User size={18} /> },
+    { id: '건강정보', label: '건강 정보', icon: <Activity size={18} /> },
+    { id: '가족관리', label: '가족 관리', icon: <Users size={18} /> },
   ]
 
   return (
@@ -61,10 +62,10 @@ export default function MyPage() {
         {/* PC용 네비게이션 메뉴 (메인과 통일) */}
         <div className="hidden md:flex items-center gap-12 mb-2">
           <button onClick={() => router.push('/main')} className="flex items-center gap-2 text-gray-400 font-bold text-lg hover:text-blue-500 transition-all">
-            <span className="text-2xl">🏠</span> 홈
+            <Home size={20} /> 홈
           </button>
           <button onClick={() => router.push('/mypage')} className="flex items-center gap-2 text-blue-500 font-black text-lg hover:opacity-80 transition-all">
-            <span className="text-2xl">👤</span> 마이페이지
+            <User size={20} /> 마이페이지
           </button>
         </div>
       </div>
@@ -78,8 +79,8 @@ export default function MyPage() {
           {/* 프로필 요약 카드 */}
           <div className="bg-white rounded-[40px] shadow-sm p-8 border border-white/50 animate-in fade-in slide-in-from-left-3 duration-500">
             <div className="flex flex-col items-center text-center">
-              <div className="w-24 h-24 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-4xl shadow-lg shadow-blue-100 mb-4 border-4 border-white">
-                👤
+              <div className="w-24 h-24 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center shadow-lg shadow-blue-100 mb-4 border-4 border-white">
+                <User size={40} className="text-white" />
               </div>
               <h2 className="text-xl font-black text-gray-900 mb-1">홍길동님</h2>
               <p className="text-gray-400 text-xs font-bold mb-6 italic">jw@gmail.com</p>
@@ -88,11 +89,11 @@ export default function MyPage() {
               <div className="grid grid-cols-2 gap-3 w-full">
                 <div className="bg-blue-50/50 p-4 rounded-[24px] border border-blue-50">
                   <p className="text-[10px] font-black text-blue-500 mb-1">연속 복약</p>
-                  <p className="text-lg font-black text-gray-800">3일째 🔥</p>
+                  <p className="text-lg font-black text-gray-800">3일째</p>
                 </div>
                 <div className="bg-orange-50/50 p-4 rounded-[24px] border border-orange-50">
                   <p className="text-[10px] font-black text-orange-500 mb-1">진행 챌린지</p>
-                  <p className="text-lg font-black text-gray-800">1개 🏆</p>
+                  <p className="text-lg font-black text-gray-800">1개</p>
                 </div>
               </div>
             </div>
@@ -110,7 +111,7 @@ export default function MyPage() {
                       ? 'bg-blue-500 text-white shadow-lg shadow-blue-100 font-black' 
                       : 'text-gray-500 hover:bg-slate-50 font-bold'}`}
                 >
-                  <span className="text-xl">{item.icon}</span>
+                  <span>{item.icon}</span>
                   <span className="text-sm">{item.label}</span>
                   {activeMenu === item.id && (
                     <span className="ml-auto w-1.5 h-1.5 bg-white rounded-full"></span>
@@ -212,7 +213,7 @@ export default function MyPage() {
                           </div>
                         </div>
                         <button className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all shadow-sm">
-                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                          <Trash2 size={18} />
                         </button>
                       </div>
                     ))}
@@ -238,13 +239,17 @@ export default function MyPage() {
         <button 
           onClick={() => router.push('/main')} 
           className="flex-1 flex flex-col items-center gap-2 group">
-          <span className="text-2xl group-active:scale-90 transition-transform opacity-40 group-hover:opacity-100">🏠</span>
+          <span className="group-active:scale-90 transition-transform opacity-40 group-hover:opacity-100">
+            <Home size={22} />
+          </span>
           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Home</span>
         </button>
         <button 
           onClick={() => router.push('/mypage')} 
           className="flex-1 flex flex-col items-center gap-2 group">
-          <span className="text-2xl group-active:scale-90 transition-transform">👤</span>
+          <span className="group-active:scale-90 transition-transform text-blue-500">
+            <User size={22} />
+          </span>
           <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">My</span>
         </button>
       </div>

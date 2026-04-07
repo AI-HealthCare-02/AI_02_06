@@ -10,14 +10,14 @@ export default function ChallengePage() {
   const [activeTab, setActiveTab] = useState('추천')
   const [accepted, setAccepted] = useState([])
   const [ongoing, setOngoing] = useState([
-    { id: 1, icon: '🚭', title: '금연 챌린지', days: 30, current: 3, status: 'IN_PROGRESS' },
+    { id: 1, abbr: '금연', title: '금연 챌린지', days: 30, current: 3, status: 'IN_PROGRESS', abbrColor: 'bg-red-100 text-red-600' },
   ])
 
   const recommended = [
-    { id: 1, icon: '🚭', title: '금연 챌린지', desc: '30일 동안 금연해보세요', days: 30, difficulty: '어려움', color: 'bg-red-50', textColor: 'text-red-500' },
-    { id: 2, icon: '🏃', title: '매일 걷기', desc: '매일 30분씩 걸어보세요', days: 21, difficulty: '보통', color: 'bg-green-50', textColor: 'text-green-500' },
-    { id: 3, icon: '💊', title: '복약 완료 챌린지', desc: '7일 연속 복약을 완료해보세요', days: 7, difficulty: '쉬움', color: 'bg-blue-50', textColor: 'text-blue-500' },
-    { id: 4, icon: '🥗', title: '건강한 식단', desc: '21일 동안 균형 잡힌 식사를 해보세요', days: 21, difficulty: '보통', color: 'bg-yellow-50', textColor: 'text-yellow-500' },
+    { id: 1, abbr: '금연', title: '금연 챌린지', desc: '30일 동안 금연해보세요', days: 30, difficulty: '어려움', color: 'bg-red-50', textColor: 'text-red-500', abbrColor: 'bg-red-100 text-red-600' },
+    { id: 2, abbr: '걷기', title: '매일 걷기', desc: '매일 30분씩 걸어보세요', days: 21, difficulty: '보통', color: 'bg-green-50', textColor: 'text-green-500', abbrColor: 'bg-green-100 text-green-600' },
+    { id: 3, abbr: '복약', title: '복약 완료 챌린지', desc: '7일 연속 복약을 완료해보세요', days: 7, difficulty: '쉬움', color: 'bg-blue-50', textColor: 'text-blue-500', abbrColor: 'bg-blue-100 text-blue-600' },
+    { id: 4, abbr: '식단', title: '건강한 식단', desc: '21일 동안 균형 잡힌 식사를 해보세요', days: 21, difficulty: '보통', color: 'bg-yellow-50', textColor: 'text-yellow-500', abbrColor: 'bg-yellow-100 text-yellow-600' },
   ]
 
   const handleAccept = (challenge) => {
@@ -65,8 +65,8 @@ export default function ChallengePage() {
                 <div key={item.id} className="bg-white rounded-2xl shadow-sm p-6 border border-gray-50 hover:border-blue-200 transition-all">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                      <div className={`${item.color} w-12 h-12 rounded-xl flex items-center justify-center text-2xl shadow-sm`}>
-                        {item.icon}
+                      <div className={`${item.abbrColor} w-12 h-12 rounded-xl flex items-center justify-center text-xs font-black shadow-sm`}>
+                        {item.abbr}
                       </div>
                       <div>
                         <h3 className="font-bold text-gray-900">{item.title}</h3>
@@ -105,7 +105,7 @@ export default function ChallengePage() {
               ongoing.map((item) => (
                 <div key={item.id} className="bg-white rounded-2xl shadow-sm p-6 border border-gray-50">
                   <div className="flex items-center gap-4 mb-5">
-                    <span className="text-3xl drop-shadow-sm">{item.icon}</span>
+                    <div className={`${item.abbrColor} w-12 h-12 rounded-xl flex items-center justify-center text-xs font-black shrink-0`}>{item.abbr}</div>
                     <div className="flex-1">
                       <h3 className="font-bold text-gray-900">{item.title}</h3>
                       <p className="text-gray-400 text-xs mt-0.5">{item.current}일째 진행 중!</p>
@@ -123,7 +123,7 @@ export default function ChallengePage() {
                   <button
                     onClick={() => handleCheck(item.id)}
                     className="w-full bg-gray-50 text-gray-600 py-3.5 rounded-xl text-sm font-bold transition-colors hover:bg-gray-100 active:scale-[0.98]">
-                    오늘 완료 체크 ✅
+                    오늘 완료 체크
                   </button>
                 </div>
               ))

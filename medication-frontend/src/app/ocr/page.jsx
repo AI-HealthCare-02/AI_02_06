@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Info, Camera } from 'lucide-react'
 import Header from '../../components/Header'
 import BottomNav from '../../components/BottomNav'
 
@@ -35,7 +36,8 @@ export default function OcrPage() {
         {/* 설명 카드 */}
         <div className="bg-blue-50 rounded-2xl p-6 mb-8 border border-blue-100">
           <h2 className="font-bold text-blue-900 text-sm mb-4 flex items-center gap-2">
-            <span>💡</span> 처방전 등록 방법
+            <Info size={14} className="text-blue-900" />
+            처방전 등록 방법
           </h2>
           <div className="space-y-4">
             <div className="flex gap-3">
@@ -70,7 +72,7 @@ export default function OcrPage() {
             ) : (
               <div className="animate-in fade-in zoom-in duration-300">
                 <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <p className="text-4xl">📷</p>
+                  <Camera size={28} className="text-gray-400" />
                 </div>
                 <p className="text-gray-900 font-bold mb-1">처방전 사진 찍기</p>
                 <p className="text-gray-400 text-xs">JPG, PNG 파일 지원</p>

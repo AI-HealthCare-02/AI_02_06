@@ -1,10 +1,11 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { Home, User, Camera, Trophy, ClipboardList, MessageCircle, X, Send } from 'lucide-react'
 
 function ChatModal({ onClose }) {
   const [messages, setMessages] = useState([
-    { role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요 💊' }
+    { role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }
   ])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -39,7 +40,7 @@ function ChatModal({ onClose }) {
             <h2 className="font-bold text-lg">복약 AI 상담</h2>
             <p className="text-xs text-gray-400">약 복용 방법, 부작용 등 무엇이든 물어보세요</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-black cursor-pointer text-xl">✕</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-black cursor-pointer"><X size={20} /></button>
         </div>
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -78,12 +79,12 @@ function ChatModal({ onClose }) {
             className="flex-1 border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-blue-300" />
           <button onClick={handleSend}
             disabled={isLoading || !input.trim()}
-            className={`w-9 h-9 rounded-full flex items-center justify-center text-sm cursor-pointer
+            className={`w-9 h-9 rounded-full flex items-center justify-center cursor-pointer
               ${isLoading || !input.trim()
                 ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
                 : 'bg-blue-500 text-white hover:bg-blue-600'
               }`}>
-            →
+            <Send size={16} />
           </button>
         </div>
       </div>
@@ -97,11 +98,11 @@ export default function Navigation() {
   const [showChat, setShowChat] = useState(false)
 
   const menus = [
-    { icon: '🏠', label: '홈', path: '/main' },
-    { icon: '👤', label: '마이페이지', path: '/mypage' },
-    { icon: '📷', label: '처방전 등록', path: '/ocr' },
-    { icon: '🏆', label: '챌린지', path: '/challenge' },
-    { icon: '📋', label: '용법/주의사항', path: '/medication' },
+    { icon: <Home size={18} />, label: '홈', path: '/main' },
+    { icon: <User size={18} />, label: '마이페이지', path: '/mypage' },
+    { icon: <Camera size={18} />, label: '처방전 등록', path: '/ocr' },
+    { icon: <Trophy size={18} />, label: '챌린지', path: '/challenge' },
+    { icon: <ClipboardList size={18} />, label: '용법/주의사항', path: '/medication' },
   ]
 
   return (
@@ -118,8 +119,8 @@ export default function Navigation() {
       {/* 챗봇 플로팅 버튼 */}
       <button
         onClick={() => setShowChat(true)}
-        className="fixed bottom-6 right-6 z-40 w-14 h-14 bg-blue-500 rounded-full shadow-lg flex items-center justify-center text-white text-2xl cursor-pointer hover:bg-blue-600">
-        💊
+        className="fixed bottom-6 right-6 z-40 w-14 h-14 bg-blue-500 rounded-full shadow-lg flex items-center justify-center text-white cursor-pointer hover:bg-blue-600">
+        <MessageCircle size={24} />
       </button>
 
       {/* 어두운 배경 */}
@@ -131,8 +132,8 @@ export default function Navigation() {
       <div className={`fixed top-0 left-0 h-full w-64 bg-white z-50 shadow-xl transform transition-transform duration-300
         ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex justify-between items-center px-6 py-5 border-b border-gray-100">
-          <h2 className="font-bold text-lg">💊 Downforce</h2>
-          <button onClick={() => setIsOpen(false)} className="text-gray-400 hover:text-black cursor-pointer text-xl">✕</button>
+          <h2 className="font-bold text-lg">Downforce</h2>
+          <button onClick={() => setIsOpen(false)} className="text-gray-400 hover:text-black cursor-pointer"><X size={20} /></button>
         </div>
         <div className="py-4">
           {menus.map((menu, i) => (

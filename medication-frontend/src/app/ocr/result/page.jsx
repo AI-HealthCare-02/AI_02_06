@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Trash2 } from 'lucide-react'
 import Header from '../../../components/Header'
 import BottomNav from '../../../components/BottomNav'
 
@@ -29,9 +30,7 @@ export default function OcrResultPage() {
               <div className="flex justify-between items-start mb-4">
                 <h3 className="font-bold text-lg text-gray-900">{med.name}</h3>
                 <button className="text-gray-300 hover:text-red-400 transition-colors">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-                  </svg>
+                  <Trash2 size={20} />
                 </button>
               </div>
               
@@ -72,8 +71,5 @@ export default function OcrResultPage() {
 
       <BottomNav />
     </main>
-  )
-}
-/main>
   )
 }
