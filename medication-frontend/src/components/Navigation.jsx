@@ -11,9 +11,11 @@ function ChatModal({ onClose }) {
   const scrollRef = useRef(null)
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
+    setTimeout(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      }
+    }, 100)
   }, [messages, isLoading])
 
   const handleSend = () => {
@@ -122,12 +124,10 @@ export default function Navigation() {
         💊
       </button>
 
-      {/* 어두운 배경 */}
       {isOpen && (
         <div onClick={() => setIsOpen(false)} className="fixed inset-0 bg-black/50 z-40" />
       )}
 
-      {/* 사이드바 */}
       <div className={`fixed top-0 left-0 h-full w-64 bg-white z-50 shadow-xl transform transition-transform duration-300
         ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex justify-between items-center px-6 py-5 border-b border-gray-100">
