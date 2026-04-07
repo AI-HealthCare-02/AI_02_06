@@ -97,12 +97,17 @@ export default function KakaoCallbackPage() {
       try {
         // 3. BE에 인가 코드 전달하여 로그인 처리
         // access_token은 HttpOnly 쿠키로 자동 저장됨
-        await api.get('/api/v1/auth/kakao/callback', {
+        const response = await api.get('/api/v1/auth/kakao/callback', {
           params: { code, state },
         })
 
-        // 4. 메인 페이지로 리다이렉트
-        router.replace('/main')
+        // 4. 신규 사용자면 설문조사, 기존 사용자면 메인으로 리다이렉트
+        const { is_new_user } = response.data
+        if (is_new_user) {
+          router.replace('/survey')
+        } else {
+          router.replace('/main')
+        }
       } catch (err) {
         console.error('로그인 처리 실패:', err)
         const parsed = err.parsed || parseApiError(err)

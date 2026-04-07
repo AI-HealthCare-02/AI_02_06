@@ -1,10 +1,12 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import api, { parseApiError, showError } from '../../lib/api'
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
+  const router = useRouter()
 
   const handleKakaoLogin = async () => {
     setIsLoading(true)
@@ -15,10 +17,10 @@ export default function LoginPage() {
       const { client_id, redirect_uri, authorize_url, state } = data
 
       // 2. BE에서 받은 state 저장 (CSRF 방지)
-      // localStorage 사용 (sessionStorage는 탭별로 독립적이라 새 탭에서 문제 발생)
       localStorage.setItem('oauth_state', state)
 
       // 3. 카카오(Mock) 인증 페이지로 리다이렉트
+      // 운영환경이면 카카오 서버로, 개발환경이면 Mock 서버로 동일하게 리다이렉트 처리
       const params = new URLSearchParams({
         client_id,
         redirect_uri,
