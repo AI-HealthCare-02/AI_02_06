@@ -1,159 +1,156 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Header from '../../components/Header'
+import BottomNav from '../../components/BottomNav'
+import EmptyState from '../../components/EmptyState'
 
 function MyPageSkeleton() {
   return (
     <main className="min-h-screen bg-gray-50 animate-pulse">
-      <div className="bg-white border-b border-gray-200 px-10 py-4">
-        <div className="h-5 w-24 bg-gray-200 rounded" />
+      <div className="bg-white border-b border-gray-100 px-6 py-5">
+        <div className="h-6 w-24 bg-gray-200 rounded" />
       </div>
-      <div className="py-10 flex gap-10 pl-10">
-        <div className="w-48 shrink-0 space-y-4">
-          <div className="h-4 w-24 bg-gray-200 rounded" />
-          <div className="h-4 w-20 bg-gray-200 rounded" />
-          <div className="h-4 w-20 bg-gray-200 rounded" />
-        </div>
-        <div className="flex-1 pr-10 space-y-6">
-          <div className="h-6 w-32 bg-gray-200 rounded mb-6" />
-          <div className="h-4 w-full bg-gray-200 rounded" />
-          <div className="h-4 w-full bg-gray-200 rounded" />
-          <div className="h-4 w-3/4 bg-gray-200 rounded" />
-        </div>
+      <div className="px-6 py-8 space-y-6">
+        <div className="bg-white rounded-2xl p-6 h-32 w-full" />
+        <div className="bg-white rounded-2xl p-6 h-64 w-full" />
       </div>
     </main>
   )
 }
 
 export default function MyPage() {
-  const [activeMenu, setActiveMenu] = useState('기본정보')
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(true)
+  const [activeMenu, setActiveMenu] = useState('기본정보')
+  
+  // 예시 데이터
+  const [family, setFamily] = useState([
+    { id: 1, name: '정순희', relation: '어머니' }
+  ])
 
   useEffect(() => {
-    setTimeout(() => setIsLoading(false), 1000)
+    setTimeout(() => setIsLoading(false), 800)
   }, [])
 
   if (isLoading) return <MyPageSkeleton />
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      <div className="bg-white border-b border-gray-200 px-10 py-4">
-        <h1 className="text-lg font-bold tracking-widest">MY PAGE</h1>
-      </div>
+    <main className="min-h-screen bg-gray-50 pb-24">
+      <Header title="마이페이지" subtitle="내 정보 및 관리" />
 
-      <div className="py-10 flex gap-10 pl-10">
-
-        {/* 왼쪽 사이드바 */}
-        <div className="w-48 shrink-0 flex flex-col justify-between" style={{minHeight: '400px'}}>
-          <div>
-            {['기본정보', '건강정보', '가족목록'].map((menu) => (
-              <button
-                key={menu}
-                onClick={() => setActiveMenu(menu)}
-                className={`block w-full text-left py-3 text-sm border-b border-gray-100 cursor-pointer
-                  ${activeMenu === menu
-                    ? 'font-bold text-black'
-                    : 'text-gray-400 hover:text-black'
-                  }`}
-              >
-                {menu}
-              </button>
-            ))}
-          </div>
-          <div className="space-y-2">
-            <button className="block w-full text-left py-2 text-xs text-gray-400 hover:text-black cursor-pointer">
-              로그아웃
+      <div className="max-w-3xl mx-auto px-6 py-6">
+        {/* 상단 탭 메뉴 */}
+        <div className="flex gap-6 mb-8 border-b border-gray-200 overflow-x-auto whitespace-nowrap scrollbar-hide">
+          {['기본정보', '건강정보', '가족관리'].map((menu) => (
+            <button
+              key={menu}
+              onClick={() => setActiveMenu(menu)}
+              className={`pb-3 text-sm font-bold cursor-pointer transition-colors active:scale-[0.98] transition-transform duration-150
+                ${activeMenu === menu ? 'text-blue-500 border-b-2 border-blue-500' : 'text-gray-400'}`}
+            >
+              {menu}
             </button>
-            <button className="block w-full text-left py-2 text-xs text-gray-300 hover:text-gray-500 cursor-pointer">
-              회원탈퇴
-            </button>
-          </div>
+          ))}
         </div>
 
-        {/* 오른쪽 내용 */}
-        <div className="flex-1 pr-10">
-
+        {/* 컨텐츠 영역 */}
+        <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
           {activeMenu === '기본정보' && (
-            <div>
-              <h2 className="text-lg font-bold mb-8 pb-3 border-b border-black">기본 정보</h2>
-              <div className="space-y-6">
-                <div className="flex items-center">
-                  <span className="w-32 text-sm text-gray-500">닉네임</span>
-                  <span className="text-sm">홍길동</span>
-                </div>
-                <div className="flex items-center border-t border-gray-100 pt-6">
-                  <span className="w-32 text-sm text-gray-500">이메일</span>
-                  <span className="text-sm">jw@gmail.com</span>
-                </div>
-                <div className="flex items-center border-t border-gray-100 pt-6">
-                  <span className="w-32 text-sm text-gray-500">로그인</span>
-                  <span className="text-sm">카카오</span>
+            <div className="space-y-4">
+              <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-50">
+                <div className="space-y-6">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-400 font-medium">닉네임</span>
+                    <span className="text-sm font-bold text-gray-900">홍길동</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-6 border-t border-gray-50">
+                    <span className="text-sm text-gray-400 font-medium">이메일</span>
+                    <span className="text-sm font-medium text-gray-900">jw@gmail.com</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-6 border-t border-gray-50">
+                    <span className="text-sm text-gray-400 font-medium">로그인 계정</span>
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-5 bg-yellow-400 rounded-full flex items-center justify-center text-[10px]">K</span>
+                      <span className="text-sm font-medium text-gray-900">카카오</span>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <button className="w-full border border-gray-200 py-3 rounded-xl text-gray-500 text-sm cursor-pointer hover:bg-gray-50 mt-10">
+              <button className="w-full bg-white border border-gray-200 text-gray-500 py-4 rounded-xl text-sm font-bold hover:bg-gray-50 transition-colors mt-4">
                 로그아웃
               </button>
-              <button className="w-full text-gray-300 text-xs cursor-pointer mt-3 hover:text-gray-400">
+              <button className="w-full text-gray-300 text-xs py-2 hover:text-gray-400 transition-colors">
                 회원탈퇴
               </button>
             </div>
           )}
 
           {activeMenu === '건강정보' && (
-            <div>
-              <div className="flex justify-between items-center mb-8 pb-3 border-b border-black">
-                <h2 className="text-lg font-bold">건강 정보</h2>
-                <button className="text-sm text-gray-400 hover:text-black cursor-pointer">수정</button>
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-50">
+              <div className="flex justify-between items-center mb-8">
+                <h3 className="font-bold text-gray-900">내 건강 프로필</h3>
+                <button className="text-xs text-blue-500 font-bold hover:underline">수정하기</button>
               </div>
               <div className="space-y-6">
-                <div className="flex items-center">
-                  <span className="w-32 text-sm text-gray-500">나이</span>
-                  <span className="text-sm">25세</span>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-gray-400 font-medium">나이</span>
+                  <span className="text-sm font-bold text-gray-900">25세</span>
                 </div>
-                <div className="flex items-center border-t border-gray-100 pt-6">
-                  <span className="w-32 text-sm text-gray-500">키 / 몸무게</span>
-                  <span className="text-sm">163cm / 55kg</span>
+                <div className="flex justify-between items-center pt-6 border-t border-gray-50">
+                  <span className="text-sm text-gray-400 font-medium">키 / 몸무게</span>
+                  <span className="text-sm font-bold text-gray-900">163cm / 55kg</span>
                 </div>
-                <div className="flex items-center border-t border-gray-100 pt-6">
-                  <span className="w-32 text-sm text-gray-500">기저질환</span>
-                  <span className="text-sm">고혈압</span>
+                <div className="flex justify-between items-center pt-6 border-t border-gray-50">
+                  <span className="text-sm text-gray-400 font-medium">기저질환</span>
+                  <span className="text-sm font-bold text-gray-900">고혈압</span>
                 </div>
-                <div className="flex items-center border-t border-gray-100 pt-6">
-                  <span className="w-32 text-sm text-gray-500">알레르기</span>
-                  <span className="text-sm">페니실린</span>
+                <div className="flex justify-between items-center pt-6 border-t border-gray-50">
+                  <span className="text-sm text-gray-400 font-medium">알레르기</span>
+                  <span className="text-sm font-bold text-gray-900">페니실린</span>
                 </div>
               </div>
             </div>
           )}
 
-          {activeMenu === '가족목록' && (
-            <div>
-              <div className="flex justify-between items-center mb-8 pb-3 border-b border-black">
-                <h2 className="text-lg font-bold">가족 목록</h2>
-                <button className="text-sm text-gray-400 hover:text-black cursor-pointer">+ 추가</button>
+          {activeMenu === '가족관리' && (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center mb-2 px-1">
+                <h3 className="font-bold text-gray-900">함께 관리하는 가족</h3>
+                <button className="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg font-bold hover:bg-blue-100 transition-colors">
+                  + 추가하기
+                </button>
               </div>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center py-4 border-b border-gray-100">
-                  <div>
-                    <p className="text-sm font-semibold">정순희</p>
-                    <p className="text-xs text-gray-400 mt-1">어머니</p>
+              
+              {family.length > 0 ? (
+                family.map((member) => (
+                  <div key={member.id} className="bg-white rounded-2xl p-6 shadow-sm border border-gray-50 flex justify-between items-center">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-xl font-bold text-blue-500">
+                        {member.name[0]}
+                      </div>
+                      <div>
+                        <p className="font-bold text-gray-900">{member.name}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{member.relation}</p>
+                      </div>
+                    </div>
+                    <button className="text-xs text-red-400 font-bold hover:text-red-600 px-2 py-1 transition-colors">삭제</button>
                   </div>
-                  <button className="text-xs text-red-400 hover:text-red-600 cursor-pointer">삭제</button>
-                </div>
-              </div>
+                ))
+              ) : (
+                <EmptyState 
+                  title="등록된 가족이 없어요" 
+                  message="가족의 복약도 함께 관리해보세요!" 
+                  actionLabel="가족 추가하기"
+                  onAction={() => {}}
+                />
+              )}
             </div>
           )}
-
         </div>
       </div>
 
-      {/* 하단 네비게이션 */}
-      <div className="fixed bottom-0 w-full bg-white border-t border-gray-100 flex">
-        <button onClick={() => router.push('/main')} className="flex-1 py-4 text-gray-400 text-sm">홈</button>
-        <button onClick={() => router.push('/mypage')} className="flex-1 py-4 text-blue-500 text-sm font-semibold">마이페이지</button>
-      </div>
-
+      <BottomNav />
     </main>
   )
 }
