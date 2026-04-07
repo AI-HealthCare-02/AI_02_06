@@ -31,6 +31,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-dateutil" },
     { name = "redis" },
+    { name = "requests" },
     { name = "tomlkit" },
     { name = "tzdata" },
 ]
@@ -78,6 +79,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.12.0" },
     { name = "python-dateutil", specifier = ">=2.9.0.post0" },
     { name = "redis", specifier = ">=7.1.0" },
+    { name = "requests", specifier = ">=2.33.1" },
     { name = "tomlkit", specifier = ">=0.14.0" },
     { name = "tzdata", specifier = ">=2024.1" },
 ]

@@ -120,16 +120,22 @@ class OAuthService:
             )
             is_new_user = True
         
-        # 2. 본인(SELF) 프로필 자동 생성 체크
-        from app.repositories.profile_repository import ProfileRepository
-        profile_repo = ProfileRepository()
-        self_profile = await profile_repo.get_self_profile(account.id)
+        # 2. 본인(SELF) 프로필 자동 생성 체크 (모델 직접 사용)
+        from app.models.profiles import Profile, RelationType
+        
+        self_profile = await Profile.filter(
+            account_id=account.id, 
+            relation_type=RelationType.SELF,
+            deleted_at__isnull=True
+        ).first()
         
         if not self_profile:
-            await profile_repo.create(
+            from uuid import uuid4
+            await Profile.create(
+                id=uuid4(),
                 account_id=account.id,
                 name=f"{nickname}(본인)",
-                relation_type="SELF",
+                relation_type=RelationType.SELF,
                 health_survey={
                     "age": 25,
                     "gender": "MALE",

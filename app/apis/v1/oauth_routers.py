@@ -175,8 +175,11 @@ async def kakao_callback(
         )
 
     # state 검증 (CSRF 방지) - BE에서 생성한 서명된 state 검증
-    if not state or not _verify_state(state):
-        if config.ENV == Env.PROD:
+    # [DEV ONLY] 개발자용 즉시 로그인 버튼 클릭 시에만 검증을 건너뜁니다.
+    is_dev_login = config.ENV != Env.PROD and code == "dev_test_login"
+    
+    if not is_dev_login:
+        if not state or not _verify_state(state):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
@@ -184,8 +187,6 @@ async def kakao_callback(
                     "error_description": "유효하지 않거나 만료된 state입니다.",
                 },
             )
-        else:
-            print("⚠️ [DEBUG] LOCAL 환경이므로 state 검증 실패를 무시하고 진행합니다.")
 
     # 클라이언트 IP 추출 (Rate limiting용, 프록시 고려)
     client_ip = _get_client_ip(request)
