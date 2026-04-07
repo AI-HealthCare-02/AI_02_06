@@ -36,6 +36,7 @@ nul
 docs/
 
 # 보안 키
-downforce-key.pemnode_modules/
+downforce-key.pem
+node_modules/
 package-lock.json
 package.json
