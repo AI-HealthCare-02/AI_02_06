@@ -61,7 +61,7 @@ export default function LoginPage() {
         </div>
 
         {/* 네이버 버튼 */}
-        <button className="w-full bg-green-500 text-white py-3 rounded-xl font-semibold text-sm cursor-pointer hover:bg-green-600">
+        <button className="w-full bg-green-500 text-white py-3 rounded-xl font-semibold text-sm cursor-pointer hover:bg-green-600 active:scale-[0.98] transition-transform duration-150">
           네이버로 로그인
         </button>
 
