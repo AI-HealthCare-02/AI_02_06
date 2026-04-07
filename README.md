@@ -22,8 +22,13 @@
 .
 ├── ai_worker/          # AI 모델 추론 및 학습 관련 코드 (Worker)
 │   ├── core/           # 워커 설정 및 로거
+│   ├── data/           # 약품 데이터 JSON (medicines.json)
 │   ├── models/         # AI 모델 파일 보관 (PyTorch 등)
 │   ├── tasks/          # 실제 처리할 작업 정의
+│   ├── utils/          # OCR, 청킹, RAG 유틸리티
+│   │   ├── ocr.py      # CLOVA OCR 호출 및 약 이름 추출
+│   │   ├── chunker.py  # JSON → 텍스트 청크 변환
+│   │   └── rag.py      # OpenAI 기반 복약 가이드 생성
 │   └── main.py         # 워커 진입점
 ├── app/                # FastAPI 서버 코드
 │   ├── apis/           # API 라우터 (v1 버전 관리)
@@ -183,10 +188,74 @@ chmod +x scripts/certbot.sh
 # 정적 타입 검사 (Mypy)
 ./scripts/ci/check_mypy.sh
 ```
+#세준 04-06일 12시 13분
+---
+
+##  RAG 파이프라인 (AI Worker)
+
+오늘 추가된 파일들로 구성된 복약 가이드 생성 흐름입니다.
+
+```
+[약 봉투 이미지]
+      ↓
+ ocr.py (CLOVA OCR 호출)
+      ↓
+ extract_medicine_names() (약 이름 추출)
+      ↓
+ chunker.py (medicines.json → 텍스트 청크)
+      ↓
+ rag.py (OpenAI GPT로 복약 가이드 생성)
+      ↓
+[최종 답변 반환]
+```
+
+### 추가된 파일 설명
+
+| 파일 | 설명 |
+|------|------|
+| `ai_worker/data/medicines.json` | 50개 약품 데이터 (성분, 용도, 면책사항, 병용금기 약물/음식) |
+| `ai_worker/utils/ocr.py` | CLOVA OCR API 호출, 경로 탐색 공격 방지, 약 이름 매칭 |
+| `ai_worker/utils/chunker.py` | JSON 데이터를 약품별 텍스트 청크 리스트로 변환 |
+| `ai_worker/utils/rag.py` | OpenAI API로 복약 가이드 생성 (개발: gpt-4o-mini / 배포: gpt-4o) |
+
+### 필요한 환경 변수
+
+`envs/.local.env`에 아래 항목을 추가하세요.
+
+```env
+CLOVA_OCR_INVOKE_URL=<네이버 콘솔 URL>
+CLOVA_OCR_SECRET_KEY=<네이버 콘솔 Key>
+OPENAI_API_KEY=<OpenAI API Key>
+APP_ENV=dev         # 배포 시 prod로 변경
+ALLOWED_IMAGE_DIR=/tmp/ocr_images  # OCR 이미지 허용 경로
+```
+
+>  `.env` 파일은 `.gitignore`에 포함되어 있어 Git에 업로드되지 않습니다. 절대 키를 코드에 직접 입력하지 마세요.
+
+### 사용 예시
+
+```python
+from ai_worker.utils.ocr import call_clova_ocr, extract_text_from_ocr, extract_medicine_names
+from ai_worker.utils.chunker import DataChunker
+from ai_worker.utils.rag import RAGGenerator
+
+# 1. OCR로 약 이름 추출
+ocr_result = call_clova_ocr("/tmp/ocr_images/prescription.jpg")
+ocr_text = extract_text_from_ocr(ocr_result)
+
+# 2. 약품 데이터 로드 및 매칭
+data = DataChunker.load_json("ai_worker/data/medicines.json")
+matched = extract_medicine_names(ocr_text, data)
+
+# 3. 청크 변환 후 복약 가이드 생성
+chunks = DataChunker.json_to_chunks(matched)
+guide = RAGGenerator().generate_guide(matched, chunks)
+print(guide)
+```
 
 ---
 
-## 📝 개발 가이드
+##  개발 가이드
 
 - **API 추가**: `app/apis/v1/` 아래에 새로운 라우터 파일을 생성하고 `app/apis/v1/__init__.py`에 등록하세요.
 - **DB 모델 추가**: `app/models/`에 Tortoise 모델을 정의하고 `app/db/databases.py`의 `MODELS` 리스트에 추가하세요.

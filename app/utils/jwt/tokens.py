@@ -1,10 +1,9 @@
 from calendar import timegm
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from app.core import config
-from app.models.users import User
 from app.utils.jwt.exceptions import ExpiredTokenError, TokenBackendError, TokenBackendExpiredError, TokenError
 from app.utils.jwt.state import token_backend
 
@@ -74,12 +73,6 @@ class Token:
 
     def set_jti(self) -> None:
         self.payload["jti"] = uuid4().hex
-
-    @classmethod
-    def for_user(cls, user: User) -> Self:
-        token = cls()
-        token["user_id"] = user.id
-        return token
 
 
 class AccessToken(Token):

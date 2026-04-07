@@ -6,7 +6,6 @@ from app.core import config
 
 TORTOISE_APP_MODELS = [
     "aerich.models",
-    "app.models.users",
     "app.models.accounts",
     "app.models.refresh_tokens",
     "app.models.profiles",

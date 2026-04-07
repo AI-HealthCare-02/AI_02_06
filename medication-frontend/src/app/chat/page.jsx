@@ -1,6 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Header from '../../components/Header'
 
 export default function ChatPage() {
   const router = useRouter()
@@ -34,42 +35,30 @@ export default function ChatPage() {
 
   return (
     <main className="min-h-screen bg-gray-50 flex flex-col">
-
-      {/* 상단 헤더 */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-4">
-        <button
-          onClick={() => router.push('/main')}
-          className="text-gray-400 hover:text-black cursor-pointer text-xl">
-          ←
-        </button>
-        <div>
-          <h1 className="font-bold">복약 AI 상담</h1>
-          <p className="text-xs text-gray-400">약 복용 방법, 부작용 등 무엇이든 물어보세요</p>
-        </div>
-      </div>
+      <Header title="복약 AI 상담" subtitle="무엇이든 물어보세요" showBack={true} />
 
       {/* 채팅 영역 */}
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 pb-32">
         {messages.map((msg, i) => (
-          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-xs px-4 py-3 rounded-2xl text-sm
+          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-1 duration-300`}>
+            <div className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm shadow-sm
               ${msg.role === 'user'
-                ? 'bg-blue-500 text-white rounded-br-sm'
-                : 'bg-white shadow-sm text-gray-800 rounded-bl-sm'
+                ? 'bg-blue-500 text-white rounded-br-none'
+                : 'bg-white text-gray-800 rounded-bl-none border border-gray-100'
               }`}>
               {msg.content}
             </div>
           </div>
         ))}
 
-        {/* 로딩 점 애니메이션 */}
+        {/* 로딩 애니메이션 */}
         {isLoading && (
-          <div className="flex justify-start">
-            <div className="bg-white shadow-sm px-4 py-3 rounded-2xl rounded-bl-sm">
-              <div className="flex gap-1">
-                <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
-                <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
-                <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
+          <div className="flex justify-start animate-in fade-in duration-300">
+            <div className="bg-white border border-gray-100 shadow-sm px-4 py-4 rounded-2xl rounded-bl-none">
+              <div className="flex gap-1.5">
+                <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
+                <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
+                <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
               </div>
             </div>
           </div>
@@ -79,28 +68,41 @@ export default function ChatPage() {
       </div>
 
       {/* 입력창 - 하단 고정 */}
-      <div className="fixed bottom-0 w-full bg-white border-t border-gray-100 px-6 py-4">
-        <div className="flex gap-2 items-center">
-          <button className="w-10 h-10 bg-gray-100 rounded-full text-gray-400 text-xl cursor-pointer hover:bg-gray-200 flex items-center justify-center shrink-0">
-            +
+      <div className="fixed bottom-0 w-full bg-white border-t border-gray-100 px-6 py-5 z-40">
+        <div className="max-w-3xl mx-auto flex gap-3 items-center">
+          className="w-11 h-11 bg-gray-50 text-gray-400 rounded-full flex items-center justify-center shrink-0 hover:bg-gray-100 transition-all border border-gray-100 cursor-pointer active:scale-[0.98] transition-transform duration-150"
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 12h14m-7-7v14"/>
+            </svg>
           </button>
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyUp={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSend() } }}
-            placeholder="메시지를 입력하세요"
-            className="flex-1 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-300"
-          />
+          <div className="flex-1 relative">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyUp={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSend() } }}
+              placeholder="메시지를 입력하세요"
+              className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-5 py-3 text-sm outline-none focus:border-blue-300 focus:bg-white transition-all"
+            />
+          </div>
           <button
             onClick={handleSend}
-            disabled={isLoading}
-            className="bg-blue-500 text-white px-5 py-3 rounded-xl text-sm font-semibold cursor-pointer hover:bg-blue-600 shrink-0 disabled:opacity-50">
-            전송
+            disabled={isLoading || !input.trim()}
+            className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 transition-all shadow-sm
+              ${isLoading || !input.trim()
+                ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
+                : 'bg-blue-500 text-white hover:bg-blue-600 active:scale-90 cursor-pointer'
+              }`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m5 12 14-7-3 7 3 7-14-7Z"/><path d="M5 12h11"/>
+            </svg>
           </button>
         </div>
       </div>
-
     </main>
+  )
+}
+main>
   )
 }

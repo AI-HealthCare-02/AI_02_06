@@ -9,8 +9,10 @@ import axios from 'axios'
 import { parseApiError, ERROR_CODE_MESSAGES, HTTP_STATUS_MESSAGES } from './errors'
 
 // 모든 API 요청의 기본 설정
+// Docker: Nginx 프록시 사용 (빈 문자열)
+// 로컬: 직접 FastAPI 호출 (http://localhost:8000)
 const api = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: process.env.NEXT_PUBLIC_API_URL || '',
   withCredentials: true,  // 쿠키 자동 포함 (access_token, refresh_token)
   timeout: 10000,         // 10초 타임아웃
 })
