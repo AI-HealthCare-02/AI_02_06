@@ -14,8 +14,10 @@ export default function ChallengePage() {
   const [ongoing, setOngoing] = useState([])
   const [processingIds, setProcessingIds] = useState([]) // 처리 중인 챌린지 ID 목록
 
+
   // 추천 챌린지 템플릿 (서버에서 가져올 수도 있음)
   const recommended = [
+
     { id: 'tpl_1', icon: '🚭', title: '금연 챌린지', desc: '30일 동안 금연해보세요', days: 30, difficulty: '어려움', color: 'bg-red-50', textColor: 'text-red-500' },
     { id: 'tpl_2', icon: '🏃', title: '매일 걷기', desc: '매일 30분씩 걸어보세요', days: 21, difficulty: '보통', color: 'bg-green-50', textColor: 'text-green-500' },
     { id: 'tpl_3', icon: '💊', title: '복약 완료 챌린지', desc: '7일 연속 복약을 완료해보세요', days: 7, difficulty: '쉬움', color: 'bg-blue-50', textColor: 'text-blue-500' },

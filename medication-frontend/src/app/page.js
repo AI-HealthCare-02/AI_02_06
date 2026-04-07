@@ -1,15 +1,16 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { Camera, Pill, MessageCircle } from 'lucide-react'
 
 function SlideShow({ router }) {
   const [current, setCurrent] = useState(0)
 
   const slides = [
-    { icon: '👴', title: '어르신 복약 관리', desc: '복잡한 복약 일정을 쉽게 관리해요', bg: 'bg-blue-50' },
-    { icon: '👨‍👩‍👧', title: '가족 건강 케어', desc: '가족의 복약을 한 곳에서 관리해요', bg: 'bg-green-50' },
-    { icon: '💊', title: '만성질환 관리', desc: '꾸준한 복약 습관을 만들어드려요', bg: 'bg-purple-50' },
-    { icon: '🚀', title: '지금 바로 시작해보세요!', desc: '카카오 또는 네이버로 간편하게 시작해요', bg: 'bg-yellow-50', cta: true },
+    { title: '어르신 복약 관리', desc: '복잡한 복약 일정을 쉽게 관리해요', bg: 'bg-blue-50' },
+    { title: '가족 건강 케어', desc: '가족의 복약을 한 곳에서 관리해요', bg: 'bg-green-50' },
+    { title: '만성질환 관리', desc: '꾸준한 복약 습관을 만들어드려요', bg: 'bg-purple-50' },
+    { title: '지금 바로 시작해보세요!', desc: '카카오 또는 네이버로 간편하게 시작해요', bg: 'bg-yellow-50', cta: true },
   ]
 
   useEffect(() => {
@@ -24,7 +25,6 @@ function SlideShow({ router }) {
   return (
     <div className="text-center">
       <div className={`${slide.bg} rounded-2xl p-16 transition-all duration-500`}>
-        <p className="text-6xl mb-6">{slide.icon}</p>
         <h3 className="text-2xl font-bold mb-3">{slide.title}</h3>
         <p className="text-gray-400 mb-6">{slide.desc}</p>
         {slide.cta && (
@@ -57,7 +57,7 @@ export default function LandingPage() {
 
       {/* 상단 네비게이션 */}
       <div className="flex justify-between items-center px-10 py-4 border-b border-gray-100">
-        <h1 className="text-xl font-bold">💊 Downforce</h1>
+        <h1 className="text-xl font-bold">Downforce</h1>
         <button
           onClick={() => router.push('/login')}
           className="bg-blue-500 text-white px-6 py-2 rounded-xl text-sm font-semibold cursor-pointer hover:bg-blue-600">
@@ -93,17 +93,23 @@ export default function LandingPage() {
         {/* 오른쪽 카드 */}
         <div className="flex-1 space-y-3">
           <div className="bg-blue-50 rounded-2xl p-6">
-            <p className="text-2xl mb-2">📷</p>
+            <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center mb-3">
+              <Camera size={20} className="text-blue-500" />
+            </div>
             <h3 className="font-bold mb-1">처방전 자동 인식</h3>
             <p className="text-gray-400 text-sm">사진 한 장으로 약품 정보를 자동 등록</p>
           </div>
           <div className="bg-green-50 rounded-2xl p-6">
-            <p className="text-2xl mb-2">💊</p>
+            <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center mb-3">
+              <Pill size={20} className="text-green-500" />
+            </div>
             <h3 className="font-bold mb-1">복약 알림</h3>
             <p className="text-gray-400 text-sm">복약 시간을 놓치지 않도록 알려드려요</p>
           </div>
           <div className="bg-purple-50 rounded-2xl p-6">
-            <p className="text-2xl mb-2">🤖</p>
+            <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center mb-3">
+              <MessageCircle size={20} className="text-purple-500" />
+            </div>
             <h3 className="font-bold mb-1">AI 복약 상담</h3>
             <p className="text-gray-400 text-sm">약에 대한 궁금증을 AI에게 물어보세요</p>
           </div>
