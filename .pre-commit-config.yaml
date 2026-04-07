@@ -15,3 +15,10 @@ repos:
         types: [python]
         require_serial: true
         pass_filenames: true
+      - id: bandit
+        name: Bandit Security Check
+        entry: uv run bandit -c pyproject.toml -r app/ -lll
+        language: system
+        types: [python]
+        require_serial: true
+        pass_filenames: false
