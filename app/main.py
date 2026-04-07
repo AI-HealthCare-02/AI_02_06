@@ -6,6 +6,7 @@ from tortoise.exceptions import BaseORMException, DBConnectionError
 
 from app.apis.v1 import v1_routers
 from app.db.databases import initialize_tortoise
+from app.middlewares.rate_limit import RateLimitMiddleware
 from app.middlewares.security import SecurityMiddleware
 
 app = FastAPI(
@@ -79,8 +80,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 보안 미들웨어 (입력값 검증 + CSP 헤더)
+# 보안 미들웨어 (입력값 검증 + 보안 헤더)
 app.add_middleware(SecurityMiddleware)
+
+# Rate Limiting 미들웨어 (IP 기반)
+app.add_middleware(RateLimitMiddleware)
 
 initialize_tortoise(app)
 
