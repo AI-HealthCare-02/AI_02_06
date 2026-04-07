@@ -1,47 +1,116 @@
-import asyncio
+import json
+import os
+import shutil
+import time
+import uuid
+from pathlib import Path
 from typing import Any
 
+import requests
 from fastapi import UploadFile
+from openai import OpenAI, OpenAIError
+
+_UPLOAD_DIR = Path(os.environ.get("ALLOWED_IMAGE_DIR", "/tmp/ocr_images"))
+_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+_MEDICINES_PATH = Path(__file__).parent.parent.parent / "ai_worker" / "data" / "medicines.json"
+
+
+def _load_medicines() -> list[dict[str, Any]]:
+    with open(_MEDICINES_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _call_clova_ocr(image_path: Path) -> str:
+    invoke_url = os.environ.get("CLOVA_OCR_INVOKE_URL")
+    secret_key = os.environ.get("CLOVA_OCR_SECRET_KEY")
+    if not invoke_url or not secret_key:
+        raise ValueError("OCR 처리 실패: CLOVA_OCR 환경변수가 설정되지 않았습니다.")
+
+    ext = image_path.suffix.lstrip(".").lower()
+    request_json = {
+        "images": [{"format": ext, "name": image_path.stem}],
+        "requestId": str(uuid.uuid4()),
+        "version": "V2",
+        "timestamp": int(round(time.time() * 1000)),
+    }
+    with open(image_path, "rb") as f:
+        response = requests.post(
+            invoke_url,
+            headers={"X-OCR-SECRET": secret_key},
+            data={"message": json.dumps(request_json).encode("UTF-8")},
+            files=[("file", f)],
+            timeout=30,
+        )
+    response.raise_for_status()
+    fields = response.json()["images"][0]["fields"]
+    return " ".join(field["inferText"] for field in fields)
+
+
+def _generate_guide(medicines: list[dict[str, Any]]) -> str:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY 환경변수가 설정되지 않았습니다.")
+
+    env = os.environ.get("APP_ENV", "dev")
+    model = "gpt-4o" if env == "prod" else "gpt-4o-mini"
+    client = OpenAI(api_key=api_key)
+
+    medicines_text = "\n".join(f"- {m['name']} ({m['ingredient']})" for m in medicines)
+    context_chunks = []
+    for m in medicines:
+        context_chunks.append(
+            f"약 이름: {m['name']}\n성분: {m['ingredient']}\n용도: {m['usage']}\n"
+            f"면책사항: {m['disclaimer']}\n병용금기 약물: {', '.join(m['contraindicated_drugs'])}\n"
+            f"금기 음식: {', '.join(m['contraindicated_foods'])}"
+        )
+    context_text = "\n---\n".join(context_chunks)
+
+    prompt = f"""당신은 전문 약사 AI입니다. 아래 환자 복용 약물과 참고 데이터를 바탕으로
+친절하고 상세한 복약 가이드를 작성해주세요.
+
+[환자 복용 약물]
+{medicines_text}
+
+[참고 데이터]
+{context_text}
+
+지침:
+1. 병용 금기 성분과 음식을 강조해서 알려주세요.
+2. 복용 시 주의사항(면책사항)을 포함해주세요.
+3. 마지막에 반드시 다음 문구를 포함하세요:
+   "⚠️ 이 안내는 참고용이며, 정확한 진단과 처방은 반드시 전문 의료인과 상의하십시오."
+"""
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+        )
+        return response.choices[0].message.content or ""
+    except OpenAIError as e:
+        raise ValueError(f"OpenAI API 호출 실패: {e}") from e
 
 
 class OCRService:
-    """
-    OCR (광학 문자 인식) 서비스
-    처방전 및 약봉투 이미지에서 약품 정보를 추출합니다.
-    """
+    def __init__(self) -> None:
+        self._medicines = _load_medicines()
 
     async def extract_text_from_image(self, file: UploadFile) -> dict[str, Any]:
-        """
-        이미지 파일에서 텍스트 및 약품 정보를 추출합니다.
-        현재는 Mock 데이터를 반환하며, 추후 AI 모델(Tesseract, Google Vision 등) 연동 예정입니다.
-        """
-        # 파일 읽기 시뮬레이션
-        _content = await file.read()
-        
-        # 실제 AI 모델 추론 처리를 위한 지연 시간 시뮬레이션 (1초)
-        await asyncio.sleep(1)
+        image_path = _UPLOAD_DIR / f"{uuid.uuid4()}_{file.filename}"
+        with image_path.open("wb") as f:
+            shutil.copyfileobj(file.file, f)
 
-        # Mock 추출 결과
-        mock_result = {
-            "status": "success",
-            "filename": file.filename,
-            "detected_items": [
-                {
-                    "medicine_name": "타이레놀정 500mg",
-                    "dose_per_intake": "1정",
-                    "intake_times": ["08:00", "13:00", "18:00"],
-                    "total_days": 3,
-                    "instruction": "식후 30분 복용"
-                },
-                {
-                    "medicine_name": "아모디핀정",
-                    "dose_per_intake": "0.5정",
-                    "intake_times": ["08:00"],
-                    "total_days": 30,
-                    "instruction": "아침 식사 전 복용"
-                }
-            ],
-            "raw_text": "추출된 전체 텍스트 내역 (OCR 원본 데이터)..."
-        }
+        try:
+            ocr_text = _call_clova_ocr(image_path)
+            if not ocr_text.strip():
+                raise ValueError("이미지에서 텍스트를 추출할 수 없습니다.")
 
-        return mock_result
+            matched = [m for m in self._medicines if m["name"] in ocr_text]
+            if not matched:
+                raise ValueError("처방전에서 인식된 약 정보가 없습니다. 사진을 다시 찍어주세요.")
+
+            guide = _generate_guide(matched)
+            return {"status": "success", "filename": file.filename, "guide": guide}
+        finally:
+            image_path.unlink(missing_ok=True)

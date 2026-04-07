@@ -55,5 +55,8 @@ async def upload_image_for_ocr(
             }
         )
 
-    result = await ocr_service.extract_text_from_image(file)
-    return result
+    try:
+        result = await ocr_service.extract_text_from_image(file)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
