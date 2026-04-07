@@ -1,7 +1,7 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "react-hot-toast";
 import "./globals.css";
-import Navigation from '@/components/Navigation'
+import Navigation from '../components/Navigation'
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
