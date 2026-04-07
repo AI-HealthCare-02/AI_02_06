@@ -101,7 +101,7 @@ class OAuthService:
                 ) from e
 
     async def dev_test_login(self) -> tuple[Account, bool]:
-        """개발용 즉시 로그인 (테스트유저 고정)"""
+        """개발용 즉시 로그인 (테스트유저 계정 + 본인 프로필 자동 생성)"""
         nickname = "테스트유저"
         provider_account_id = "test_dev_id_12345"
 
@@ -112,12 +112,31 @@ class OAuthService:
 
         is_new_user = False
         if not account:
+            # 1. 계정 생성
             account = await self.account_repo.create(
                 provider=AuthProvider.KAKAO,
                 provider_account_id=provider_account_id,
                 nickname=nickname,
             )
             is_new_user = True
+        
+        # 2. 본인(SELF) 프로필 자동 생성 체크
+        from app.repositories.profile_repository import ProfileRepository
+        profile_repo = ProfileRepository()
+        self_profile = await profile_repo.get_self_profile(account.id)
+        
+        if not self_profile:
+            await profile_repo.create(
+                account_id=account.id,
+                name=f"{nickname}(본인)",
+                relation_type="SELF",
+                health_survey={
+                    "age": 25,
+                    "gender": "MALE",
+                    "conditions": ["테스트"],
+                    "allergies": ["없음"]
+                }
+            )
         
         return account, is_new_user
 
