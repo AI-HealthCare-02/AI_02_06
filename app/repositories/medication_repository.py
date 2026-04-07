@@ -27,6 +27,15 @@ class MedicationRepository:
             deleted_at__isnull=True,
         ).all()
 
+    async def get_all_by_profiles(self, profile_ids: list[UUID]) -> list[Medication]:
+        """여러 프로필의 모든 약품 조회"""
+        if not profile_ids:
+            return []
+        return await Medication.filter(
+            profile_id__in=profile_ids,
+            deleted_at__isnull=True,
+        ).all()
+
     async def get_active_by_profile(self, profile_id: UUID) -> list[Medication]:
         """프로필의 현재 복용 중인 약품 조회"""
         return await Medication.filter(

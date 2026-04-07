@@ -5,7 +5,9 @@ from fastapi.responses import ORJSONResponse
 from tortoise.exceptions import BaseORMException, DBConnectionError
 
 from app.apis.v1 import v1_routers
+from app.core.config import Env, config
 from app.db.databases import initialize_tortoise
+from app.middlewares.rate_limit import RateLimitMiddleware
 from app.middlewares.security import SecurityMiddleware
 
 app = FastAPI(
@@ -68,19 +70,31 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 # --- 미들웨어 설정 ---
 
-# CORS 설정 (운영 도메인 없이 localhost 사용)
-origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+# CORS 설정 (환경별 분기)
+if config.ENV == Env.PROD:
+    # 운영 환경: 엄격한 설정
+    cors_origins = [config.FRONTEND_URL]
+    cors_methods = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
+    cors_headers = ["Content-Type", "Authorization"]
+else:
+    # 로컬/개발 환경: 느슨한 설정
+    cors_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    cors_methods = ["*"]
+    cors_headers = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=cors_origins,
     allow_credentials=True,  # 쿠키(refresh_token) 전송 허용
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=cors_methods,
+    allow_headers=cors_headers,
 )
 
-# 보안 미들웨어 (입력값 검증 + CSP 헤더)
+# 보안 미들웨어 (입력값 검증 + 보안 헤더)
 app.add_middleware(SecurityMiddleware)
+
+# Rate Limiting 미들웨어 (IP 기반)
+app.add_middleware(RateLimitMiddleware)
 
 initialize_tortoise(app)
 

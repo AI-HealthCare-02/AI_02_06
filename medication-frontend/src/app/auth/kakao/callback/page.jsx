@@ -1,5 +1,5 @@
 'use client'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import api, { parseApiError, showError } from '../../../../lib/api'
 
@@ -52,6 +52,7 @@ function MainSkeleton() {
 export default function KakaoCallbackPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const isProcessing = useRef(false)
 
   useEffect(() => {
     const handleCallback = async () => {
@@ -60,6 +61,15 @@ export default function KakaoCallbackPage() {
       const state = searchParams.get('state')
       const errorParam = searchParams.get('error')
       const errorDescription = searchParams.get('error_description')
+
+      // searchParams가 아직 로드되지 않은 경우 대기 (Next.js hydration)
+      if (!code && !errorParam) {
+        return
+      }
+
+      // 중복 실행 방지 (React 18 Strict Mode, 브라우저 캐시 등)
+      if (isProcessing.current) return
+      isProcessing.current = true
 
       // 에러 발생 시 Toast + 로그인 페이지로 리다이렉트
       const handleError = (message) => {
@@ -73,22 +83,16 @@ export default function KakaoCallbackPage() {
         return
       }
 
-      // code가 없는 경우
-      if (!code) {
-        handleError('인가 코드가 없습니다.')
-        return
-      }
-
-      // 2. state 검증 (CSRF 방지)
-      const savedState = sessionStorage.getItem('oauth_state')
+      // 2. state 검증 (CSRF 방지) - localStorage 사용 (모든 탭에서 공유)
+      const savedState = localStorage.getItem('oauth_state')
       if (!savedState || savedState !== state) {
-        sessionStorage.removeItem('oauth_state')
+        localStorage.removeItem('oauth_state')
         handleError('유효하지 않은 요청입니다.')
         return
       }
 
-      // state 사용 완료 후 삭제
-      sessionStorage.removeItem('oauth_state')
+      // state 사용 완료 후 삭제 (재사용 방지)
+      localStorage.removeItem('oauth_state')
 
       try {
         // 3. BE에 인가 코드 전달하여 로그인 처리

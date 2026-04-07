@@ -27,6 +27,15 @@ class ChallengeRepository:
             deleted_at__isnull=True,
         ).all()
 
+    async def get_all_by_profiles(self, profile_ids: list[UUID]) -> list[Challenge]:
+        """여러 프로필의 모든 챌린지 조회"""
+        if not profile_ids:
+            return []
+        return await Challenge.filter(
+            profile_id__in=profile_ids,
+            deleted_at__isnull=True,
+        ).all()
+
     async def get_active_by_profile(self, profile_id: UUID) -> list[Challenge]:
         """프로필의 진행 중인 챌린지 조회"""
         return await Challenge.filter(

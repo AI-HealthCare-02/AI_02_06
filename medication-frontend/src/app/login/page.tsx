@@ -15,7 +15,8 @@ export default function LoginPage() {
       const { client_id, redirect_uri, authorize_url, state } = data
 
       // 2. BE에서 받은 state 저장 (CSRF 방지)
-      sessionStorage.setItem('oauth_state', state)
+      // localStorage 사용 (sessionStorage는 탭별로 독립적이라 새 탭에서 문제 발생)
+      localStorage.setItem('oauth_state', state)
 
       // 3. 카카오(Mock) 인증 페이지로 리다이렉트
       const params = new URLSearchParams({

@@ -9,7 +9,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 
+from app.dependencies.security import get_current_account
 from app.dtos.medication import MedicationCreate, MedicationResponse, MedicationUpdate
+from app.models.accounts import Account
 from app.services.medication_service import MedicationService
 
 router = APIRouter(prefix="/medications", tags=["Medications"])
@@ -20,6 +22,7 @@ def get_medication_service() -> MedicationService:
 
 
 MedicationServiceDep = Annotated[MedicationService, Depends(get_medication_service)]
+CurrentAccount = Annotated[Account, Depends(get_current_account)]
 
 
 @router.post(
@@ -30,10 +33,11 @@ MedicationServiceDep = Annotated[MedicationService, Depends(get_medication_servi
 )
 async def create_medication(
     data: MedicationCreate,
+    current_account: CurrentAccount,
     service: MedicationServiceDep,
 ):
     """새로운 약품을 등록합니다."""
-    medication = await service.create_medication(data.profile_id, data)
+    medication = await service.create_medication_with_owner_check(data.profile_id, current_account.id, data)
     return MedicationResponse.model_validate(medication)
 
 
@@ -43,20 +47,21 @@ async def create_medication(
     summary="약품 목록 조회",
 )
 async def list_medications(
+    current_account: CurrentAccount,
     service: MedicationServiceDep,
     profile_id: UUID | None = None,
     active_only: bool = False,
 ):
     """약품 목록을 조회합니다. 프로필 ID로 필터링이 가능합니다."""
     if profile_id:
+        # 프로필 소유권 검증 후 조회
         if active_only:
-            medications = await service.get_active_medications(profile_id)
+            medications = await service.get_active_medications_with_owner_check(profile_id, current_account.id)
         else:
-            medications = await service.get_medications_by_profile(profile_id)
+            medications = await service.get_medications_by_profile_with_owner_check(profile_id, current_account.id)
     else:
-        from app.models.medication import Medication
-
-        medications = await Medication.filter(deleted_at__isnull=True).all()
+        # 계정의 모든 프로필에 해당하는 약품 조회
+        medications = await service.get_medications_by_account(current_account.id)
     return [MedicationResponse.model_validate(med) for med in medications]
 
 
@@ -67,10 +72,11 @@ async def list_medications(
 )
 async def get_medication(
     medication_id: UUID,
+    current_account: CurrentAccount,
     service: MedicationServiceDep,
 ):
     """특정 약품의 상세 정보를 조회합니다."""
-    medication = await service.get_medication(medication_id)
+    medication = await service.get_medication_with_owner_check(medication_id, current_account.id)
     return MedicationResponse.model_validate(medication)
 
 
@@ -82,10 +88,11 @@ async def get_medication(
 async def update_medication(
     medication_id: UUID,
     data: MedicationUpdate,
+    current_account: CurrentAccount,
     service: MedicationServiceDep,
 ):
     """약품 정보를 수정합니다."""
-    medication = await service.update_medication(medication_id, data)
+    medication = await service.update_medication_with_owner_check(medication_id, current_account.id, data)
     return MedicationResponse.model_validate(medication)
 
 
@@ -96,8 +103,9 @@ async def update_medication(
 )
 async def delete_medication(
     medication_id: UUID,
+    current_account: CurrentAccount,
     service: MedicationServiceDep,
 ):
     """약품을 삭제합니다."""
-    await service.delete_medication(medication_id)
+    await service.delete_medication_with_owner_check(medication_id, current_account.id)
     return None
