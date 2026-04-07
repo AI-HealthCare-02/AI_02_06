@@ -30,7 +30,7 @@ function SlideShow({ router }) {
         {slide.cta && (
           <button
             onClick={() => router.push('/login')}
-            className="bg-blue-500 text-white px-8 py-3 rounded-xl font-semibold cursor-pointer hover:bg-blue-600">
+            className="bg-blue-500 text-white px-8 py-3 rounded-xl font-semibold cursor-pointer hover:bg-blue-600 active:scale-[0.98] transition-transform duration-150">
             시작하기 →
           </button>
         )}

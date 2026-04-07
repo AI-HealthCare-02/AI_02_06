@@ -1,9 +1,16 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Header from '../../components/Header'
 
 export default function SurveyPage() {
   const router = useRouter()
+
+  const handleCancel = () => {
+    if (window.confirm('작성 중인 내용이 사라집니다. 정말 나가시겠습니까?')) {
+      router.push('/main')
+    }
+  }
 
   const [form, setForm] = useState({
     age: '',
@@ -22,74 +29,87 @@ export default function SurveyPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-50 p-10">
+    <main className="min-h-screen bg-gray-50 pb-12">
+      <Header 
+        title="건강 정보 입력" 
+        subtitle="맞춤 안내를 위한 기본 정보" 
+        showBack={true} 
+        onBack={handleCancel}
+      />
 
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-2xl font-bold mb-2">건강 정보 입력</h1>
-        <p className="text-gray-400 text-sm mb-8">맞춤 복약 안내를 위해 건강 정보를 입력해주세요</p>
-
-        {/* 기본 정보 - 2열 그리드 */}
-        <div className="bg-white rounded-2xl shadow-sm p-8 mb-4">
-          <h2 className="font-bold mb-6 pb-3 border-b border-gray-100">기본 정보</h2>
-          <div className="grid grid-cols-2 gap-6">
-            <div>
-              <label className="text-gray-500 text-sm">나이</label>
-              <input type="number" placeholder="나이를 입력하세요"
-                value={form.age}
-                onChange={(e) => setForm({...form, age: e.target.value})}
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-sm"
-              />
-            </div>
-            <div>
-              <label className="text-gray-500 text-sm">성별</label>
-              <div className="flex gap-3 mt-1">
-                {['MALE', 'FEMALE'].map((g) => (
-                  <button key={g}
-                    onClick={() => setForm({...form, gender: g})}
-                    className={`flex-1 py-3 rounded-xl text-sm font-semibold cursor-pointer border
-                      ${form.gender === g
-                        ? 'bg-blue-500 text-white border-blue-500'
-                        : 'bg-white text-gray-400 border-gray-200'
-                      }`}
-                  >
-                    {g === 'MALE' ? '남성' : '여성'}
-                  </button>
-                ))}
+      <div className="max-w-3xl mx-auto px-6 py-8">
+        {/* 기본 정보 */}
+        <div className="bg-white rounded-2xl shadow-sm p-6 mb-6 border border-gray-50">
+          <h2 className="font-bold text-gray-900 mb-6 flex items-center gap-2">
+            <span className="w-1 h-4 bg-blue-500 rounded-full"></span>
+            기본 정보
+          </h2>
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-gray-400 text-xs font-bold mb-1.5 block px-1">나이</label>
+                <input type="number" placeholder="세"
+                  value={form.age}
+                  onChange={(e) => setForm({...form, age: e.target.value})}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-blue-300 outline-none transition-colors"
+                />
+              </div>
+              <div>
+                <label className="text-gray-400 text-xs font-bold mb-1.5 block px-1">성별</label>
+                <div className="flex gap-2">
+                  {['MALE', 'FEMALE'].map((g) => (
+                    <button key={g}
+                      onClick={() => setForm({...form, gender: g})}
+                      className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all
+                        ${form.gender === g
+                          ? 'bg-blue-500 text-white border-blue-500 shadow-sm'
+                          : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
+                        }`}
+                    >
+                      {g === 'MALE' ? '남성' : '여성'}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
-            <div>
-              <label className="text-gray-500 text-sm">키 (cm)</label>
-              <input type="number" placeholder="키를 입력하세요"
-                value={form.height}
-                onChange={(e) => setForm({...form, height: e.target.value})}
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-sm"
-              />
-            </div>
-            <div>
-              <label className="text-gray-500 text-sm">몸무게 (kg)</label>
-              <input type="number" placeholder="몸무게를 입력하세요"
-                value={form.weight}
-                onChange={(e) => setForm({...form, weight: e.target.value})}
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-sm"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-gray-400 text-xs font-bold mb-1.5 block px-1">키 (cm)</label>
+                <input type="number" placeholder="cm"
+                  value={form.height}
+                  onChange={(e) => setForm({...form, height: e.target.value})}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-blue-300 outline-none transition-colors"
+                />
+              </div>
+              <div>
+                <label className="text-gray-400 text-xs font-bold mb-1.5 block px-1">몸무게 (kg)</label>
+                <input type="number" placeholder="kg"
+                  value={form.weight}
+                  onChange={(e) => setForm({...form, weight: e.target.value})}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-blue-300 outline-none transition-colors"
+                />
+              </div>
             </div>
           </div>
         </div>
 
-        {/* 생활 습관 - 2열 그리드 */}
-        <div className="bg-white rounded-2xl shadow-sm p-8 mb-4">
-          <h2 className="font-bold mb-6 pb-3 border-b border-gray-100">생활 습관</h2>
-          <div className="grid grid-cols-2 gap-6">
+        {/* 생활 습관 */}
+        <div className="bg-white rounded-2xl shadow-sm p-6 mb-6 border border-gray-50">
+          <h2 className="font-bold text-gray-900 mb-6 flex items-center gap-2">
+            <span className="w-1 h-4 bg-blue-500 rounded-full"></span>
+            생활 습관
+          </h2>
+          <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="text-gray-500 text-sm">흡연 여부</label>
-              <div className="flex gap-3 mt-1">
+              <label className="text-gray-400 text-xs font-bold mb-1.5 block px-1">흡연 여부</label>
+              <div className="flex gap-2">
                 {[true, false].map((val) => (
                   <button key={String(val)}
                     onClick={() => setForm({...form, is_smoking: val})}
-                    className={`flex-1 py-3 rounded-xl text-sm font-semibold cursor-pointer border
+                    className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all
                       ${form.is_smoking === val
-                        ? 'bg-blue-500 text-white border-blue-500'
-                        : 'bg-white text-gray-400 border-gray-200'
+                        ? 'bg-blue-500 text-white border-blue-500 shadow-sm'
+                        : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
                       }`}
                   >
                     {val ? '예' : '아니오'}
@@ -98,15 +118,15 @@ export default function SurveyPage() {
               </div>
             </div>
             <div>
-              <label className="text-gray-500 text-sm">음주 여부</label>
-              <div className="flex gap-3 mt-1">
+              <label className="text-gray-400 text-xs font-bold mb-1.5 block px-1">음주 여부</label>
+              <div className="flex gap-2">
                 {[true, false].map((val) => (
                   <button key={String(val)}
                     onClick={() => setForm({...form, is_drinking: val})}
-                    className={`flex-1 py-3 rounded-xl text-sm font-semibold cursor-pointer border
+                    className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all
                       ${form.is_drinking === val
-                        ? 'bg-blue-500 text-white border-blue-500'
-                        : 'bg-white text-gray-400 border-gray-200'
+                        ? 'bg-blue-500 text-white border-blue-500 shadow-sm'
+                        : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
                       }`}
                   >
                     {val ? '예' : '아니오'}
@@ -117,12 +137,15 @@ export default function SurveyPage() {
           </div>
         </div>
 
-        {/* 기저질환 + 알레르기 - 2열 그리드 */}
-        <div className="bg-white rounded-2xl shadow-sm p-8 mb-4">
-          <h2 className="font-bold mb-6 pb-3 border-b border-gray-100">질환 및 알레르기</h2>
-          <div className="grid grid-cols-2 gap-6">
+        {/* 질환 및 알레르기 */}
+        <div className="bg-white rounded-2xl shadow-sm p-6 mb-8 border border-gray-50">
+          <h2 className="font-bold text-gray-900 mb-6 flex items-center gap-2">
+            <span className="w-1 h-4 bg-blue-500 rounded-full"></span>
+            질환 및 알레르기
+          </h2>
+          <div className="space-y-6">
             <div>
-              <label className="text-gray-500 text-sm mb-3 block">기저질환</label>
+              <label className="text-gray-400 text-xs font-bold mb-3 block px-1">기저질환 (중복 선택 가능)</label>
               <div className="flex flex-wrap gap-2">
                 {['고혈압', '당뇨', '고지혈증', '심장질환', '뇌졸중', '천식', '신장질환', '갑상선질환', '없음'].map((item) => (
                   <button key={item}
@@ -132,10 +155,10 @@ export default function SurveyPage() {
                         : [...form.conditions, item]
                       setForm({...form, conditions: updated})
                     }}
-                    className={`px-4 py-2 rounded-full text-sm cursor-pointer border
+                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all border
                       ${form.conditions.includes(item)
-                        ? 'bg-blue-500 text-white border-blue-500'
-                        : 'bg-white text-gray-400 border-gray-200'
+                        ? 'bg-blue-500 text-white border-blue-500 shadow-sm'
+                        : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
                       }`}
                   >
                     {item}
@@ -144,7 +167,7 @@ export default function SurveyPage() {
               </div>
             </div>
             <div>
-              <label className="text-gray-500 text-sm mb-3 block">알레르기</label>
+              <label className="text-gray-400 text-xs font-bold mb-3 block px-1">알레르기 (중복 선택 가능)</label>
               <div className="flex flex-wrap gap-2">
                 {['페니실린', '아스피린', '항생제', '소염제', '없음'].map((item) => (
                   <button key={item}
@@ -154,10 +177,10 @@ export default function SurveyPage() {
                         : [...form.allergies, item]
                       setForm({...form, allergies: updated})
                     }}
-                    className={`px-4 py-2 rounded-full text-sm cursor-pointer border
+                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all border
                       ${form.allergies.includes(item)
-                        ? 'bg-blue-500 text-white border-blue-500'
-                        : 'bg-white text-gray-400 border-gray-200'
+                        ? 'bg-blue-500 text-white border-blue-500 shadow-sm'
+                        : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
                       }`}
                   >
                     {item}
@@ -169,21 +192,20 @@ export default function SurveyPage() {
         </div>
 
         {/* 버튼 */}
-        <div className="flex gap-3 mt-6">
+        <div className="flex gap-3">
           <button
-            onClick={() => router.push('/main')}
-            className="flex-1 border border-gray-200 py-4 rounded-xl text-gray-400 text-sm cursor-pointer hover:bg-gray-50"
+            onClick={handleCancel}
+            className="flex-1 bg-white border border-gray-200 py-4 rounded-xl text-gray-500 text-sm font-bold hover:bg-gray-50 transition-all active:scale-[0.98] duration-150"
           >
             건너뛰기
           </button>
           <button
             onClick={handleSubmit}
-            className="flex-1 bg-blue-500 text-white py-4 rounded-xl font-semibold cursor-pointer hover:bg-blue-600"
+            className="flex-1 bg-blue-500 text-white py-4 rounded-xl text-sm font-bold shadow-sm hover:bg-blue-600 active:scale-[0.95] transition-all duration-150"
           >
-            완료
+            입력 완료
           </button>
         </div>
-
       </div>
     </main>
   )

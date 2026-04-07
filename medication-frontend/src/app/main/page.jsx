@@ -1,20 +1,26 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Header from '../../components/Header'
+import BottomNav from '../../components/BottomNav'
+import EmptyState from '../../components/EmptyState'
 
 function MainSkeleton() {
   return (
-    <main className="min-h-screen bg-gray-50 pb-20 animate-pulse">
-      <div className="bg-white border-b border-gray-200 px-10 py-5">
-        <div className="h-3 w-40 bg-gray-200 rounded mb-2" />
-        <div className="h-5 w-32 bg-gray-200 rounded" />
+    <main className="max-w-[1400px] mx-auto w-full px-8 py-12 min-h-screen bg-slate-50 animate-pulse">
+      <div className="flex justify-between items-end mb-10 bg-white p-8 rounded-[32px]">
+        <div className="h-12 w-80 bg-gray-200 rounded-xl" />
+        <div className="flex gap-8">
+          <div className="h-6 w-20 bg-gray-200 rounded" />
+          <div className="h-6 w-20 bg-gray-200 rounded" />
+        </div>
       </div>
-      <div className="px-10 py-6 grid grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl p-6 col-span-2 row-span-2 h-64" />
-        <div className="bg-gray-200 rounded-2xl h-32" />
-        <div className="bg-white rounded-2xl h-32" />
-        <div className="bg-white rounded-2xl h-32" />
-        <div className="bg-white rounded-2xl h-32" />
+      <div className="grid md:grid-cols-12 gap-8">
+        <div className="md:col-span-8 bg-white rounded-[32px] h-[500px] w-full" />
+        <div className="md:col-span-4 space-y-6">
+          <div className="bg-white rounded-[32px] h-56 w-full" />
+          <div className="bg-white rounded-[32px] h-56 w-full" />
+        </div>
       </div>
     </main>
   )
@@ -29,120 +35,68 @@ function SurveyModal({ onClose }) {
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-6">
-      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl w-full max-w-sm max-h-[80vh] overflow-y-auto">
         <div className="flex justify-between items-center p-6 border-b border-gray-100 sticky top-0 bg-white">
           <div>
-            <h2 className="font-bold text-lg">건강 정보 입력</h2>
-            <p className="text-gray-400 text-xs">맞춤 복약 안내를 위해 건강 정보를 입력해주세요</p>
+            <h2 className="font-bold text-lg text-gray-900">건강 정보 입력</h2>
+            <p className="text-gray-400 text-xs mt-0.5">맞춤 안내를 위해 입력해주세요</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-black cursor-pointer text-xl">✕</button>
         </div>
         <div className="p-6 space-y-6">
           {/* 기본 정보 */}
           <div>
-            <h3 className="font-semibold mb-3 text-sm">기본 정보</h3>
+            <h3 className="font-semibold mb-3 text-sm text-gray-700">기본 정보</h3>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-gray-400 text-xs mb-1 block">나이</label>
+                <label className="text-gray-400 text-[10px] mb-1 block px-1">나이</label>
                 <input type="number" placeholder="나이"
                   value={form.age} onChange={(e) => setForm({...form, age: e.target.value})}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:border-blue-300 outline-none" />
               </div>
               <div>
-                <label className="text-gray-400 text-xs mb-1 block">성별</label>
+                <label className="text-gray-400 text-[10px] mb-1 block px-1">성별</label>
                 <div className="flex gap-2">
                   {['MALE', 'FEMALE'].map(g => (
                     <button key={g} onClick={() => setForm({...form, gender: g})}
-                      className={`flex-1 py-2 rounded-xl text-xs font-semibold cursor-pointer border
-                        ${form.gender === g ? 'bg-blue-500 text-white border-blue-500' : 'text-gray-400 border-gray-200'}`}>
+                      className={`flex-1 py-2 rounded-xl text-[10px] font-bold cursor-pointer border transition-all
+                        ${form.gender === g ? 'bg-blue-500 text-white border-blue-500' : 'text-gray-400 border-gray-200 hover:border-gray-300'}`}>
                       {g === 'MALE' ? '남성' : '여성'}
                     </button>
                   ))}
                 </div>
-              </div>
-              <div>
-                <label className="text-gray-400 text-xs mb-1 block">키 (cm)</label>
-                <input type="number" placeholder="키"
-                  value={form.height} onChange={(e) => setForm({...form, height: e.target.value})}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label className="text-gray-400 text-xs mb-1 block">몸무게 (kg)</label>
-                <input type="number" placeholder="몸무게"
-                  value={form.weight} onChange={(e) => setForm({...form, weight: e.target.value})}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
               </div>
             </div>
           </div>
 
           {/* 생활 습관 */}
           <div>
-            <h3 className="font-semibold mb-3 text-sm">생활 습관</h3>
+            <h3 className="font-semibold mb-3 text-sm text-gray-700">생활 습관</h3>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-gray-400 text-xs mb-1 block">흡연</label>
+                <label className="text-gray-400 text-[10px] mb-1 block px-1">흡연</label>
                 <div className="flex gap-2">
                   {[true, false].map(v => (
                     <button key={String(v)} onClick={() => setForm({...form, is_smoking: v})}
-                      className={`flex-1 py-2 rounded-xl text-xs font-semibold cursor-pointer border
-                        ${form.is_smoking === v ? 'bg-blue-500 text-white border-blue-500' : 'text-gray-400 border-gray-200'}`}>
+                      className={`flex-1 py-2 rounded-xl text-[10px] font-bold cursor-pointer border transition-all
+                        ${form.is_smoking === v ? 'bg-blue-500 text-white border-blue-500' : 'text-gray-400 border-gray-200 hover:border-gray-300'}`}>
                       {v ? '예' : '아니오'}
                     </button>
                   ))}
                 </div>
               </div>
               <div>
-                <label className="text-gray-400 text-xs mb-1 block">음주</label>
+                <label className="text-gray-400 text-[10px] mb-1 block px-1">음주</label>
                 <div className="flex gap-2">
                   {[true, false].map(v => (
                     <button key={String(v)} onClick={() => setForm({...form, is_drinking: v})}
-                      className={`flex-1 py-2 rounded-xl text-xs font-semibold cursor-pointer border
-                        ${form.is_drinking === v ? 'bg-blue-500 text-white border-blue-500' : 'text-gray-400 border-gray-200'}`}>
+                      className={`flex-1 py-2 rounded-xl text-[10px] font-bold cursor-pointer border transition-all
+                        ${form.is_drinking === v ? 'bg-blue-500 text-white border-blue-500' : 'text-gray-400 border-gray-200 hover:border-gray-300'}`}>
                       {v ? '예' : '아니오'}
                     </button>
                   ))}
                 </div>
               </div>
-            </div>
-          </div>
-
-          {/* 기저질환 */}
-          <div>
-            <h3 className="font-semibold mb-3 text-sm">기저질환</h3>
-            <div className="flex flex-wrap gap-2">
-              {['고혈압', '당뇨', '고지혈증', '심장질환', '천식', '신장질환', '없음'].map(item => (
-                <button key={item}
-                  onClick={() => {
-                    const updated = form.conditions.includes(item)
-                      ? form.conditions.filter(c => c !== item)
-                      : [...form.conditions, item]
-                    setForm({...form, conditions: updated})
-                  }}
-                  className={`px-3 py-1.5 rounded-full text-xs cursor-pointer border
-                    ${form.conditions.includes(item) ? 'bg-blue-500 text-white border-blue-500' : 'text-gray-400 border-gray-200'}`}>
-                  {item}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 알레르기 */}
-          <div>
-            <h3 className="font-semibold mb-3 text-sm">알레르기</h3>
-            <div className="flex flex-wrap gap-2">
-              {['페니실린', '아스피린', '항생제', '소염제', '없음'].map(item => (
-                <button key={item}
-                  onClick={() => {
-                    const updated = form.allergies.includes(item)
-                      ? form.allergies.filter(a => a !== item)
-                      : [...form.allergies, item]
-                    setForm({...form, allergies: updated})
-                  }}
-                  className={`px-3 py-1.5 rounded-full text-xs cursor-pointer border
-                    ${form.allergies.includes(item) ? 'bg-blue-500 text-white border-blue-500' : 'text-gray-400 border-gray-200'}`}>
-                  {item}
-                </button>
-              ))}
             </div>
           </div>
         </div>
@@ -150,11 +104,11 @@ function SurveyModal({ onClose }) {
         {/* 버튼 */}
         <div className="flex gap-3 p-6 border-t border-gray-100">
           <button onClick={onClose}
-            className="flex-1 border border-gray-200 py-3 rounded-xl text-gray-400 text-sm cursor-pointer hover:bg-gray-50">
+            className="flex-1 border border-gray-200 py-3 rounded-xl text-gray-400 text-sm font-bold cursor-pointer hover:bg-gray-50">
             건너뛰기
           </button>
           <button onClick={onClose}
-            className="flex-1 bg-blue-500 text-white py-3 rounded-xl font-semibold text-sm cursor-pointer hover:bg-blue-600">
+            className="flex-1 bg-blue-500 text-white py-3 rounded-xl text-sm font-bold cursor-pointer hover:bg-blue-600 shadow-sm">
             완료
           </button>
         </div>
@@ -184,50 +138,48 @@ function ChatModal({ onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-6">
-      <div className="bg-white rounded-2xl w-full max-w-lg h-[600px] flex flex-col">
-        <div className="flex justify-between items-center p-4 border-b border-gray-100">
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-3xl w-full max-w-sm h-[600px] flex flex-col shadow-2xl overflow-hidden">
+        <div className="flex justify-between items-center p-5 border-b border-gray-100 bg-white">
           <div>
-            <h2 className="font-bold">복약 AI 상담</h2>
-            <p className="text-xs text-gray-400">약 복용 방법, 부작용 등 무엇이든 물어보세요</p>
+            <h2 className="font-bold text-gray-900">복약 AI 상담</h2>
+            <p className="text-[10px] text-gray-400 mt-0.5">실시간 AI 가이드</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-black cursor-pointer text-xl">✕</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-black cursor-pointer text-xl p-1">✕</button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-slate-50">
           {messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-xs px-4 py-3 rounded-2xl text-sm
-                ${msg.role === 'user' ? 'bg-blue-500 text-white rounded-br-sm' : 'bg-gray-100 text-gray-800 rounded-bl-sm'}`}>
+              <div className={`max-w-[85%] px-4 py-3 rounded-2xl text-sm shadow-sm
+                ${msg.role === 'user' ? 'bg-blue-500 text-white rounded-tr-none' : 'bg-white text-gray-800 rounded-tl-none border border-gray-100'}`}>
                 {msg.content}
               </div>
             </div>
           ))}
           {isLoading && (
             <div className="flex justify-start">
-              <div className="bg-gray-100 px-4 py-3 rounded-2xl">
-                <div className="flex gap-1">
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
+              <div className="bg-white border border-gray-100 shadow-sm px-4 py-3 rounded-2xl rounded-tl-none">
+                <div className="flex gap-1.5">
+                  <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
+                  <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
+                  <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
                 </div>
               </div>
             </div>
           )}
         </div>
 
-        <div className="p-4 border-t border-gray-100 flex gap-2 items-center">
-          <button className="w-9 h-9 bg-gray-100 rounded-full text-gray-400 text-xl cursor-pointer hover:bg-gray-200 flex items-center justify-center shrink-0">
-            +
-          </button>
+        <div className="p-4 border-t border-gray-100 flex gap-2 items-center bg-white">
           <input type="text" value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyUp={(e) => { if (e.key === 'Enter') handleSend() }}
-            placeholder="메시지를 입력하세요"
-            className="flex-1 border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none" />
+            placeholder="궁금한 것을 물어보세요"
+            className="flex-1 bg-gray-50 border border-gray-100 rounded-2xl px-4 py-3 text-sm outline-none focus:border-blue-300 transition-all" />
           <button onClick={handleSend}
-            className="bg-blue-500 text-white px-4 py-2 rounded-xl text-sm cursor-pointer hover:bg-blue-600">
-            전송
+            disabled={!input.trim()}
+            className="bg-blue-500 text-white w-10 h-10 rounded-full flex items-center justify-center shadow-md disabled:bg-gray-200 disabled:shadow-none transition-all active:scale-90">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 14-7-3 7 3 7-14-7Z"/><path d="M5 12h11"/></svg>
           </button>
         </div>
       </div>
@@ -244,7 +196,7 @@ export default function MainPage() {
   useEffect(() => {
     setTimeout(() => {
       setIsLoading(false)
-      setShowSurvey(true) // 로그인 후 자동으로 설문 팝업
+      setShowSurvey(true)
     }, 1000)
   }, [])
 
@@ -275,83 +227,153 @@ export default function MainPage() {
       {/* 챗봇 모달 */}
       {showChat && <ChatModal onClose={() => setShowChat(false)} />}
 
-      <main className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200 px-10 py-5">
-          <p className="text-gray-400 text-sm mb-1">{greeting.sub}</p>
-          <h1 className="text-xl font-bold">{greeting.msg} 홍길동님</h1>
-        </div>
-        <div className="px-10 py-6 grid grid-cols-3 gap-4">
-          <div className="bg-white rounded-2xl shadow-sm p-6 col-span-2 row-span-2">
-            <div className="flex justify-between items-center mb-4 pb-3 border-b border-gray-100">
-              <h2 className="font-bold">오늘 복약 현황</h2>
-              <span className="text-blue-500 text-sm font-semibold">2/3 완료</span>
-            </div>
-            <div className="w-full bg-gray-100 rounded-full h-2 mb-6">
-              <div className="bg-blue-500 h-2 rounded-full" style={{width: '66%'}} />
-            </div>
-            <div className="space-y-3">
-              {todayMeds.map((med, i) => (
-                <div key={i} className="flex items-center justify-between py-3 border-b border-gray-50">
-                  <div className="flex items-center gap-4">
-                    <span className="text-gray-400 text-sm w-12">{med.time}</span>
-                    <span onClick={() => router.push('/medication')}
-                      className={`text-sm font-semibold cursor-pointer hover:text-blue-500 ${med.done ? 'text-gray-400 line-through' : 'text-black'}`}>
-                      💊 {med.name}
-                    </span>
-                  </div>
-                  <span className={`text-xs px-3 py-1 rounded-full ${med.done ? 'bg-green-50 text-green-500' : 'bg-blue-50 text-blue-500'}`}>
-                    {med.done ? '완료' : '예정'}
-                  </span>
-                </div>
-              ))}
-            </div>
+      <main className="max-w-[1400px] mx-auto w-full px-8 py-12 min-h-screen bg-slate-50 relative overflow-x-hidden">
+        
+        {/* 상단 인사말 헤더 (와이드 레이아웃 적용) */}
+        <div className="w-full flex justify-between items-end mb-10 bg-white p-10 rounded-[40px] shadow-sm border border-white">
+          <div>
+            <p className="text-gray-400 text-sm font-bold mb-2 px-1">{greeting.sub}</p>
+            <h1 className="text-4xl font-black text-gray-900 leading-tight">
+              {greeting.msg.split('!')[0]}! <span className="text-blue-500">홍길동님</span> 반가워요
+            </h1>
           </div>
-
-          {/* 챗봇 버튼 → 모달로 */}
-          <div onClick={() => setShowChat(true)}
-            className="bg-blue-500 rounded-2xl p-6 text-white cursor-pointer hover:bg-blue-600">
-            <p className="text-xs mb-2 opacity-80">궁금한 게 있으신가요?</p>
-            <h2 className="font-bold">💊 복약 AI 상담하기</h2>
-            <p className="text-xs mt-3 opacity-60">약 복용 방법, 부작용 등</p>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-sm p-6">
-            <h2 className="font-bold mb-2">처방전 등록</h2>
-            <button onClick={() => router.push('/ocr')}
-              className="w-full border-2 border-dashed border-gray-200 py-3 rounded-xl text-gray-400 text-sm cursor-pointer hover:border-blue-300 mt-2">
-              + 업로드
+          
+          {/* PC용 네비게이션 메뉴 (간격 대확장) */}
+          <div className="hidden md:flex items-center gap-12 mb-2">
+            <button onClick={() => router.push('/main')} className="flex items-center gap-2 text-blue-500 font-black text-lg hover:opacity-80 transition-all">
+              <span className="text-2xl">🏠</span> 홈
+            </button>
+            <button onClick={() => router.push('/mypage')} className="flex items-center gap-2 text-gray-400 font-bold text-lg hover:text-gray-600 transition-all">
+              <span className="text-2xl">👤</span> 마이페이지
             </button>
           </div>
-
-          <div onClick={() => router.push('/challenge')}
-            className="bg-white rounded-2xl shadow-sm p-6 cursor-pointer hover:shadow-md">
-            <h2 className="font-bold mb-3">챌린지 현황</h2>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-xl">🏆</span>
-              <span className="font-semibold text-sm">{challenge.title}</span>
-            </div>
-            <p className="text-gray-400 text-xs mb-2">{challenge.days}일째 진행 중!</p>
-            <div className="w-full bg-gray-100 rounded-full h-1.5">
-              <div className="bg-yellow-400 h-1.5 rounded-full" style={{width: `${(challenge.days/challenge.target)*100}%`}} />
-            </div>
-            <p className="text-xs text-gray-400 mt-1">{challenge.days}/{challenge.target}일</p>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-sm p-6">
-            <h2 className="font-bold mb-3">최근 처방전</h2>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold">{recentPrescription.hospital}</p>
-                <p className="text-xs text-gray-400 mt-1">{recentPrescription.date}</p>
-              </div>
-              <span className="text-xs text-blue-500 cursor-pointer">보기</span>
-            </div>
-          </div>
         </div>
 
-        <div className="fixed bottom-0 w-full bg-white border-t border-gray-100 flex">
-          <button onClick={() => router.push('/main')} className="flex-1 py-4 text-blue-500 text-sm font-semibold">홈</button>
-          <button onClick={() => router.push('/mypage')} className="flex-1 py-4 text-gray-400 text-sm">마이페이지</button>
+        {/* 메인 콘텐츠 대시보드 그리드 */}
+        <div className="grid md:grid-cols-12 gap-8">
+          
+          {/* 좌측 메인 (8칸): 오늘 복약 현황 (너비 봉인 해제) */}
+          <div className="md:col-span-8 w-full h-full">
+            <div className="bg-white rounded-[40px] shadow-sm p-10 border border-white/50 w-full h-full animate-in fade-in slide-in-from-left-3 duration-500">
+              <div className="flex justify-between items-center mb-10">
+                <div className="flex items-center gap-4">
+                  <span className="text-3xl">💊</span>
+                  <h2 className="text-2xl font-black text-gray-900">오늘 복약 현황</h2>
+                </div>
+                <span className="bg-blue-50 text-blue-600 text-sm font-black px-5 py-2 rounded-2xl">2/3 완료</span>
+              </div>
+              <div className="w-full bg-gray-100 rounded-full h-4 mb-12 overflow-hidden shadow-inner">
+                <div className="bg-gradient-to-r from-blue-400 to-blue-600 h-4 rounded-full shadow-[0_0_15px_rgba(59,130,246,0.4)] transition-all duration-1000" style={{width: '66%'}} />
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {todayMeds.map((med, i) => (
+                  <div key={i} 
+                    onClick={() => router.push('/medication')}
+                    className="flex flex-col justify-between p-6 rounded-[32px] bg-slate-50/50 hover:bg-white hover:shadow-xl hover:shadow-blue-50 transition-all border border-transparent hover:border-blue-100 cursor-pointer group active:scale-[0.98] min-h-[140px]">
+                    <div className="flex justify-between items-start w-full">
+                      <span className="text-gray-400 text-xs font-black">{med.time}</span>
+                      {med.done ? (
+                        <span className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white text-sm shadow-md">✓</span>
+                      ) : (
+                        <span className="w-8 h-8 bg-white text-blue-500 rounded-full flex items-center justify-center text-xs font-black border-2 border-blue-100 shadow-sm">...</span>
+                      )}
+                    </div>
+                    <span className={`text-lg font-black mt-4 transition-all ${med.done ? 'text-gray-300 line-through' : 'text-gray-800 group-hover:text-blue-600'}`}>
+                      {med.name}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* 우측 사이드 (4칸): AI 상담 & 처방전 등록 (너비 봉인 해제) */}
+          <div className="md:col-span-4 flex flex-col space-y-8 w-full h-full">
+            <div onClick={() => setShowChat(true)}
+              className="flex-1 bg-blue-500 rounded-[40px] p-10 text-white shadow-2xl shadow-blue-100 cursor-pointer active:scale-[0.96] transition-all duration-200 relative overflow-hidden group min-h-[220px]">
+              <div className="absolute -right-4 -bottom-4 opacity-20 group-hover:scale-110 transition-transform duration-500">
+                <svg width="140" height="140" viewBox="0 0 24 24" fill="white"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              </div>
+              <p className="text-sm font-black opacity-80 mb-3">복약 궁금증 해소</p>
+              <h2 className="text-3xl font-black leading-tight">AI 상담사와<br/>대화하기 💬</h2>
+            </div>
+
+            <div onClick={() => router.push('/ocr')}
+              className="flex-1 bg-white rounded-[40px] p-10 border border-gray-100 shadow-sm cursor-pointer active:scale-[0.96] transition-all duration-200 relative overflow-hidden group min-h-[220px] flex flex-col justify-center">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-black text-gray-400 mb-3">스마트한 등록</p>
+                  <h2 className="text-3xl font-black text-gray-800 leading-tight">처방전<br/>등록하기</h2>
+                </div>
+                <span className="text-6xl group-hover:rotate-12 transition-transform duration-300">📄</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 하단 영역 (각 6칸): 챌린지 & 최근 처방전 (너비 봉인 해제) */}
+          <div className="md:col-span-6 w-full h-full">
+            <div onClick={() => router.push('/challenge')}
+              className="bg-white rounded-[40px] shadow-sm p-10 border border-gray-100 cursor-pointer active:scale-[0.98] transition-all group h-full">
+              <div className="flex justify-between items-center mb-8">
+                <h2 className="text-xl font-black text-gray-900 flex items-center gap-3">
+                  <span className="text-2xl">🏆</span> 챌린지 현황
+                </h2>
+                <div className="w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center text-gray-400 group-hover:bg-blue-500 group-hover:text-white transition-all duration-300 shadow-sm">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="group-hover:translate-x-0.5 transition-transform">
+                    <path d="m9 18 6-6-6-6"/>
+                  </svg>
+                </div>
+              </div>
+              <div className="flex items-center gap-6 mb-8">
+                <div className="bg-orange-50 w-20 h-20 rounded-[28px] flex items-center justify-center text-4xl shadow-md border border-orange-100 animate-bounce-subtle">🔥</div>
+                <div className="flex-1">
+                  <span className="font-black text-xl text-gray-800">{challenge.title}</span>
+                  <p className="text-orange-500 text-sm font-black mt-1.5">{challenge.days}일째 연속 성공!</p>
+                </div>
+              </div>
+              <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden shadow-inner">
+                <div className="bg-gradient-to-r from-orange-400 to-orange-500 h-3 rounded-full shadow-[0_0_10px_rgba(251,146,60,0.4)] transition-all duration-1000" style={{width: `${(challenge.days/challenge.target)*100}%`}} />
+              </div>
+            </div>
+          </div>
+
+          <div className="md:col-span-6 w-full h-full">
+            <div className="bg-white rounded-[40px] shadow-sm p-10 border border-gray-100 h-full w-full">
+              <div className="flex justify-between items-center mb-8">
+                <h2 className="text-xl font-black text-gray-900 flex items-center gap-3">
+                  <span className="text-2xl">📄</span> 최근 처방전
+                </h2>
+                <button className="text-xs font-black text-blue-500 hover:bg-blue-50 px-4 py-2 rounded-2xl transition-all border border-blue-100">전체보기</button>
+              </div>
+              <div className="bg-slate-50/80 rounded-[32px] p-6 flex items-center justify-between border border-gray-100 hover:bg-white hover:shadow-2xl hover:shadow-slate-200 transition-all cursor-pointer group">
+                <div className="flex items-center gap-5">
+                  <div className="bg-white w-16 h-16 rounded-[24px] flex items-center justify-center text-3xl shadow-sm group-hover:bg-blue-50 transition-colors">📄</div>
+                  <div>
+                    <p className="text-lg font-black text-gray-800">{recentPrescription.hospital} 처방</p>
+                    <p className="text-sm text-gray-400 font-bold mt-1">{recentPrescription.date}</p>
+                  </div>
+                </div>
+                <span className="text-sm font-black text-gray-300 group-hover:text-blue-500 transition-colors">자세히 보기</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        {/* 하단 네비게이션 (모바일에서만 표시) */}
+        <div className="md:hidden fixed bottom-0 left-0 w-full bg-white/90 backdrop-blur-lg border-t border-gray-100 flex py-5 px-8 z-40 shadow-[0_-5px_30px_rgba(0,0,0,0.08)] rounded-t-[40px]">
+          <button 
+            onClick={() => router.push('/main')} 
+            className="flex-1 flex flex-col items-center gap-2 group">
+            <span className="text-2xl group-active:scale-90 transition-transform">🏠</span>
+            <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Home</span>
+          </button>
+          <button 
+            onClick={() => router.push('/mypage')} 
+            className="flex-1 flex flex-col items-center gap-2 group">
+            <span className="text-2xl group-active:scale-90 transition-transform opacity-40 group-hover:opacity-100">👤</span>
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">My</span>
+          </button>
         </div>
       </main>
     </>

@@ -1,6 +1,8 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Header from '../../components/Header'
+import BottomNav from '../../components/BottomNav'
 
 export default function MedicationPage() {
   const router = useRouter()
@@ -27,47 +29,36 @@ export default function MedicationPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-50">
-
-      {/* 헤더 */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-4">
-        <button
-          onClick={() => router.back()}
-          className="text-gray-400 hover:text-black cursor-pointer text-xl">
-          ←
-        </button>
-        <div>
-          <h1 className="font-bold">{medication.name}</h1>
-          <p className="text-xs text-gray-400">용법 및 주의사항</p>
-        </div>
-      </div>
+    <main className="min-h-screen bg-gray-50 pb-24">
+      {/* 공통 헤더 적용 */}
+      <Header title={medication.name} subtitle="용법 및 주의사항" showBack={true} />
 
       {/* 복약 정보 카드 */}
       <div className="max-w-3xl mx-auto px-6 py-6">
-        <div className="bg-blue-500 rounded-2xl p-6 text-white mb-4">
+        <div className="bg-blue-500 rounded-2xl p-6 text-white mb-6 shadow-sm">
           <div className="grid grid-cols-3 gap-4 text-center">
             <div>
-              <p className="text-blue-200 text-xs mb-1">1회 복용량</p>
-              <p className="font-bold">{medication.dose}</p>
+              <p className="text-blue-100 text-xs mb-1 opacity-80">1회 복용량</p>
+              <p className="font-bold text-lg">{medication.dose}</p>
             </div>
             <div>
-              <p className="text-blue-200 text-xs mb-1">복용 횟수</p>
-              <p className="font-bold">{medication.frequency}</p>
+              <p className="text-blue-100 text-xs mb-1 opacity-80">복용 횟수</p>
+              <p className="font-bold text-lg">{medication.frequency}</p>
             </div>
             <div>
-              <p className="text-blue-200 text-xs mb-1">복용 방법</p>
-              <p className="font-bold">{medication.instruction}</p>
+              <p className="text-blue-100 text-xs mb-1 opacity-80">복용 방법</p>
+              <p className="font-bold text-lg">{medication.instruction}</p>
             </div>
           </div>
         </div>
 
         {/* 탭 */}
-        <div className="flex gap-6 mb-6 border-b border-gray-200">
+        <div className="flex gap-6 mb-6 border-b border-gray-200 overflow-x-auto whitespace-nowrap scrollbar-hide">
           {['용법', '주의사항', '부작용', '상호작용'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`pb-3 text-sm font-semibold cursor-pointer
+              className={`pb-3 text-sm font-semibold cursor-pointer transition-colors active:scale-[0.98] transition-transform duration-150
                 ${activeTab === tab
                   ? 'text-blue-500 border-b-2 border-blue-500'
                   : 'text-gray-400'
@@ -78,85 +69,92 @@ export default function MedicationPage() {
           ))}
         </div>
 
-        {/* 용법 */}
-        {activeTab === '용법' && (
-          <div className="bg-white rounded-2xl shadow-sm p-6">
-            <h2 className="font-bold mb-4">복용 방법</h2>
-            <div className="space-y-4">
-              <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                <span className="text-2xl">⏰</span>
-                <div>
-                  <p className="font-semibold text-sm">복용 시간</p>
-                  <p className="text-gray-400 text-xs mt-1">매일 같은 시간에 복용하세요</p>
+        {/* 탭 컨텐츠 영역 (여백 유지) */}
+        <div className="space-y-4">
+          {/* 용법 */}
+          {activeTab === '용법' && (
+            <div className="bg-white rounded-2xl shadow-sm p-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <h2 className="font-bold mb-4">복용 방법</h2>
+              <div className="space-y-4">
+                <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
+                  <span className="text-2xl">⏰</span>
+                  <div>
+                    <p className="font-semibold text-sm">복용 시간</p>
+                    <p className="text-gray-400 text-xs mt-1">매일 같은 시간에 복용하세요</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
+                  <span className="text-2xl">🍽️</span>
+                  <div>
+                    <p className="font-semibold text-sm">{medication.instruction}</p>
+                    <p className="text-gray-400 text-xs mt-1">식사와 함께 복용하면 효과적이에요</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
+                  <span className="text-2xl">💊</span>
+                  <div>
+                    <p className="font-semibold text-sm">1회 {medication.dose} 복용</p>
+                    <p className="text-gray-400 text-xs mt-1">임의로 용량을 변경하지 마세요</p>
+                  </div>
                 </div>
               </div>
-              <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                <span className="text-2xl">🍽️</span>
-                <div>
-                  <p className="font-semibold text-sm">{medication.instruction}</p>
-                  <p className="text-gray-400 text-xs mt-1">식사와 함께 복용하면 효과적이에요</p>
-                </div>
+            </div>
+          )}
+
+          {/* 주의사항 */}
+          {activeTab === '주의사항' && (
+            <div className="bg-white rounded-2xl shadow-sm p-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <h2 className="font-bold mb-4">주의사항</h2>
+              <div className="space-y-3">
+                {medication.warnings.map((w, i) => (
+                  <div key={i} className="flex gap-3 p-4 bg-yellow-50 rounded-xl">
+                    <span className="text-yellow-500 shrink-0">⚠️</span>
+                    <p className="text-sm text-gray-600 leading-relaxed">{w}</p>
+                  </div>
+                ))}
               </div>
-              <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                <span className="text-2xl">💊</span>
-                <div>
-                  <p className="font-semibold text-sm">1회 {medication.dose} 복용</p>
-                  <p className="text-gray-400 text-xs mt-1">임의로 용량을 변경하지 마세요</p>
-                </div>
+            </div>
+          )}
+
+          {/* 부작용 */}
+          {activeTab === '부작용' && (
+            <div className="bg-white rounded-2xl shadow-sm p-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <h2 className="font-bold mb-4">주요 부작용</h2>
+              <div className="flex flex-wrap gap-2 mb-6">
+                {medication.sideEffects.map((s, i) => (
+                  <span key={i} className="bg-red-50 text-red-500 px-4 py-2 rounded-full text-sm font-medium">
+                    {s}
+                  </span>
+                ))}
+              </div>
+              <div className="bg-red-50 rounded-xl p-4 border border-red-100">
+                <p className="text-red-600 text-sm font-semibold mb-1 flex items-center gap-1">
+                  <span>🚨</span> 이런 증상이 나타나면
+                </p>
+                <p className="text-gray-500 text-xs leading-relaxed">심한 부작용이 나타나면 즉시 복용을 중단하고 의사와 상담하세요</p>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* 주의사항 */}
-        {activeTab === '주의사항' && (
-          <div className="bg-white rounded-2xl shadow-sm p-6">
-            <h2 className="font-bold mb-4">주의사항</h2>
-            <div className="space-y-3">
-              {medication.warnings.map((w, i) => (
-                <div key={i} className="flex gap-3 p-4 bg-yellow-50 rounded-xl">
-                  <span className="text-yellow-500 shrink-0">⚠️</span>
-                  <p className="text-sm text-gray-600">{w}</p>
-                </div>
-              ))}
+          {/* 상호작용 */}
+          {activeTab === '상호작용' && (
+            <div className="bg-white rounded-2xl shadow-sm p-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <h2 className="font-bold mb-4">약물 상호작용</h2>
+              <div className="space-y-3">
+                {medication.interactions.map((item, i) => (
+                  <div key={i} className="flex gap-3 p-4 bg-orange-50 rounded-xl">
+                    <span className="shrink-0 text-orange-500">🚫</span>
+                    <p className="text-sm text-gray-600 leading-relaxed">{item}</p>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-
-        {/* 부작용 */}
-        {activeTab === '부작용' && (
-          <div className="bg-white rounded-2xl shadow-sm p-6">
-            <h2 className="font-bold mb-4">주요 부작용</h2>
-            <div className="flex flex-wrap gap-2 mb-6">
-              {medication.sideEffects.map((s, i) => (
-                <span key={i} className="bg-red-50 text-red-400 px-4 py-2 rounded-full text-sm">
-                  {s}
-                </span>
-              ))}
-            </div>
-            <div className="bg-red-50 rounded-xl p-4">
-              <p className="text-red-500 text-sm font-semibold mb-1">⚠️ 이런 증상이 나타나면</p>
-              <p className="text-gray-500 text-xs">심한 부작용이 나타나면 즉시 복용을 중단하고 의사와 상담하세요</p>
-            </div>
-          </div>
-        )}
-
-        {/* 상호작용 */}
-        {activeTab === '상호작용' && (
-          <div className="bg-white rounded-2xl shadow-sm p-6">
-            <h2 className="font-bold mb-4">약물 상호작용</h2>
-            <div className="space-y-3">
-              {medication.interactions.map((item, i) => (
-                <div key={i} className="flex gap-3 p-4 bg-orange-50 rounded-xl">
-                  <span className="shrink-0">🚫</span>
-                  <p className="text-sm text-gray-600">{item}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
+          )}
+        </div>
       </div>
+
+      {/* 하단 탭 바 추가 */}
+      <BottomNav />
     </main>
   )
 }
