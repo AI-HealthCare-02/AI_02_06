@@ -1,7 +1,8 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Pill, FileText, Flame, Ban, X, Check, Plus } from 'lucide-react'
+
 
 function MainSkeleton() {
   return (
@@ -63,6 +64,7 @@ function SurveyModal({ onClose }) {
         </div>
       </div>
     </div>
+
   )
 }
 

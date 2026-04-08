@@ -24,6 +24,7 @@ export default function OcrPage() {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(true)
   const [preview, setPreview] = useState(null)
+  const [file, setFile] = useState(null)
 
   useEffect(() => {
     setTimeout(() => setIsLoading(false), 800)
@@ -38,11 +39,23 @@ export default function OcrPage() {
   }
 
   const handleFileChange = (e) => {
-    const file = e.target.files[0]
-    if (file) {
-      const url = URL.createObjectURL(file)
-      setPreview(url)
+    const selected = e.target.files[0]
+    if (selected) {
+      setFile(selected)
+      setPreview(URL.createObjectURL(selected))
     }
+  }
+
+  const handleAnalyze = () => {
+    if (!file) return
+    sessionStorage.setItem('ocrFileName', file.name)
+    sessionStorage.setItem('ocrFileType', file.type)
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      sessionStorage.setItem('ocrFileData', e.target.result)
+      router.push('/ocr/loading')
+    }
+    reader.readAsDataURL(file)
   }
 
   return (
@@ -113,7 +126,7 @@ export default function OcrPage() {
             취소
           </button>
           <button
-            onClick={() => router.push('/ocr/loading')}
+            onClick={handleAnalyze}
             disabled={!preview}
             className={`flex-1 py-4 rounded-xl text-sm font-bold transition-all active:scale-[0.98] cursor-pointer
               ${preview
