@@ -1,7 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import api from '@/lib/api'
+import { Pill } from 'lucide-react'
+
 
 export default function OcrLoadingPage() {
   const router = useRouter()
@@ -82,7 +83,10 @@ export default function OcrLoadingPage() {
         <div className="relative w-24 h-24 mx-auto mb-8">
           <div className="absolute inset-0 rounded-full border-4 border-gray-100" />
           <div className="absolute inset-0 rounded-full border-4 border-blue-500 border-t-transparent animate-spin" />
-          <div className="absolute inset-0 flex items-center justify-center text-3xl">💊</div>
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Pill size={28} className="text-blue-500" />
+          </div>
+
         </div>
         <h2 className="text-xl font-bold mb-3">처방전 분석 중</h2>
         <p className="text-gray-400 text-sm mb-8">{steps[step]}</p>

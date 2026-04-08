@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import api, { parseApiError, showError } from '../../lib/api'
+import { Pill } from 'lucide-react'
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
@@ -43,7 +44,9 @@ export default function LoginPage() {
       <div className="bg-white p-10 rounded-2xl shadow-sm w-96 text-center">
 
         {/* 로고 */}
-        <div className="text-5xl mb-4">💊</div>
+        <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+          <Pill size={32} className="text-blue-500" />
+        </div>
         <h1 className="text-2xl font-bold mb-1">복약 안내</h1>
         <p className="text-gray-400 text-sm mb-8">내 약을 안전하게 관리하세요</p>
 
