@@ -30,15 +30,17 @@ class OAuthService:
         self.refresh_token_repo = refresh_token_repo or RefreshTokenRepository()
         self.rate_limiter = rate_limiter
 
-        if config.ENV == Env.PROD:
-            self.kakao_token_url = "https://kauth.kakao.com/oauth/token"
-            self.kakao_userinfo_url = "https://kapi.kakao.com/v2/user/me"
-        else:
+        if config.ENV == Env.LOCAL:
+            # local: Mock 서버 사용 (개발 편의)
             # Docker 환경에서 백엔드가 자기 자신(Mock 서버)을 호출할 때
-            # 서비스명인 'fastapi'를 사용하여 내부 네트워크로 직접 통신합니다. (502 에러 방지)
-            base_url = "http://fastapi:8000"
+            # API_BASE_URL을 사용하여 내부 네트워크로 직접 통신합니다.
+            base_url = config.API_BASE_URL
             self.kakao_token_url = f"{base_url}/api/v1/mock/kakao/oauth/token"
             self.kakao_userinfo_url = f"{base_url}/api/v1/mock/kakao/v2/user/me"
+        else:
+            # dev/prod: 실제 카카오 서버 사용
+            self.kakao_token_url = "https://kauth.kakao.com/oauth/token"
+            self.kakao_userinfo_url = "https://kapi.kakao.com/v2/user/me"
 
     def _check_rate_limit(self, client_ip: str) -> None:
         """Rate limit 체크 (rate_limiter가 주입된 경우에만 동작)"""
@@ -121,31 +123,25 @@ class OAuthService:
                 nickname=nickname,
             )
             is_new_user = True
-        
+
         # 2. 본인(SELF) 프로필 자동 생성 체크 (모델 직접 사용)
         from app.models.profiles import Profile, RelationType
-        
+
         self_profile = await Profile.filter(
-            account_id=account.id, 
-            relation_type=RelationType.SELF,
-            deleted_at__isnull=True
+            account_id=account.id, relation_type=RelationType.SELF, deleted_at__isnull=True
         ).first()
-        
+
         if not self_profile:
             from uuid import uuid4
+
             await Profile.create(
                 id=uuid4(),
                 account_id=account.id,
                 name=f"{nickname}(본인)",
                 relation_type=RelationType.SELF,
-                health_survey={
-                    "age": 25,
-                    "gender": "MALE",
-                    "conditions": ["테스트"],
-                    "allergies": ["없음"]
-                }
+                health_survey={"age": 25, "gender": "MALE", "conditions": ["테스트"], "allergies": ["없음"]},
             )
-        
+
         return account, is_new_user
 
     async def kakao_callback(self, code: str, client_ip: str) -> tuple[Account, bool]:
