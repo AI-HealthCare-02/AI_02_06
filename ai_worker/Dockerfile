@@ -21,7 +21,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --group ai --no-dev --frozen
 
 # 4. 로컬 소스 코드를 컨테이너 내부로 복사합니다.
-COPY ./ai_worker ./ai_worker
+COPY ai_worker/ ./ai_worker/
 
 # 디렉토리 소유권 변경
 RUN chown -R appuser:appgroup /app

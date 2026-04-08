@@ -32,7 +32,9 @@ services:
   fastapi:
     container_name: fastapi
     image: ${DOCKER_USER}/${DOCKER_REPOSITORY}:app-${APP_VERSION}
-    env_file: .env
+    env_file:
+      - .env
+      - ./app/.env
     volumes:
       - static_volume:/app/templates
       - media_volume:/app/media
@@ -68,7 +70,9 @@ services:
   ai-worker:
     container_name: ai-worker
     image: ${DOCKER_USER}/${DOCKER_REPOSITORY}:ai-${AI_WORKER_VERSION}
-    env_file: .env
+    env_file:
+      - .env
+      - ./ai_worker/.env
     restart: unless-stopped
     networks:
       - frontend  # 외부 API 접근용 (CLOVA OCR, OpenAI)
@@ -101,7 +105,12 @@ services:
   frontend:
     container_name: nextjs-fe
     image: ${DOCKER_USER}/${DOCKER_REPOSITORY}:frontend-${APP_VERSION}
-    env_file: .env
+    env_file:
+      - .env
+      - ./medication-frontend/.env
+    environment:
+      # Server-side API URL (Docker 내부 네트워크)
+      - API_URL=http://fastapi:8000
     restart: unless-stopped
     networks:
       - frontend
