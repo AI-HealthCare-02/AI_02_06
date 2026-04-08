@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Header from '../../components/Header'
+import BottomNav from '../../components/BottomNav'
 import EmptyState from '../../components/EmptyState'
 import api, { showError } from '../../lib/api'
 
@@ -51,25 +52,6 @@ const Icons = {
   ),
 }
 
-function ChallengeSkeleton() {
-  return (
-    <div className="min-h-screen bg-gray-50 pb-24 animate-pulse">
-      <div className="h-48 bg-white border-b border-gray-100" />
-      <div className="max-w-3xl mx-auto px-6 py-12">
-        <div className="flex gap-8 mb-8 border-b border-gray-200">
-          <div className="h-10 w-24 bg-gray-200 rounded-t-xl" />
-          <div className="h-10 w-24 bg-gray-200 rounded-t-xl" />
-        </div>
-        <div className="space-y-6">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-32 bg-white rounded-3xl border border-gray-100 shadow-sm" />
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export default function ChallengePage() {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(true)
@@ -79,53 +61,13 @@ export default function ChallengePage() {
   const [processingIds, setProcessingIds] = useState([])
 
   const recommended = [
-    {
-      id: 'tpl_1',
-      icon: <Icons.NoSmoking />,
-      title: '금연 챌린지',
-      desc: '30일 동안 금연해보세요',
-      days: 30,
-      difficulty: '어려움',
-      color: 'bg-red-50',
-      textColor: 'text-red-500',
-      iconColor: 'text-red-400',
-    },
-    {
-      id: 'tpl_2',
-      icon: <Icons.Walking />,
-      title: '매일 걷기',
-      desc: '매일 30분씩 걸어보세요',
-      days: 21,
-      difficulty: '보통',
-      color: 'bg-green-50',
-      textColor: 'text-green-500',
-      iconColor: 'text-green-400',
-    },
-    {
-      id: 'tpl_3',
-      icon: <Icons.Pill />,
-      title: '복약 완료 챌린지',
-      desc: '7일 연속 복약을 완료해보세요',
-      days: 7,
-      difficulty: '쉬움',
-      color: 'bg-blue-50',
-      textColor: 'text-blue-500',
-      iconColor: 'text-blue-400',
-    },
-    {
-      id: 'tpl_4',
-      icon: <Icons.Salad />,
-      title: '건강한 식단',
-      desc: '21일 동안 균형 잡힌 식사를 해보세요',
-      days: 21,
-      difficulty: '보통',
-      color: 'bg-yellow-50',
-      textColor: 'text-yellow-500',
-      iconColor: 'text-yellow-400',
-    },
+    { id: 'tpl_1', icon: <Icons.NoSmoking />, title: '금연 챌린지', desc: '30일 동안 금연해보세요', days: 30, difficulty: '어려움', color: 'bg-red-50', textColor: 'text-red-500', iconColor: 'text-red-400' },
+    { id: 'tpl_2', icon: <Icons.Walking />, title: '매일 걷기', desc: '매일 30분씩 걸어보세요', days: 21, difficulty: '보통', color: 'bg-green-50', textColor: 'text-green-500', iconColor: 'text-green-400' },
+    { id: 'tpl_3', icon: <Icons.Pill />, title: '복약 완료 챌린지', desc: '7일 연속 복약을 완료해보세요', days: 7, difficulty: '쉬움', color: 'bg-blue-50', textColor: 'text-blue-500', iconColor: 'text-blue-400' },
+    { id: 'tpl_4', icon: <Icons.Salad />, title: '건강한 식단', desc: '21일 동안 균형 잡힌 식사를 해보세요', days: 21, difficulty: '보통', color: 'bg-yellow-50', textColor: 'text-yellow-500', iconColor: 'text-yellow-400' },
   ]
 
-  const getIconByTitle = (title) => {
+  const getIconByTitle = (title: string) => {
     if (title.includes('금연')) return <Icons.NoSmoking />
     if (title.includes('걷기')) return <Icons.Walking />
     if (title.includes('복약')) return <Icons.Pill />
@@ -133,34 +75,36 @@ export default function ChallengePage() {
     return <Icons.Target />
   }
 
+  const isAlreadyStarted = (templateTitle: string) => {
+    return ongoing.some((c: any) => c.title === templateTitle)
+  }
+
   useEffect(() => {
     const fetchData = async () => {
       try {
+        setIsLoading(true)
         const profileRes = await api.get('/api/v1/profiles/')
         const profiles = profileRes.data
 
-        if (profiles.length === 0) {
+        if (!profiles || profiles.length === 0) {
           router.replace('/survey')
           return
         }
 
-        const selfProfile = profiles.find(p => p.relation_type === 'SELF') || profiles[0]
+        const selfProfile = profiles.find((p: any) => p.relation_type === 'SELF') || profiles[0]
         setProfileId(selfProfile.id)
 
         const challengeRes = await api.get('/api/v1/challenges/')
-        const challenges = challengeRes.data
-
-        const activeChallenges = challenges
-          .filter(c => c.challenge_status === 'IN_PROGRESS')
-          .map(c => ({
+        const activeChallenges = challengeRes.data
+          .filter((c: any) => c.challenge_status === 'IN_PROGRESS')
+          .map((c: any) => ({
             ...c,
             icon: getIconByTitle(c.title),
             current: c.completed_dates?.length || 0,
           }))
 
         setOngoing(activeChallenges)
-      } catch (err) {
-        console.error('데이터 로드 실패:', err)
+      } catch (err: any) {
         if (err.response?.status !== 401) {
           showError('데이터를 불러오는데 실패했습니다.')
         }
@@ -168,13 +112,11 @@ export default function ChallengePage() {
         setIsLoading(false)
       }
     }
-
     fetchData()
   }, [router])
 
-  const handleAccept = async (template) => {
+  const handleAccept = async (template: any) => {
     if (!profileId || processingIds.includes(template.id)) return
-
     setProcessingIds(prev => [...prev, template.id])
 
     try {
@@ -192,18 +134,17 @@ export default function ChallengePage() {
       }
       setOngoing(prev => [...prev, newChallenge])
       setActiveTab('진행중')
-    } catch (err) {
-      console.error('챌린지 시작 실패:', err)
+    } catch (err: any) {
       showError(err.parsed?.message || '챌린지 시작에 실패했습니다.')
     } finally {
       setProcessingIds(prev => prev.filter(id => id !== template.id))
     }
   }
 
-  const handleCheck = async (challenge) => {
+  const handleCheck = async (challenge: any) => {
     if (processingIds.includes(challenge.id)) return
-
     const today = new Date().toISOString().split('T')[0]
+    
     if (challenge.completed_dates?.includes(today)) {
       showError('오늘은 이미 체크했습니다!')
       return
@@ -213,10 +154,11 @@ export default function ChallengePage() {
 
     try {
       const newCompletedDates = [...(challenge.completed_dates || []), today]
+      const isCompleted = newCompletedDates.length >= challenge.target_days
 
       const response = await api.patch(`/api/v1/challenges/${challenge.id}`, {
         completed_dates: newCompletedDates,
-        challenge_status: newCompletedDates.length >= challenge.target_days ? 'COMPLETED' : 'IN_PROGRESS',
+        challenge_status: isCompleted ? 'COMPLETED' : 'IN_PROGRESS',
       })
 
       if (response.data.challenge_status === 'COMPLETED') {
@@ -229,29 +171,21 @@ export default function ChallengePage() {
             : c
         ))
       }
-    } catch (err) {
-      console.error('체크 실패:', err)
+    } catch (err: any) {
       showError(err.parsed?.message || '체크에 실패했습니다.')
     } finally {
       setProcessingIds(prev => prev.filter(id => id !== challenge.id))
     }
   }
 
-  const isAlreadyStarted = (templateTitle) => {
-    return ongoing.some(c => c.title === templateTitle)
-  }
-
   if (isLoading) {
     return (
       <main className="min-h-screen bg-gray-50 pb-24">
         <Header title="생활습관 챌린지" subtitle="건강한 습관을 만들어보세요" showBack={true} />
-        <div className="max-w-3xl mx-auto px-6 py-6">
-          <div className="animate-pulse space-y-4">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="bg-white rounded-2xl h-32 w-full" />
-            ))}
-          </div>
+        <div className="max-w-3xl mx-auto px-6 py-6 space-y-4 animate-pulse">
+          {[1, 2, 3].map(i => <div key={i} className="bg-white rounded-2xl h-32 w-full" />)}
         </div>
+        <BottomNav />
       </main>
     )
   }
@@ -261,16 +195,14 @@ export default function ChallengePage() {
       <Header title="생활습관 챌린지" subtitle="건강한 습관을 만들어보세요" showBack={true} />
 
       <div className="max-w-3xl mx-auto px-6 py-6">
-
-        {/* 탭 */}
         <div className="flex gap-8 mb-8 border-b border-gray-200">
           {['추천', '진행중'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={`pb-3 text-sm font-bold cursor-pointer transition-colors relative active:scale-[0.98]
-                ${activeTab === tab
-                  ? 'text-gray-900 border-b-2 border-gray-900'
+                ${activeTab === tab 
+                  ? 'text-gray-900 border-b-2 border-gray-900' 
                   : 'text-gray-400 hover:text-gray-600'}`}
             >
               {tab}
@@ -283,66 +215,53 @@ export default function ChallengePage() {
           ))}
         </div>
 
-        {/* 추천 챌린지 */}
         {activeTab === '추천' && (
           <div className="space-y-4">
-            {recommended.length > 0 ? (
-              recommended.map((item) => {
-                const started = isAlreadyStarted(item.title)
-                const isProcessing = processingIds.includes(item.id)
-
-                return (
-                  <div key={item.id} className="bg-white rounded-2xl shadow-sm p-6 border border-gray-50 hover:border-blue-200 transition-all">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <div className={`${item.color} ${item.iconColor} w-12 h-12 rounded-xl flex items-center justify-center shadow-sm`}>
-                          {item.icon}
-                        </div>
-                        <div>
-                          <h3 className="font-bold text-gray-900">{item.title}</h3>
-                          <p className="text-gray-400 text-xs mt-1 leading-relaxed">{item.desc}</p>
-                          <div className="flex gap-2 mt-2">
-                            <span className="bg-gray-100 text-gray-500 text-[10px] px-2 py-1 rounded-full font-bold">
-                              {item.days}일
-                            </span>
-                            <span className={`${item.color} ${item.textColor} text-[10px] px-2 py-1 rounded-full font-bold`}>
-                              {item.difficulty}
-                            </span>
-                          </div>
+            {recommended.map((item) => {
+              const started = isAlreadyStarted(item.title)
+              const isProcessing = processingIds.includes(item.id)
+              return (
+                <div key={item.id} className="bg-white rounded-2xl shadow-sm p-6 border border-gray-50 hover:border-blue-200 transition-all">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className={`${item.color} ${item.iconColor} w-12 h-12 rounded-xl flex items-center justify-center shadow-sm`}>
+                        {item.icon}
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-gray-900">{item.title}</h3>
+                        <p className="text-gray-400 text-xs mt-1 leading-relaxed">{item.desc}</p>
+                        <div className="flex gap-2 mt-2">
+                          <span className="bg-gray-100 text-gray-500 text-[10px] px-2 py-1 rounded-full font-bold">{item.days}일</span>
+                          <span className={`${item.color} ${item.textColor} text-[10px] px-2 py-1 rounded-full font-bold`}>{item.difficulty}</span>
                         </div>
                       </div>
-                      <button
-                        onClick={() => handleAccept(item)}
-                        disabled={started || isProcessing}
-                        className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-sm
-                          ${started
-                            ? 'bg-gray-100 text-gray-400'
-                            : isProcessing
-                              ? 'bg-blue-300 text-white cursor-wait'
-                              : 'bg-blue-500 text-white hover:bg-blue-600'
-                          }`}
-                      >
-                        {started ? '진행중' : isProcessing ? '처리중...' : '시작하기'}
-                      </button>
                     </div>
+                    <button
+                      onClick={() => handleAccept(item)}
+                      disabled={started || isProcessing}
+                      className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-sm
+                        ${started 
+                          ? 'bg-gray-100 text-gray-400' 
+                          : isProcessing 
+                            ? 'bg-blue-300 text-white cursor-wait' 
+                            : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+                    >
+                      {started ? '진행중' : isProcessing ? '처리중...' : '시작하기'}
+                    </button>
                   </div>
-                )
-              })
-            ) : (
-              <EmptyState title="추천할 챌린지가 없어요" message="잠시 후 다시 확인해 주세요!" />
-            )}
+                </div>
+              )
+            })}
           </div>
         )}
 
-        {/* 진행중 챌린지 */}
         {activeTab === '진행중' && (
           <div className="space-y-4">
             {ongoing.length > 0 ? (
-              ongoing.map((item) => {
+              ongoing.map((item: any) => {
                 const isProcessing = processingIds.includes(item.id)
                 const today = new Date().toISOString().split('T')[0]
                 const checkedToday = item.completed_dates?.includes(today)
-
                 return (
                   <div key={item.id} className="bg-white rounded-2xl shadow-sm p-6 border border-gray-50">
                     <div className="flex items-center gap-4 mb-5">
@@ -353,11 +272,9 @@ export default function ChallengePage() {
                         <h3 className="font-bold text-gray-900">{item.title}</h3>
                         <p className="text-gray-400 text-xs mt-0.5">{item.current}일째 진행 중!</p>
                       </div>
-                      <span className="text-blue-500 text-sm font-bold">
-                        {item.current}/{item.target_days}일
-                      </span>
+                      <span className="text-blue-500 text-sm font-bold">{item.current}/{item.target_days}일</span>
                     </div>
-                    <div className="w-full bg-gray-100 rounded-full h-2 mb-4">
+                    <div className="w-full bg-gray-100 rounded-full h-2 mb-4 overflow-hidden">
                       <div
                         className="bg-blue-500 h-2 rounded-full transition-all duration-500 shadow-sm"
                         style={{ width: `${(item.current / item.target_days) * 100}%` }}
@@ -367,12 +284,11 @@ export default function ChallengePage() {
                       onClick={() => handleCheck(item)}
                       disabled={isProcessing || checkedToday}
                       className={`w-full py-3.5 rounded-xl text-sm font-bold transition-colors active:scale-[0.98]
-                        ${checkedToday
-                          ? 'bg-green-50 text-green-500'
-                          : isProcessing
-                            ? 'bg-gray-100 text-gray-400 cursor-wait'
-                            : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                        }`}
+                        ${checkedToday 
+                          ? 'bg-green-50 text-green-500' 
+                          : isProcessing 
+                            ? 'bg-gray-100 text-gray-400 cursor-wait' 
+                            : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}
                     >
                       {checkedToday ? '오늘 완료!' : isProcessing ? '처리중...' : '오늘 완료 체크'}
                     </button>
@@ -380,16 +296,12 @@ export default function ChallengePage() {
                 )
               })
             ) : (
-              <EmptyState
-                title="진행 중인 챌린지가 없어요"
-                message="새로운 건강 습관을 시작해볼까요?"
-                actionLabel="추천 챌린지 보기"
-                onAction={() => setActiveTab('추천')}
-              />
+              <EmptyState title="진행 중인 챌린지가 없어요" message="새로운 습관을 시작해보세요!" onAction={() => setActiveTab('추천')} actionLabel="추천 챌린지 보기" />
             )}
           </div>
         )}
       </div>
+      <BottomNav />
     </main>
   )
 }

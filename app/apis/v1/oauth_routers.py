@@ -175,35 +175,40 @@ async def kakao_callback(
         )
 
     # state 검증 (CSRF 방지) - BE에서 생성한 서명된 state 검증
-    if not state or not _verify_state(state):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": "invalid_state",
-                "error_description": "유효하지 않거나 만료된 state입니다.",
-            },
-        )
+    # [DEV ONLY] 개발자용 즉시 로그인 버튼 클릭 시에만 검증을 건너뜁니다.
+    is_dev_login = config.ENV != Env.PROD and code == "dev_test_login"
+    
+    if not is_dev_login:
+        if not state or not _verify_state(state):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": "invalid_state",
+                    "error_description": "유효하지 않거나 만료된 state입니다.",
+                },
+            )
 
     # 클라이언트 IP 추출 (Rate limiting용, 프록시 고려)
     client_ip = _get_client_ip(request)
 
-    # 콜백 처리 (토큰 교환 + 사용자 정보 조회 + 계정 처리)
-    account, is_new_user = await oauth_service.kakao_callback(
-        code=code,
-        client_ip=client_ip,
-    )
+    # [DEV ONLY] 개발용 즉시 로그인 처리
+    if config.ENV != Env.PROD and code == "dev_test_login":
+        account, is_new_user = await oauth_service.dev_test_login()
+    else:
+        # 콜백 처리 (토큰 교환 + 사용자 정보 조회 + 계정 처리)
+        account, is_new_user = await oauth_service.kakao_callback(
+            code=code,
+            client_ip=client_ip,
+        )
 
     # 서비스 JWT 토큰 발급 및 DB 저장
     tokens = await oauth_service.issue_tokens(account)
 
-    # 응답 생성
-    response = Response(
-        content=OAuthLoginResponse(
-            access_token=str(tokens["access_token"]),
-            is_new_user=is_new_user,
-        ).model_dump(),
-        status_code=status.HTTP_200_OK,
-    )
+    # 응답 생성 (FE 메인 페이지로 리다이렉트)
+    from fastapi.responses import RedirectResponse
+    
+    redirect_url = "http://localhost:3000/main"
+    response = RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
     # Access Token을 HttpOnly 쿠키로 설정 (XSS 방지)
     response.set_cookie(

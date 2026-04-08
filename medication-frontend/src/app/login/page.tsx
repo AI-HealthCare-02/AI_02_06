@@ -38,6 +38,18 @@ export default function LoginPage() {
     }
   }
 
+  const handleTestLogin = async () => {
+    setIsLoading(true)
+    try {
+      // 1. 테스트 로그인 API 호출 (백엔드에 약속된 특수 코드 전송)
+      // 로컬 개발 환경(localhost:8000)으로 직접 호출하여 쿠키를 설정함
+      window.location.href = `http://localhost:8000/api/v1/auth/kakao/callback?code=dev_test_login&state=dev_mode`
+    } catch (err) {
+      console.error('테스트 로그인 실패:', err)
+      setIsLoading(false)
+    }
+  }
+
   return (
     <main className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
 
@@ -57,6 +69,15 @@ export default function LoginPage() {
           className="w-full bg-yellow-400 py-3 rounded-xl font-semibold text-sm mb-3 cursor-pointer hover:bg-yellow-500 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isLoading ? '연결 중...' : '카카오로 로그인'}
+        </button>
+
+        {/* 테스트 로그인 버튼 (개발용) */}
+        <button
+          onClick={handleTestLogin}
+          disabled={isLoading}
+          className="w-full bg-slate-800 text-white py-3 rounded-xl font-semibold text-sm mb-3 cursor-pointer hover:bg-black transition-all disabled:opacity-50"
+        >
+          테스트 유저로 로그인 (Dev)
         </button>
 
         {/* 구분선 */}
