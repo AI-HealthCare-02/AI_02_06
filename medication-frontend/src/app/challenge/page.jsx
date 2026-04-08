@@ -3,19 +3,38 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Header from '../../components/Header'
-import BottomNav from '../../components/BottomNav'
 import EmptyState from '../../components/EmptyState'
 import api, { showError } from '../../lib/api'
 
+function ChallengeSkeleton() {
+  return (
+    <div className="min-h-screen bg-gray-50 pb-24 animate-pulse">
+      <div className="h-48 bg-white border-b border-gray-100" />
+      <div className="max-w-3xl mx-auto px-6 py-12">
+        <div className="flex gap-8 mb-8 border-b border-gray-200">
+          <div className="h-10 w-24 bg-gray-200 rounded-t-xl" />
+          <div className="h-10 w-24 bg-gray-200 rounded-t-xl" />
+        </div>
+        <div className="space-y-6">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-32 bg-white rounded-3xl border border-gray-100 shadow-sm" />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function ChallengePage() {
-  const [activeTab, setActiveTab] = useState('추천')
   const [isLoading, setIsLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState('추천')
   const [profileId, setProfileId] = useState(null)
   const [ongoing, setOngoing] = useState([])
   const [processingIds, setProcessingIds] = useState([]) // 처리 중인 챌린지 ID 목록
 
 
   // 추천 챌린지 템플릿 (서버에서 가져올 수도 있음)
+
   const recommended = [
 
     { id: 'tpl_1', icon: '🚭', title: '금연 챌린지', desc: '30일 동안 금연해보세요', days: 30, difficulty: '어려움', color: 'bg-red-50', textColor: 'text-red-500' },
@@ -305,8 +324,6 @@ export default function ChallengePage() {
           </div>
         )}
       </div>
-
-      <BottomNav />
     </main>
   )
 }

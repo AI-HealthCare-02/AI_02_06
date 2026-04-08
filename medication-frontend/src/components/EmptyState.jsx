@@ -6,7 +6,8 @@ export default function EmptyState({
   title,
   message,
   actionLabel,
-  onAction
+  onAction,
+  actionClassName
 }) {
   return (
     <div className="flex flex-col items-center justify-center py-12 px-6 text-center bg-white rounded-2xl shadow-sm border border-gray-50">
@@ -20,7 +21,7 @@ export default function EmptyState({
       {actionLabel && (
         <button
           onClick={onAction}
-          className="bg-blue-500 text-white px-8 py-3 rounded-xl font-semibold text-sm hover:bg-blue-600 transition-colors shadow-sm cursor-pointer"
+          className={actionClassName || "bg-gray-900 text-white px-8 py-3 rounded-xl font-black text-sm hover:bg-gray-800 transition-all shadow-lg cursor-pointer active:scale-95"}
         >
           {actionLabel}
         </button>
