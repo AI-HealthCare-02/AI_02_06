@@ -1,15 +1,40 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Header from '../../components/Header'
-import BottomNav from '../../components/BottomNav'
 import EmptyState from '../../components/EmptyState'
 
+function ChallengeSkeleton() {
+  return (
+    <div className="min-h-screen bg-gray-50 pb-24 animate-pulse">
+      <div className="h-48 bg-white border-b border-gray-100" />
+      <div className="max-w-3xl mx-auto px-6 py-12">
+        <div className="flex gap-8 mb-8 border-b border-gray-200">
+          <div className="h-10 w-24 bg-gray-200 rounded-t-xl" />
+          <div className="h-10 w-24 bg-gray-200 rounded-t-xl" />
+        </div>
+        <div className="space-y-6">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-32 bg-white rounded-3xl border border-gray-100 shadow-sm" />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function ChallengePage() {
+  const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('추천')
   const [accepted, setAccepted] = useState([])
   const [ongoing, setOngoing] = useState([
     { id: 1, abbr: '금연', title: '금연 챌린지', days: 30, current: 3, status: 'IN_PROGRESS', abbrColor: 'bg-red-100 text-red-600' },
   ])
+
+  useEffect(() => {
+    setTimeout(() => setIsLoading(false), 800)
+  }, [])
+
+  if (isLoading) return <ChallengeSkeleton />
 
   const recommended = [
     { id: 1, abbr: '금연', title: '금연 챌린지', desc: '30일 동안 금연해보세요', days: 30, difficulty: '어려움', abbrColor: 'bg-red-100 text-red-600', diffColor: 'bg-red-50 text-red-500' },
@@ -138,8 +163,6 @@ export default function ChallengePage() {
           </div>
         )}
       </div>
-
-      <BottomNav />
     </main>
   )
 }

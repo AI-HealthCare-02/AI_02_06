@@ -119,31 +119,33 @@ export default function Navigation() {
           : 'bg-white border-gray-200'}`}>
         <div className="max-w-[1400px] mx-auto px-6 flex justify-between items-center h-14">
 
-          {/* 로고 */}
-          <Link href={isLanding ? '/' : '/main'} className="flex items-center gap-2 flex-shrink-0">
-            <div className="w-7 h-7 bg-gray-900 rounded-md flex items-center justify-center text-white">
-              <Pill size={14} />
-            </div>
-            <span className="font-semibold text-[15px] tracking-tight text-gray-900">Downforce</span>
-          </Link>
+          <div className="flex items-center gap-10">
+            {/* 로고 */}
+            <Link href={isLanding ? '/' : '/main'} className="flex items-center gap-2 flex-shrink-0">
+              <div className="w-7 h-7 bg-gray-900 rounded-md flex items-center justify-center text-white">
+                <Pill size={14} />
+              </div>
+              <span className="font-semibold text-[15px] tracking-tight text-gray-900">Downforce</span>
+            </Link>
 
-          {/* 앱 내부 페이지 데스크탑 네비게이션 */}
-          {!isLanding && (
-            <div className="hidden md:flex items-center">
-              {menus.map((menu) => (
-                <Link
-                  key={menu.path}
-                  href={menu.path}
-                  className={`px-3.5 py-1.5 text-sm rounded-md transition-colors
-                    ${pathname === menu.path
-                      ? 'text-gray-900 font-medium'
-                      : 'text-gray-500 hover:text-gray-900'}`}
-                >
-                  {menu.label}
-                </Link>
-              ))}
-            </div>
-          )}
+            {/* 앱 내부 페이지 데스크탑 네비게이션 */}
+            {!isLanding && (
+              <div className="hidden md:flex items-center gap-1">
+                {menus.map((menu) => (
+                  <Link
+                    key={menu.path}
+                    href={menu.path}
+                    className={`px-4 py-1.5 text-[13px] rounded-lg transition-all
+                      ${pathname === menu.path
+                        ? 'text-gray-900 font-bold bg-gray-50'
+                        : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50/50'}`}
+                  >
+                    {menu.label}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* 오른쪽 버튼 영역 */}
           <div className="hidden md:flex items-center gap-2">
@@ -168,18 +170,12 @@ export default function Navigation() {
             )}
           </div>
 
-          {/* 모바일: 랜딩은 로그인 버튼, 앱 페이지는 햄버거 */}
-          {isLanding ? (
+          {/* 모바일: 랜딩은 로그인 버튼, 앱 페이지는 표시 없음 (하단 네비게이션 사용) */}
+          {isLanding && (
             <button
               onClick={() => router.push('/login')}
               className="md:hidden text-sm bg-gray-900 text-white font-medium cursor-pointer px-4 py-1.5 rounded-lg">
               로그인
-            </button>
-          ) : (
-            <button
-              onClick={() => setIsOpen(true)}
-              className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 cursor-pointer transition-colors">
-              <Menu size={20} />
             </button>
           )}
         </div>
@@ -189,50 +185,10 @@ export default function Navigation() {
       {!isLanding && (
         <button
           onClick={() => setShowChat(true)}
-          className="fixed bottom-6 right-6 z-[60] w-12 h-12 bg-gray-900 rounded-2xl shadow-lg flex items-center justify-center text-white cursor-pointer hover:bg-gray-700 hover:scale-105 transition-all active:scale-95">
+          className="fixed bottom-24 right-6 z-[60] w-12 h-12 bg-gray-900 rounded-2xl shadow-lg flex items-center justify-center text-white cursor-pointer hover:bg-gray-700 hover:scale-105 transition-all active:scale-95">
           <MessageCircle size={20} />
         </button>
       )}
-
-      {/* 모바일 오버레이 */}
-      {isOpen && (
-        <div onClick={() => setIsOpen(false)} className="fixed inset-0 bg-black/30 backdrop-blur-[2px] z-[70] md:hidden" />
-      )}
-
-      {/* 모바일 드로어 */}
-      <div className={`fixed top-0 left-0 h-full w-72 bg-white z-[80] shadow-2xl transform transition-transform duration-300 md:hidden
-        ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="flex justify-between items-center px-5 py-4 border-b border-gray-100">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-gray-900 rounded-md flex items-center justify-center text-white">
-              <Pill size={14} />
-            </div>
-            <span className="font-semibold text-[15px] text-gray-900">Downforce</span>
-          </div>
-          <button onClick={() => setIsOpen(false)} className="text-gray-400 hover:text-black cursor-pointer p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-            <X size={20} />
-          </button>
-        </div>
-        <div className="py-3 px-3">
-          {menus.map((menu, i) => (
-            <button key={i}
-              onClick={() => { router.push(menu.path); setIsOpen(false) }}
-              className={`flex items-center gap-3 w-full px-4 py-3.5 rounded-xl transition-all cursor-pointer text-sm
-                ${pathname === menu.path ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}>
-              <div className={pathname === menu.path ? 'text-gray-900' : 'text-gray-400'}>
-                {menu.icon}
-              </div>
-              <span>{menu.label}</span>
-            </button>
-          ))}
-        </div>
-        <div className="absolute bottom-0 w-full p-5 border-t border-gray-100">
-          <button className="flex items-center gap-3 text-sm text-gray-500 hover:text-red-500 transition-colors cursor-pointer w-full px-4 py-3 rounded-xl hover:bg-red-50">
-            <LogOut size={16} />
-            로그아웃
-          </button>
-        </div>
-      </div>
 
       <div className="h-14" />
     </>

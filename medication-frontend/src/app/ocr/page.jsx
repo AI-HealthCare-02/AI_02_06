@@ -1,13 +1,35 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Info, Camera } from 'lucide-react'
 import Header from '../../components/Header'
-import BottomNav from '../../components/BottomNav'
+
+function OCRSkeleton() {
+  return (
+    <div className="min-h-screen bg-gray-50 pb-32 animate-pulse">
+      <div className="h-48 bg-white border-b border-gray-100" />
+      <div className="max-w-3xl mx-auto px-6 py-12">
+        <div className="h-40 bg-gray-100 rounded-3xl mb-12 shadow-sm border border-gray-50" />
+        <div className="h-[400px] bg-white rounded-[40px] border border-gray-100 shadow-sm" />
+        <div className="mt-12 flex gap-4">
+          <div className="flex-1 h-16 bg-gray-100 rounded-2xl" />
+          <div className="flex-1 h-16 bg-gray-200 rounded-2xl" />
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function OcrPage() {
   const router = useRouter()
+  const [isLoading, setIsLoading] = useState(true)
   const [preview, setPreview] = useState(null)
+
+  useEffect(() => {
+    setTimeout(() => setIsLoading(false), 800)
+  }, [])
+
+  if (isLoading) return <OCRSkeleton />
 
   const handleCancel = () => {
     if (window.confirm('작성 중인 내용이 사라집니다. 정말 나가시겠습니까?')) {
@@ -103,8 +125,6 @@ export default function OcrPage() {
           </button>
         </div>
       </div>
-
-      <BottomNav />
     </main>
   )
 }
