@@ -50,7 +50,7 @@ async def mock_authorize(
             detail=f"정의되지 않은 Mock 시나리오입니다: {scenario}",
         )
 
-    # 추출한 코드로 리다이렉트 URL 조립
+    # [원복] 추출한 코드로 리다이렉트 URL 조립 (브라우저가 직접 이동하도록)
     redirect_url = f"{redirect_uri}?code={trigger_code}"
     if state:
         redirect_url += f"&state={state}"

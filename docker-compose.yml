@@ -59,6 +59,7 @@ services:
       context: ./medication-frontend
       dockerfile: Dockerfile
     env_file: .env
+    command: npm run dev
     volumes:
       - ./medication-frontend:/app
       - /app/node_modules

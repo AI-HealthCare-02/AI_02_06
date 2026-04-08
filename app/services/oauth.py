@@ -30,13 +30,15 @@ class OAuthService:
         self.refresh_token_repo = refresh_token_repo or RefreshTokenRepository()
         self.rate_limiter = rate_limiter
 
-        # 환경에 따른 타겟 URL 동적 할당
         if config.ENV == Env.PROD:
             self.kakao_token_url = "https://kauth.kakao.com/oauth/token"
             self.kakao_userinfo_url = "https://kapi.kakao.com/v2/user/me"
         else:
-            self.kakao_token_url = f"{config.API_BASE_URL}/api/v1/mock/kakao/oauth/token"
-            self.kakao_userinfo_url = f"{config.API_BASE_URL}/api/v1/mock/kakao/v2/user/me"
+            # Docker 환경에서 백엔드가 자기 자신(Mock 서버)을 호출할 때
+            # 서비스명인 'fastapi'를 사용하여 내부 네트워크로 직접 통신합니다. (502 에러 방지)
+            base_url = "http://fastapi:8000"
+            self.kakao_token_url = f"{base_url}/api/v1/mock/kakao/oauth/token"
+            self.kakao_userinfo_url = f"{base_url}/api/v1/mock/kakao/v2/user/me"
 
     def _check_rate_limit(self, client_ip: str) -> None:
         """Rate limit 체크 (rate_limiter가 주입된 경우에만 동작)"""

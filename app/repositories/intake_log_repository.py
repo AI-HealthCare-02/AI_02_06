@@ -24,6 +24,12 @@ class IntakeLogRepository:
             scheduled_date=scheduled_date,
         ).all()
 
+    async def get_by_profiles(self, profile_ids: list[UUID]) -> list[IntakeLog]:
+        """여러 프로필의 복용 기록 조회"""
+        if not profile_ids:
+            return []
+        return await IntakeLog.filter(profile_id__in=profile_ids).all()
+
     async def get_by_medication(self, medication_id: UUID) -> list[IntakeLog]:
         """약품 ID로 복용 기록 조회"""
         return await IntakeLog.filter(medication_id=medication_id).all()

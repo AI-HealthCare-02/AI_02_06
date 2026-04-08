@@ -1,6 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Header from '../../../components/Header'
+import BottomNav from '../../../components/BottomNav'
 
 export default function OcrResultPage() {
   const router = useRouter()
@@ -42,7 +44,8 @@ export default function OcrResultPage() {
         <div className="flex gap-3 pb-10">
           <button
             onClick={() => router.push('/ocr')}
-            className="flex-1 border border-gray-200 py-4 rounded-xl text-gray-400 text-sm cursor-pointer hover:bg-gray-50">
+            className="flex-1 bg-white border border-gray-200 py-4 rounded-xl text-gray-500 text-sm font-bold cursor-pointer hover:bg-gray-50 transition-colors"
+          >
             다시 촬영
           </button>
           <button
@@ -52,6 +55,8 @@ export default function OcrResultPage() {
           </button>
         </div>
       </div>
+
+      <BottomNav />
     </main>
   )
 }

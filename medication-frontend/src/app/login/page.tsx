@@ -1,10 +1,12 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import api, { parseApiError, showError } from '../../lib/api'
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
+  const router = useRouter()
 
   const handleKakaoLogin = async () => {
     setIsLoading(true)
@@ -15,9 +17,10 @@ export default function LoginPage() {
       const { client_id, redirect_uri, authorize_url, state } = data
 
       // 2. BE에서 받은 state 저장 (CSRF 방지)
-      sessionStorage.setItem('oauth_state', state)
+      localStorage.setItem('oauth_state', state)
 
       // 3. 카카오(Mock) 인증 페이지로 리다이렉트
+      // 운영환경이면 카카오 서버로, 개발환경이면 Mock 서버로 동일하게 리다이렉트 처리
       const params = new URLSearchParams({
         client_id,
         redirect_uri,
@@ -61,7 +64,7 @@ export default function LoginPage() {
         </div>
 
         {/* 네이버 버튼 */}
-        <button className="w-full bg-green-500 text-white py-3 rounded-xl font-semibold text-sm cursor-pointer hover:bg-green-600">
+        <button className="w-full bg-green-500 text-white py-3 rounded-xl font-semibold text-sm cursor-pointer hover:bg-green-600 active:scale-[0.98] transition-transform duration-150">
           네이버로 로그인
         </button>
 
