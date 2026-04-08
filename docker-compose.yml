@@ -4,7 +4,7 @@ services:
     image: redis:alpine
     container_name: redis
     networks:
-      - ws
+      - backend
     ports:
       - "6379:6379"
     healthcheck:
@@ -13,6 +13,20 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    # 리소스 제한
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          memory: 128M
+    # 로깅 설정
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # 2. API Server (FastAPI)
   fastapi:
@@ -27,14 +41,34 @@ services:
     volumes:
       - ./app:/app/app
       - static_volume:/app/templates
-    restart: always
     ports:
       - "8000:8000"
     networks:
-      - ws
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     depends_on:
       redis:
         condition: service_healthy
+    # 리소스 제한
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          memory: 256M
+    # 로깅 설정
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   # 3. AI Worker (Model 학습 및 추론)
   ai-worker:
@@ -44,13 +78,32 @@ services:
       dockerfile: ai_worker/Dockerfile
     image: ${DOCKER_USER}/${DOCKER_REPOSITORY}:ai-${AI_WORKER_VERSION}
     env_file: .env
-    restart: always
-    mem_limit: 4G
     networks:
-      - ws
+      - frontend  # 외부 API 접근용 (CLOVA OCR, OpenAI)
+      - backend   # Redis 통신용
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "python"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     depends_on:
       redis:
         condition: service_healthy
+    # 리소스 제한 (AI 작업용 대용량)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          memory: 1G
+    # 로깅 설정
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   # 4. Frontend (Next.js)
   frontend:
@@ -58,17 +111,39 @@ services:
     build:
       context: ./medication-frontend
       dockerfile: Dockerfile
+      target: dev
     env_file: .env
-    command: npm run dev
+    environment:
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
     volumes:
       - ./medication-frontend:/app
       - /app/node_modules
       - /app/.next
     networks:
-      - ws
-    restart: always
+      - frontend
     ports:
       - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # 리소스 제한
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          memory: 256M
+    # 로깅 설정
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
 
   # 5. Nginx (Reverse Proxy)
   nginx:
@@ -80,14 +155,41 @@ services:
     ports:
       - "80:80"
     networks:
-      - ws
-    depends_on:
-      - fastapi
       - frontend
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      fastapi:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    # 리소스 제한
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          memory: 64M
+    # 로깅 설정
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
 
 volumes:
   static_volume:
 
 networks:
-  ws:
+  # 외부 접근용 네트워크 (nginx, fastapi, frontend)
+  frontend:
     driver: bridge
+  # 내부 서비스용 네트워크 (fastapi, redis, ai-worker)
+  backend:
+    driver: bridge
+    internal: true

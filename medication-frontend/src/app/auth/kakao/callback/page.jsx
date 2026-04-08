@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import api, { parseApiError, showError } from '../../../../lib/api'
 
@@ -49,7 +49,7 @@ function MainSkeleton() {
   )
 }
 
-export default function KakaoCallbackPage() {
+function KakaoCallbackContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const isProcessing = useRef(false)
@@ -120,4 +120,12 @@ export default function KakaoCallbackPage() {
 
   // 로딩 중 - 메인 페이지 스켈레톤 표시
   return <MainSkeleton />
+}
+
+export default function KakaoCallbackPage() {
+  return (
+    <Suspense fallback={<MainSkeleton />}>
+      <KakaoCallbackContent />
+    </Suspense>
+  )
 }

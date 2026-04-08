@@ -1,0 +1,110 @@
+# Gemini Guide - Backend (FastAPI)
+
+## Your Role
+
+백엔드의 반복적인 코드 생성, CRUD 보일러플레이트, 테스트 코드 작성을 담당합니다.
+
+## Quick Scaffolding
+
+### New Router
+```python
+from fastapi import APIRouter, Depends
+from app.dependencies.security import get_current_account
+
+router = APIRouter(prefix="/items", tags=["Items"])
+
+@router.get("/")
+async def list_items():
+    pass
+```
+
+### New Service
+```python
+class ItemService:
+    def __init__(self):
+        self.repository = ItemRepository()
+
+    async def get_all(self) -> list[Item]:
+        return await self.repository.get_all()
+```
+
+### New Repository
+```python
+class ItemRepository:
+    async def get_all(self) -> list[Item]:
+        return await Item.filter(deleted_at__isnull=True).all()
+
+    async def get_by_id(self, id: UUID) -> Item | None:
+        return await Item.filter(id=id, deleted_at__isnull=True).first()
+
+    async def create(self, data: ItemCreate) -> Item:
+        return await Item.create(**data.model_dump())
+```
+
+### New DTO
+```python
+from pydantic import BaseModel, ConfigDict, Field
+from uuid import UUID
+from datetime import datetime
+
+class ItemCreate(BaseModel):
+    name: str = Field(..., max_length=128)
+    profile_id: UUID
+
+class ItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    created_at: datetime
+```
+
+### New Model
+```python
+from tortoise import fields, models
+
+class Item(models.Model):
+    id = fields.UUIDField(pk=True)
+    name = fields.CharField(max_length=128)
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+    deleted_at = fields.DatetimeField(null=True)
+
+    class Meta:
+        table = "items"
+```
+
+## Test Templates
+
+### Service Test
+```python
+import pytest
+from unittest.mock import AsyncMock
+
+@pytest.fixture
+def mock_repository():
+    return AsyncMock()
+
+@pytest.mark.asyncio
+async def test_get_all(mock_repository):
+    service = ItemService()
+    service.repository = mock_repository
+    mock_repository.get_all.return_value = []
+
+    result = await service.get_all()
+
+    assert result == []
+    mock_repository.get_all.assert_called_once()
+```
+
+## Output Format
+
+- 완전한 실행 가능 코드
+- 필요한 import 문 포함
+- 간결한 인라인 주석
+
+## Do NOTs
+
+- 복잡한 비즈니스 로직 설계 (Claude에게 위임)
+- 보안 관련 결정 (Claude에게 위임)
+- 아키텍처 변경 제안
