@@ -166,6 +166,7 @@ export default function SurveyPage() {
         title="건강 정보 입력"
         subtitle={existingProfile ? '정보를 수정할 수 있습니다' : '맞춤 안내를 위한 기본 정보'}
 
+
         showBack={true}
         onBack={handleCancel}
       />
@@ -338,6 +339,7 @@ export default function SurveyPage() {
             disabled={isSubmitting}
             className="flex-1 bg-white border border-gray-200 py-4 rounded-xl text-gray-500 text-sm font-bold hover:bg-gray-50 transition-all active:scale-[0.98] duration-150 disabled:opacity-50"
 
+
           >
             건너뛰기
           </button>
@@ -346,6 +348,7 @@ export default function SurveyPage() {
             onClick={handleSubmit}
             disabled={isSubmitting}
             className="flex-1 bg-blue-500 text-white py-4 rounded-xl text-sm font-bold shadow-sm hover:bg-blue-600 active:scale-[0.95] transition-all duration-150 disabled:opacity-50 disabled:cursor-wait"
+
 
           >
             {isSubmitting ? '저장 중...' : existingProfile ? '수정 완료' : '입력 완료'}

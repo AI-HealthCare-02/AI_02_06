@@ -1,5 +1,4 @@
 'use client'
-
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Header from '../../components/Header'
@@ -26,17 +25,14 @@ function ChallengeSkeleton() {
 }
 
 export default function ChallengePage() {
+  const router = useRouter()
   const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('추천')
   const [profileId, setProfileId] = useState(null)
   const [ongoing, setOngoing] = useState([])
   const [processingIds, setProcessingIds] = useState([]) // 처리 중인 챌린지 ID 목록
 
-
-  // 추천 챌린지 템플릿 (서버에서 가져올 수도 있음)
-
   const recommended = [
-
     { id: 'tpl_1', icon: '🚭', title: '금연 챌린지', desc: '30일 동안 금연해보세요', days: 30, difficulty: '어려움', color: 'bg-red-50', textColor: 'text-red-500' },
     { id: 'tpl_2', icon: '🏃', title: '매일 걷기', desc: '매일 30분씩 걸어보세요', days: 21, difficulty: '보통', color: 'bg-green-50', textColor: 'text-green-500' },
     { id: 'tpl_3', icon: '💊', title: '복약 완료 챌린지', desc: '7일 연속 복약을 완료해보세요', days: 7, difficulty: '쉬움', color: 'bg-blue-50', textColor: 'text-blue-500' },
@@ -86,7 +82,6 @@ export default function ChallengePage() {
         setOngoing(activeChallenges)
       } catch (err) {
         console.error('데이터 로드 실패:', err)
-        // 401 에러는 api 인터셉터에서 처리
         if (err.response?.status !== 401) {
           showError('데이터를 불러오는데 실패했습니다.')
         }
@@ -134,7 +129,6 @@ export default function ChallengePage() {
   const handleCheck = async (challenge) => {
     if (processingIds.includes(challenge.id)) return
 
-    // 오늘 날짜 확인 (이미 체크했는지)
     const today = new Date().toISOString().split('T')[0]
     if (challenge.completed_dates?.includes(today)) {
       showError('오늘은 이미 체크했습니다!')
@@ -144,22 +138,17 @@ export default function ChallengePage() {
     setProcessingIds(prev => [...prev, challenge.id])
 
     try {
-      // completed_dates에 오늘 날짜 추가
       const newCompletedDates = [...(challenge.completed_dates || []), today]
 
       const response = await api.patch(`/api/v1/challenges/${challenge.id}`, {
         completed_dates: newCompletedDates,
-        // 목표 달성 시 상태 변경
         challenge_status: newCompletedDates.length >= challenge.target_days ? 'COMPLETED' : 'IN_PROGRESS',
       })
 
-      // 상태 업데이트
       if (response.data.challenge_status === 'COMPLETED') {
-        // 완료된 챌린지는 목록에서 제거
         setOngoing(prev => prev.filter(c => c.id !== challenge.id))
         showError('축하합니다! 챌린지를 완료했습니다! 🎉')
       } else {
-        // 진행도 업데이트
         setOngoing(prev => prev.map(c =>
           c.id === challenge.id
             ? { ...c, completed_dates: newCompletedDates, current: newCompletedDates.length }
@@ -179,21 +168,7 @@ export default function ChallengePage() {
     return ongoing.some(c => c.title === templateTitle)
   }
 
-  if (isLoading) {
-    return (
-      <main className="min-h-screen bg-gray-50 pb-24">
-        <Header title="생활습관 챌린지" subtitle="건강한 습관을 만들어보세요" showBack={true} />
-        <div className="max-w-3xl mx-auto px-6 py-6">
-          <div className="animate-pulse space-y-4">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="bg-white rounded-2xl h-32 w-full" />
-            ))}
-          </div>
-        </div>
-        <BottomNav />
-      </main>
-    )
-  }
+  if (isLoading) return <ChallengeSkeleton />
 
   return (
     <main className="min-h-screen bg-gray-50 pb-24">
@@ -231,7 +206,7 @@ export default function ChallengePage() {
                 const isProcessing = processingIds.includes(item.id)
 
                 return (
-                  <div key={item.id} className="bg-white rounded-2xl shadow-sm p-6 border border-gray-50 hover:border-blue-200 transition-all">
+                  <div key={item.id} className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100 hover:border-gray-200 transition-all">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-4">
                         <div className={`${item.color} w-12 h-12 rounded-xl flex items-center justify-center text-2xl shadow-sm`}>
@@ -255,13 +230,12 @@ export default function ChallengePage() {
                           ${started
                             ? 'bg-gray-100 text-gray-400'
                             : isProcessing
-                              ? 'bg-blue-300 text-white cursor-wait'
-                              : 'bg-blue-500 text-white hover:bg-blue-600'
+                              ? 'bg-gray-300 text-white cursor-wait'
+                              : 'bg-gray-900 text-white hover:bg-gray-700'
                           }`}>
                         {started ? '진행중' : isProcessing ? '처리중...' : '시작하기'}
                       </button>
                     </div>
-
                   </div>
                 )
               })
@@ -281,20 +255,20 @@ export default function ChallengePage() {
                 const checkedToday = item.completed_dates?.includes(today)
 
                 return (
-                  <div key={item.id} className="bg-white rounded-2xl shadow-sm p-6 border border-gray-50">
+                  <div key={item.id} className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
                     <div className="flex items-center gap-4 mb-5">
                       <span className="text-3xl drop-shadow-sm">{item.icon}</span>
                       <div className="flex-1">
                         <h3 className="font-bold text-gray-900">{item.title}</h3>
                         <p className="text-gray-400 text-xs mt-0.5">{item.current}일째 진행 중!</p>
                       </div>
-                      <span className="text-blue-500 text-sm font-bold">
+                      <span className="text-gray-700 text-sm font-bold">
                         {item.current}/{item.target_days}일
                       </span>
                     </div>
-                    <div className="w-full bg-gray-100 rounded-full h-2 mb-4">
+                    <div className="w-full bg-gray-100 rounded-full h-1.5 mb-4">
                       <div
-                        className="bg-blue-500 h-2 rounded-full transition-all duration-500 shadow-sm"
+                        className="bg-gray-900 h-1.5 rounded-full transition-all duration-500"
                         style={{width: `${(item.current/item.target_days)*100}%`}}
                       />
                     </div>
