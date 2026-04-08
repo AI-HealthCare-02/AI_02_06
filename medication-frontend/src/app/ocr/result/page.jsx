@@ -1,4 +1,5 @@
 'use client'
+
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Trash2 } from 'lucide-react'
@@ -37,6 +38,7 @@ export default function OcrResultPage() {
     { name: '아스피린프로텍트정', dose: '1정', frequency: '1일 1회', instruction: '식후 즉시' },
   ])
 
+
   useEffect(() => {
     setTimeout(() => setIsLoading(false), 800)
   }, [])
@@ -44,13 +46,22 @@ export default function OcrResultPage() {
   if (isLoading) return <ResultSkeleton />
 
   return (
-    <main className="min-h-screen bg-gray-50 pb-32">
-      <Header title="분석 결과" subtitle="인식된 약품 정보를 확인하세요" showBack={true} />
+    <main className="min-h-screen bg-gray-50">
+      <div className="bg-white border-b border-gray-200 px-10 py-4 flex items-center gap-4">
+        <button onClick={() => router.push('/ocr')} className="text-gray-400 hover:text-black cursor-pointer text-xl">←</button>
+        <div>
+          <h1 className="font-bold">처방전 인식 결과</h1>
+          <p className="text-xs text-gray-400">AI가 생성한 복약 가이드입니다</p>
+        </div>
+      </div>
 
-      <div className="max-w-3xl mx-auto px-6 py-8">
-        <div className="mb-6 flex justify-between items-center px-1">
-          <h2 className="font-bold text-gray-900">검색된 약품 {meds.length}건</h2>
-          <button className="text-xs text-blue-500 font-bold hover:underline">+ 직접 추가</button>
+      <div className="max-w-3xl mx-auto px-10 py-8 space-y-4">
+        <div className="bg-green-50 rounded-2xl p-4 flex items-center gap-3">
+          <span className="text-2xl">✅</span>
+          <div>
+            <p className="font-semibold text-green-700 text-sm">분석 완료!</p>
+            <p className="text-green-600 text-xs">복약 가이드가 생성되었습니다.</p>
+          </div>
         </div>
 
         <div className="space-y-4 mb-10">
@@ -81,8 +92,7 @@ export default function OcrResultPage() {
           ))}
         </div>
 
-        {/* 하단 액션 버튼 */}
-        <div className="flex gap-3">
+        <div className="flex gap-3 pb-10">
           <button
             onClick={() => router.push('/ocr')}
             className="flex-1 bg-white border border-gray-200 py-4 rounded-xl text-gray-500 text-sm font-bold cursor-pointer hover:bg-gray-50 transition-colors"
@@ -90,10 +100,9 @@ export default function OcrResultPage() {
             다시 촬영
           </button>
           <button
-            onClick={() => router.push('/main')}
-            className="flex-1 bg-blue-500 text-white py-4 rounded-xl text-sm font-bold shadow-sm hover:bg-blue-600 active:scale-[0.95] transition-all duration-150"
-          >
-            모두 저장하기
+            onClick={() => { sessionStorage.removeItem('ocrGuide'); router.push('/main') }}
+            className="flex-1 bg-blue-500 text-white py-4 rounded-xl font-semibold cursor-pointer hover:bg-blue-600">
+            확인
           </button>
         </div>
       </div>
