@@ -7,6 +7,7 @@ import BottomNav from '../../components/BottomNav'
 export default function OcrPage() {
   const router = useRouter()
   const [preview, setPreview] = useState(null)
+  const [file, setFile] = useState(null)
 
   const handleCancel = () => {
     if (window.confirm('작성 중인 내용이 사라집니다. 정말 나가시겠습니까?')) {
@@ -15,11 +16,23 @@ export default function OcrPage() {
   }
 
   const handleFileChange = (e) => {
-    const file = e.target.files[0]
-    if (file) {
-      const url = URL.createObjectURL(file)
-      setPreview(url)
+    const selected = e.target.files[0]
+    if (selected) {
+      setFile(selected)
+      setPreview(URL.createObjectURL(selected))
     }
+  }
+
+  const handleAnalyze = () => {
+    if (!file) return
+    sessionStorage.setItem('ocrFileName', file.name)
+    sessionStorage.setItem('ocrFileType', file.type)
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      sessionStorage.setItem('ocrFileData', e.target.result)
+      router.push('/ocr/loading')
+    }
+    reader.readAsDataURL(file)
   }
 
   return (
@@ -88,7 +101,7 @@ export default function OcrPage() {
             취소
           </button>
           <button
-            onClick={() => router.push('/ocr/loading')}
+            onClick={handleAnalyze}
             disabled={!preview}
             className={`flex-1 py-4 rounded-xl text-sm font-bold shadow-sm transition-all active:scale-[0.98] duration-150
               ${preview 

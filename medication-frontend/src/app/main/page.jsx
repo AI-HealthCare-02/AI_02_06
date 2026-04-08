@@ -1,9 +1,7 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import Header from '../../components/Header'
-import BottomNav from '../../components/BottomNav'
-import EmptyState from '../../components/EmptyState'
+import api from '@/lib/api'
 
 function MainSkeleton() {
   return (
@@ -119,22 +117,74 @@ function SurveyModal({ onClose }) {
 
 // 챗봇 모달
 function ChatModal({ onClose }) {
+  const [sessionId, setSessionId] = useState(null)
   const [messages, setMessages] = useState([
     { role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요 💊' }
   ])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const bottomRef = useRef(null)
 
-  const handleSend = () => {
+  useEffect(() => {
+    const initSession = async () => {
+      try {
+        const saved = sessionStorage.getItem('chatSessionId')
+        if (saved) {
+          setSessionId(saved)
+          const res = await api.get(`/api/v1/messages/session/${saved}`)
+          if (res.data.length > 0) {
+            const history = res.data.map(m => ({
+              role: m.sender_type === 'USER' ? 'user' : 'assistant',
+              content: m.content,
+            }))
+            setMessages(prev => [prev[0], ...history])
+          }
+          return
+        }
+        const accountId = localStorage.getItem('accountId')
+        const profileId = localStorage.getItem('profileId')
+        if (!accountId || !profileId) return
+        const res = await api.post('/api/v1/chat-sessions/', {
+          account_id: accountId,
+          profile_id: profileId,
+          title: '복약 상담',
+        })
+        sessionStorage.setItem('chatSessionId', res.data.id)
+        setSessionId(res.data.id)
+      } catch (e) {
+        console.error('세션 초기화 실패', e)
+      }
+    }
+    initSession()
+  }, [])
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, isLoading])
+
+  const handleSend = async () => {
     const message = input.trim()
-    if (!message || isLoading) return
+    if (!message || isLoading || !sessionId) return
     setInput('')
     setMessages(prev => [...prev, { role: 'user', content: message }])
     setIsLoading(true)
-    setTimeout(() => {
-      setMessages(prev => [...prev, { role: 'assistant', content: '지금은 테스트 중이에요. 곧 실제 AI와 연결될 거예요!' }])
+    try {
+      const res = await api.post('/api/v1/messages/ask', {
+        session_id: sessionId,
+        content: message,
+      })
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: res.data.assistant_message.content,
+      }])
+    } catch {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: '죄송합니다. 응답을 받지 못했습니다. 잠시 후 다시 시도해주세요.',
+      }])
+    } finally {
       setIsLoading(false)
-    }, 1500)
+    }
   }
 
   return (
@@ -168,22 +218,22 @@ function ChatModal({ onClose }) {
               </div>
             </div>
           )}
+          <div ref={bottomRef} />
         </div>
-
+        
         <div className="p-4 border-t border-gray-100 flex gap-2 items-center bg-white">
-          <input type="text" value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyUp={(e) => { if (e.key === 'Enter') handleSend() }}
-            placeholder="궁금한 것을 물어보세요"
-            className="flex-1 bg-gray-50 border border-gray-100 rounded-2xl px-4 py-3 text-sm outline-none focus:border-blue-300 transition-all" />
-          <button onClick={handleSend}
-            disabled={!input.trim()}
-            className="bg-blue-500 text-white w-10 h-10 rounded-full flex items-center justify-center shadow-md disabled:bg-gray-200 disabled:shadow-none transition-all active:scale-90">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 14-7-3 7 3 7-14-7Z"/><path d="M5 12h11"/></svg>
-          </button>
-        </div>
-      </div>
-    </div>
+  <input type="text" value={input}
+    onChange={(e) => setInput(e.target.value)}
+    onKeyUp={(e) => { if (e.key === 'Enter') handleSend() }}
+    placeholder={sessionId ? '궁금한 것을 물어보세요' : '세션을 초기화하는 중...'}
+    disabled={!sessionId}
+    className="flex-1 bg-gray-50 border border-gray-100 rounded-2xl px-4 py-3 text-sm outline-none focus:border-blue-300 transition-all" />
+  <button onClick={handleSend}
+    disabled={!input.trim() || isLoading || !sessionId}
+    className="bg-blue-500 text-white w-10 h-10 rounded-full flex items-center justify-center shadow-md disabled:bg-gray-200 disabled:shadow-none transition-all active:scale-90">
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 14-7-3 7 3 7-14-7Z"/><path d="M5 12h11"/></svg>
+  </button>
+</div>
   )
 }
 
