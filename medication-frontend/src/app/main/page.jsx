@@ -1,6 +1,7 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import api from '@/lib/api'
 
 function MainSkeleton() {
   return (
@@ -165,68 +166,120 @@ function SurveyModal({ onClose }) {
 
 // 챗봇 모달
 function ChatModal({ onClose }) {
+  const [sessionId, setSessionId] = useState(null)
   const [messages, setMessages] = useState([
     { role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요 💊' }
   ])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const bottomRef = useRef(null)
 
-  const handleSend = () => {
+  useEffect(() => {
+    const initSession = async () => {
+      try {
+        const saved = sessionStorage.getItem('chatSessionId')
+        if (saved) {
+          setSessionId(saved)
+          const res = await api.get(`/api/v1/messages/session/${saved}`)
+          if (res.data.length > 0) {
+            const history = res.data.map(m => ({
+              role: m.sender_type === 'USER' ? 'user' : 'assistant',
+              content: m.content,
+            }))
+            setMessages(prev => [prev[0], ...history])
+          }
+          return
+        }
+        const accountId = localStorage.getItem('accountId')
+        const profileId = localStorage.getItem('profileId')
+        if (!accountId || !profileId) return
+        const res = await api.post('/api/v1/chat-sessions/', {
+          account_id: accountId,
+          profile_id: profileId,
+          title: '복약 상담',
+        })
+        sessionStorage.setItem('chatSessionId', res.data.id)
+        setSessionId(res.data.id)
+      } catch (e) {
+        console.error('세션 초기화 실패', e)
+      }
+    }
+    initSession()
+  }, [])
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, isLoading])
+
+  const handleSend = async () => {
     const message = input.trim()
-    if (!message || isLoading) return
+    if (!message || isLoading || !sessionId) return
     setInput('')
     setMessages(prev => [...prev, { role: 'user', content: message }])
     setIsLoading(true)
-    setTimeout(() => {
-      setMessages(prev => [...prev, { role: 'assistant', content: '지금은 테스트 중이에요. 곧 실제 AI와 연결될 거예요!' }])
+    try {
+      const res = await api.post('/api/v1/messages/ask', {
+        session_id: sessionId,
+        content: message,
+      })
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: res.data.assistant_message.content,
+      }])
+    } catch {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: '죄송합니다. 응답을 받지 못했습니다. 잠시 후 다시 시도해주세요.',
+      }])
+    } finally {
       setIsLoading(false)
-    }, 1500)
+    }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-6">
-      <div className="bg-white rounded-2xl w-full max-w-lg h-[600px] flex flex-col">
-        <div className="flex justify-between items-center p-4 border-b border-gray-100">
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-end p-6">
+      <div className="bg-white rounded-2xl w-full max-w-xl h-[700px] flex flex-col shadow-xl">
+        <div className="flex justify-between items-center p-5 border-b border-gray-100">
           <div>
-            <h2 className="font-bold">복약 AI 상담</h2>
+            <h2 className="font-bold text-lg">복약 AI 상담</h2>
             <p className="text-xs text-gray-400">약 복용 방법, 부작용 등 무엇이든 물어보세요</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-black cursor-pointer text-xl">✕</button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
           {messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-xs px-4 py-3 rounded-2xl text-sm
-                ${msg.role === 'user' ? 'bg-blue-500 text-white rounded-br-sm' : 'bg-gray-100 text-gray-800 rounded-bl-sm'}`}>
+              <div className={`max-w-xs px-4 py-3 rounded-2xl text-sm whitespace-pre-wrap
+                ${msg.role === 'user' ? 'bg-blue-500 text-white rounded-br-sm' : 'bg-white shadow-sm text-gray-800 rounded-bl-sm'}`}>
                 {msg.content}
               </div>
             </div>
           ))}
           {isLoading && (
             <div className="flex justify-start">
-              <div className="bg-gray-100 px-4 py-3 rounded-2xl">
+              <div className="bg-white shadow-sm px-4 py-3 rounded-2xl rounded-bl-sm">
                 <div className="flex gap-1">
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
+                  <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                 </div>
               </div>
             </div>
           )}
+          <div ref={bottomRef} />
         </div>
 
-        <div className="p-4 border-t border-gray-100 flex gap-2 items-center">
-          <button className="w-9 h-9 bg-gray-100 rounded-full text-gray-400 text-xl cursor-pointer hover:bg-gray-200 flex items-center justify-center shrink-0">
-            +
-          </button>
+        <div className="p-5 border-t border-gray-100 flex gap-2 items-center">
           <input type="text" value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyUp={(e) => { if (e.key === 'Enter') handleSend() }}
-            placeholder="메시지를 입력하세요"
-            className="flex-1 border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none" />
+            placeholder={sessionId ? '메시지를 입력하세요' : '세션을 초기화하는 중...'}
+            disabled={!sessionId}
+            className="flex-1 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-300 disabled:bg-gray-50" />
           <button onClick={handleSend}
-            className="bg-blue-500 text-white px-4 py-2 rounded-xl text-sm cursor-pointer hover:bg-blue-600">
+            disabled={isLoading || !sessionId}
+            className="bg-blue-500 text-white px-5 py-3 rounded-xl text-sm font-semibold cursor-pointer hover:bg-blue-600 shrink-0 disabled:opacity-50">
             전송
           </button>
         </div>
