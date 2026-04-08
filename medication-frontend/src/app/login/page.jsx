@@ -30,7 +30,7 @@ export default function LoginPage() {
       })
 
       window.location.href = `${authorize_url}?${params.toString()}`
-    } catch (err: any) {
+    } catch (err) {
       console.error('카카오 로그인 설정 조회 실패:', err)
       const parsed = err.parsed || parseApiError(err)
       showError(parsed.message)
