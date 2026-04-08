@@ -58,8 +58,11 @@ services:
     build:
       context: ./medication-frontend
       dockerfile: Dockerfile
+      target: dev
     env_file: .env
-    command: npm run dev
+    environment:
+      - WATCHPACK_POLLING=true      # Docker Hot Reload
+      - CHOKIDAR_USEPOLLING=true
     volumes:
       - ./medication-frontend:/app
       - /app/node_modules
