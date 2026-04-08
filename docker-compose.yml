@@ -69,7 +69,6 @@ services:
       - /app/.next
     networks:
       - ws
-    restart: always
     ports:
       - "3000:3000"
 
