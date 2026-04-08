@@ -1,54 +1,39 @@
 'use client'
 import { useRouter, usePathname } from 'next/navigation'
+import { Home, FileText, Trophy, Pill, User } from 'lucide-react'
 
 export default function BottomNav() {
   const router = useRouter()
   const pathname = usePathname()
 
+  // 랜딩 페이지에서는 표시하지 않음
+  if (pathname === '/') return null
+
   const tabs = [
-    { 
-      label: '홈', 
-      path: '/main', 
-      icon: (active) => (
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill={active ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
-        </svg>
-      )
-    },
-    { 
-      label: '챌린지', 
-      path: '/challenge', 
-      icon: (active) => (
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill={active ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="m15.477 12.89 1.515 8.526a.5.5 0 0 1-.81.47l-3.58-2.687a1 1 0 0 0-1.197 0l-3.586 2.686a.5.5 0 0 1-.81-.469l1.514-8.526"/>
-          <circle cx="12" cy="8" r="6"/>
-        </svg>
-      )
-    },
-    { 
-      label: '마이페이지', 
-      path: '/mypage', 
-      icon: (active) => (
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill={active ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-        </svg>
-      )
-    }
+    { label: '홈',         path: '/main',       Icon: Home },
+    { label: '등록',       path: '/ocr',        Icon: FileText },
+    { label: '챌린지',     path: '/challenge',  Icon: Trophy },
+    { label: '가이드',     path: '/medication', Icon: Pill },
+    { label: '마이',       path: '/mypage',     Icon: User },
   ]
 
   return (
-    <nav className="fixed bottom-0 w-full bg-white border-t border-gray-100 flex pb-safe shadow-lg z-40">
-      {tabs.map((tab) => {
-        const isActive = pathname === tab.path
+    <nav className="md:hidden fixed bottom-0 left-0 w-full bg-white/95 backdrop-blur-lg border-t border-gray-100 flex py-3 px-2 z-50 shadow-[0_-5px_30px_rgba(0,0,0,0.06)] rounded-t-[32px]">
+      {tabs.map(({ label, path, Icon }) => {
+        const isActive = pathname === path
         return (
           <button
-            key={tab.path}
-            onClick={() => router.push(tab.path)}
-            className={`flex-1 flex flex-col items-center justify-center py-3 gap-1 cursor-pointer transition-colors
-              ${isActive ? 'text-blue-500' : 'text-gray-400 hover:text-gray-600'}`}
+            key={path}
+            onClick={() => router.push(path)}
+            className="flex-1 flex flex-col items-center justify-center gap-1.5 group cursor-pointer"
           >
-            {tab.icon(isActive)}
-            <span className="text-[10px] font-medium leading-none">{tab.label}</span>
+            <div className={`p-1 transition-all duration-300 ${isActive ? 'scale-110 text-gray-900' : 'text-gray-300'}`}>
+              <Icon size={22} strokeWidth={isActive ? 2.5 : 2} />
+            </div>
+            <span className={`text-[10px] tracking-tight transition-all duration-300
+              ${isActive ? 'text-gray-900 font-black' : 'text-gray-400 font-bold'}`}>
+              {label}
+            </span>
           </button>
         )
       })}
