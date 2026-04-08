@@ -108,6 +108,9 @@ services:
     env_file:
       - .env
       - ./medication-frontend/.env
+    environment:
+      # Server-side API URL (Docker 내부 네트워크)
+      - API_URL=http://fastapi:8000
     restart: unless-stopped
     networks:
       - frontend
