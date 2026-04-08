@@ -12,6 +12,11 @@ class MessageCreate(BaseModel):
     content: str = Field(..., description="메시지 내용")
 
 
+class ChatAskRequest(BaseModel):
+    session_id: UUID = Field(..., description="연결된 채팅 세션 ID")
+    content: str = Field(..., description="사용자 질문")
+
+
 class MessageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -21,3 +26,8 @@ class MessageResponse(BaseModel):
     content: str = Field(..., description="메시지 내용")
     created_at: datetime = Field(..., description="전송 일시")
     deleted_at: datetime | None = Field(None, description="삭제 일시")
+
+
+class ChatAskResponse(BaseModel):
+    user_message: MessageResponse
+    assistant_message: MessageResponse

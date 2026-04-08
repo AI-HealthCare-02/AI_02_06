@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 
 from app.dependencies.security import get_current_account
-from app.dtos.message import MessageCreate, MessageResponse
+from app.dtos.message import ChatAskRequest, ChatAskResponse, MessageCreate, MessageResponse
 from app.models.accounts import Account
 from app.services.message_service import MessageService
 
@@ -23,6 +23,27 @@ def get_message_service() -> MessageService:
 
 MessageServiceDep = Annotated[MessageService, Depends(get_message_service)]
 CurrentAccount = Annotated[Account, Depends(get_current_account)]
+
+
+@router.post(
+    "/ask",
+    response_model=ChatAskResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="사용자 질문 전송 및 AI 응답 수신",
+)
+async def ask_message(
+    data: ChatAskRequest,
+    service: MessageServiceDep,
+):
+    """사용자 메시지를 저장하고 RAG 기반 AI 응답을 생성하여 반환합니다."""
+    user_msg, assistant_msg = await service.ask_and_reply(
+        session_id=data.session_id,
+        content=data.content,
+    )
+    return ChatAskResponse(
+        user_message=MessageResponse.model_validate(user_msg),
+        assistant_message=MessageResponse.model_validate(assistant_msg),
+    )
 
 
 @router.post(

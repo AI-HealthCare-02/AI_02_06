@@ -10,7 +10,7 @@ const nextConfig = {
         source: "/api/:path*",
         destination: process.env.API_URL
           ? `${process.env.API_URL}/api/:path*`
-          : "http://fastapi:8000/api/:path*",
+          : "http://localhost:8000/api/:path*",
       },
     ];
   },
