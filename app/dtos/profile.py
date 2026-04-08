@@ -14,7 +14,7 @@ class BaseProfile(BaseModel):
 
 
 class ProfileCreate(BaseProfile):
-    account_id: UUID = Field(..., description="연결된 계정 ID")
+    account_id: UUID | None = Field(None, description="연결된 계정 ID (BE에서 자동 설정됨)")
 
 
 class ProfileUpdate(BaseModel):

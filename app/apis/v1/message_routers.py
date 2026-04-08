@@ -9,7 +9,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 
-from app.dtos.message import MessageCreate, MessageResponse
+from app.dependencies.security import get_current_account
+from app.dtos.message import ChatAskRequest, ChatAskResponse, MessageCreate, MessageResponse
+from app.models.accounts import Account
 from app.services.message_service import MessageService
 
 router = APIRouter(prefix="/messages", tags=["Chat"])
@@ -20,6 +22,28 @@ def get_message_service() -> MessageService:
 
 
 MessageServiceDep = Annotated[MessageService, Depends(get_message_service)]
+CurrentAccount = Annotated[Account, Depends(get_current_account)]
+
+
+@router.post(
+    "/ask",
+    response_model=ChatAskResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="사용자 질문 전송 및 AI 응답 수신",
+)
+async def ask_message(
+    data: ChatAskRequest,
+    service: MessageServiceDep,
+):
+    """사용자 메시지를 저장하고 RAG 기반 AI 응답을 생성하여 반환합니다."""
+    user_msg, assistant_msg = await service.ask_and_reply(
+        session_id=data.session_id,
+        content=data.content,
+    )
+    return ChatAskResponse(
+        user_message=MessageResponse.model_validate(user_msg),
+        assistant_message=MessageResponse.model_validate(assistant_msg),
+    )
 
 
 @router.post(
@@ -30,11 +54,13 @@ MessageServiceDep = Annotated[MessageService, Depends(get_message_service)]
 )
 async def send_message(
     data: MessageCreate,
+    current_account: CurrentAccount,
     service: MessageServiceDep,
 ):
     """채팅 세션 내에서 메시지를 전송합니다."""
-    message = await service.create_user_message(
+    message = await service.create_user_message_with_owner_check(
         session_id=data.session_id,
+        account_id=current_account.id,
         content=data.content,
     )
     return MessageResponse.model_validate(message)
@@ -47,11 +73,12 @@ async def send_message(
 )
 async def list_messages(
     session_id: UUID,
+    current_account: CurrentAccount,
     service: MessageServiceDep,
     limit: int | None = None,
 ):
     """특정 채팅 세션의 모든 메시지 이력을 시간순으로 조회합니다."""
-    messages = await service.get_messages_by_session(session_id, limit)
+    messages = await service.get_messages_by_session_with_owner_check(session_id, current_account.id, limit)
     return [MessageResponse.model_validate(m) for m in messages]
 
 
@@ -62,8 +89,9 @@ async def list_messages(
 )
 async def delete_message(
     message_id: UUID,
+    current_account: CurrentAccount,
     service: MessageServiceDep,
 ):
     """특정 메시지를 삭제합니다."""
-    await service.delete_message(message_id)
+    await service.delete_message_with_owner_check(message_id, current_account.id)
     return None

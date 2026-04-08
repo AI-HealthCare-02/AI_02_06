@@ -1,7 +1,7 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react' // useState, useRef 추가됨
 import { useRouter } from 'next/navigation'
-import Header from '../../components/Header'
+import Header from '../../components/Header' // 누락되었을 수 있는 컴포넌트 임포트 확인 필요
 
 export default function ChatPage() {
   const router = useRouter()
@@ -10,8 +10,9 @@ export default function ChatPage() {
   ])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const bottomRef = useRef(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
 
+  // 메시지 추가 시 자동 스크롤
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
@@ -24,6 +25,7 @@ export default function ChatPage() {
     setMessages(prev => [...prev, { role: 'user', content: message }])
     setIsLoading(true)
 
+    // 실제 AI 연결 전 테스트용 mock 응답 (1.5초 후 응답)
     setTimeout(() => {
       setMessages(prev => [...prev, {
         role: 'assistant',
@@ -40,7 +42,10 @@ export default function ChatPage() {
       {/* 채팅 영역 */}
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 pb-32">
         {messages.map((msg, i) => (
-          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-1 duration-300`}>
+          <div 
+            key={i} 
+            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-1 duration-300`}
+          >
             <div className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm shadow-sm
               ${msg.role === 'user'
                 ? 'bg-blue-500 text-white rounded-br-none'
@@ -51,7 +56,7 @@ export default function ChatPage() {
           </div>
         ))}
 
-        {/* 로딩 애니메이션 */}
+        {/* 로딩 애니메이션 (말줄임표 바운스) */}
         {isLoading && (
           <div className="flex justify-start animate-in fade-in duration-300">
             <div className="bg-white border border-gray-100 shadow-sm px-4 py-4 rounded-2xl rounded-bl-none">
@@ -70,7 +75,7 @@ export default function ChatPage() {
       {/* 입력창 - 하단 고정 */}
       <div className="fixed bottom-0 w-full bg-white border-t border-gray-100 px-6 py-5 z-40">
         <div className="max-w-3xl mx-auto flex gap-3 items-center">
-          <button className="w-11 h-11 bg-gray-50 text-gray-400 rounded-full flex items-center justify-center shrink-0 hover:bg-gray-100 transition-all border border-gray-100 cursor-pointer active:scale-[0.98] transition-transform duration-150">
+          <button className="w-11 h-11 bg-gray-50 text-gray-400 rounded-full flex items-center justify-center shrink-0 hover:bg-gray-100 transition-all border border-gray-100 cursor-pointer active:scale-[0.98]">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M5 12h14m-7-7v14"/>
             </svg>
