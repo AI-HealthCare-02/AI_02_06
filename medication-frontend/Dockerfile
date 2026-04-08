@@ -9,7 +9,7 @@ RUN apk add --no-cache tini
 WORKDIR /app
 
 # 패키지 파일만 먼저 복사 (캐시 레이어 활용)
-COPY package.json package-lock.json* ./
+COPY medication-frontend/package.json medication-frontend/package-lock.json* ./
 
 # 전체 의존성 설치 (devDependencies 포함)
 RUN npm ci
@@ -35,13 +35,13 @@ RUN addgroup --system --gid 1001 nodejs && \
 WORKDIR /app
 
 # 패키지 파일 복사
-COPY package.json package-lock.json* ./
+COPY medication-frontend/package.json medication-frontend/package-lock.json* ./
 
 # 프로덕션 의존성만 설치
 RUN npm ci --omit=dev
 
 # 소스 코드 복사 및 빌드
-COPY . .
+COPY medication-frontend/ .
 RUN npm run build
 
 # standalone 모드용 정적 파일 복사

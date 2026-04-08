@@ -24,7 +24,8 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --group app --no-dev --frozen
 
 # 소스 코드 복사
-COPY . .
+COPY app/ ./app/
+COPY ai_worker/ ./ai_worker/
 
 # 디렉토리 소유권 변경
 RUN chown -R appuser:appgroup /app
