@@ -1,31 +1,32 @@
-# Python
-.venv/
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-*.egg-info/
-.eggs/
+# Python (재귀적 매칭)
+**/.venv/
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+**/*.so
+**/.Python
+**/*.egg-info/
+**/.eggs/
 
 # IDE & Editor
-.idea/
-.vscode/
-*.swp
-*.swo
+**/.idea/
+**/.vscode/
+**/*.swp
+**/*.swo
 
 # Git
 .git/
 .github/
 
-# Environment
-.env
-envs/
-*.env
+# Environment (이중 보호: gitignore + dockerignore)
+**/.env
+**/.env.*
+!**/.env.example
+**/envs/
 
 # Docker (prevent recursive copy)
-docker-compose*.yml
-Dockerfile
+**/docker-compose*.yml
+**/Dockerfile
 
 # Frontend (separate build context)
 medication-frontend/
@@ -35,17 +36,27 @@ nginx/
 
 # Documentation
 README.md
+**/README.md
 docs/
 csv/
 
 # Tests (not needed in production image)
-app/tests/
+**/tests/
+**/*_test.py
+**/test_*.py
 
 # OS
-.DS_Store
-Thumbs.db
+**/.DS_Store
+**/Thumbs.db
+**/desktop.ini
 
 # Misc
-.gitignore
-.dockerignore
-*.log
+**/.gitignore
+**/.dockerignore
+**/*.log
+
+# Cache & Build artifacts
+**/.ruff_cache/
+**/.pytest_cache/
+**/.coverage
+**/htmlcov/
