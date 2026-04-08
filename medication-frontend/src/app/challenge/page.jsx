@@ -1,4 +1,5 @@
 'use client'
+
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Header from '../../components/Header'
@@ -7,7 +8,6 @@ import EmptyState from '../../components/EmptyState'
 import api, { showError } from '../../lib/api'
 
 export default function ChallengePage() {
-  const router = useRouter()
   const [activeTab, setActiveTab] = useState('추천')
   const [isLoading, setIsLoading] = useState(true)
   const [profileId, setProfileId] = useState(null)
@@ -181,18 +181,21 @@ export default function ChallengePage() {
       <Header title="생활습관 챌린지" subtitle="건강한 습관을 만들어보세요" showBack={true} />
 
       <div className="max-w-3xl mx-auto px-6 py-6">
+
         {/* 탭 */}
         <div className="flex gap-8 mb-8 border-b border-gray-200">
           {['추천', '진행중'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`pb-3 text-sm font-bold cursor-pointer transition-colors relative
-                ${activeTab === tab ? 'text-blue-500 border-b-2 border-blue-500' : 'text-gray-400'} active:scale-[0.98] transition-transform duration-150`}
+              className={`pb-3 text-sm font-bold cursor-pointer transition-colors relative active:scale-[0.98]
+                ${activeTab === tab
+                  ? 'text-gray-900 border-b-2 border-gray-900'
+                  : 'text-gray-400 hover:text-gray-600'}`}
             >
               {tab}
               {tab === '진행중' && ongoing.length > 0 && (
-                <span className="ml-1.5 bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">
+                <span className="ml-1.5 bg-gray-900 text-white text-[10px] px-1.5 py-0.5 rounded-full">
                   {ongoing.length}
                 </span>
               )}
@@ -239,6 +242,7 @@ export default function ChallengePage() {
                         {started ? '진행중' : isProcessing ? '처리중...' : '시작하기'}
                       </button>
                     </div>
+
                   </div>
                 )
               })

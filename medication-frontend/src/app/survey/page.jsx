@@ -155,20 +155,27 @@ export default function SurveyPage() {
     )
   }
 
+  const selectedClass = 'bg-gray-900 text-white border-gray-900'
+  const unselectedClass = 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
+  const chipSelected = 'bg-gray-900 text-white border-gray-900'
+  const chipUnselected = 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
+
   return (
     <main className="min-h-screen bg-gray-50 pb-12">
       <Header
         title="건강 정보 입력"
         subtitle={existingProfile ? '정보를 수정할 수 있습니다' : '맞춤 안내를 위한 기본 정보'}
+
         showBack={true}
         onBack={handleCancel}
       />
 
       <div className="max-w-3xl mx-auto px-6 py-8">
+
         {/* 기본 정보 */}
-        <div className="bg-white rounded-2xl shadow-sm p-6 mb-6 border border-gray-50">
+        <div className="bg-white rounded-2xl shadow-sm p-6 mb-6 border border-gray-100">
           <h2 className="font-bold text-gray-900 mb-6 flex items-center gap-2">
-            <span className="w-1 h-4 bg-blue-500 rounded-full"></span>
+            <span className="w-1 h-4 bg-gray-900 rounded-full"></span>
             기본 정보
             <span className="text-red-400 text-xs ml-1">*필수</span>
           </h2>
@@ -179,7 +186,7 @@ export default function SurveyPage() {
                 <input type="number" placeholder="세"
                   value={form.age}
                   onChange={(e) => setForm({...form, age: e.target.value})}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-blue-300 outline-none transition-colors"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none transition-colors"
                 />
               </div>
               <div>
@@ -189,11 +196,8 @@ export default function SurveyPage() {
                     <button key={g}
                       type="button"
                       onClick={() => setForm({...form, gender: g})}
-                      className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all
-                        ${form.gender === g
-                          ? 'bg-blue-500 text-white border-blue-500 shadow-sm'
-                          : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
-                        }`}
+                      className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all cursor-pointer
+                        ${form.gender === g ? selectedClass : unselectedClass}`}
                     >
                       {g === 'MALE' ? '남성' : '여성'}
                     </button>
@@ -207,7 +211,7 @@ export default function SurveyPage() {
                 <input type="number" placeholder="cm"
                   value={form.height}
                   onChange={(e) => setForm({...form, height: e.target.value})}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-blue-300 outline-none transition-colors"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none transition-colors"
                 />
               </div>
               <div>
@@ -215,7 +219,7 @@ export default function SurveyPage() {
                 <input type="number" placeholder="kg"
                   value={form.weight}
                   onChange={(e) => setForm({...form, weight: e.target.value})}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-blue-300 outline-none transition-colors"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none transition-colors"
                 />
               </div>
             </div>
@@ -223,9 +227,9 @@ export default function SurveyPage() {
         </div>
 
         {/* 생활 습관 */}
-        <div className="bg-white rounded-2xl shadow-sm p-6 mb-6 border border-gray-50">
+        <div className="bg-white rounded-2xl shadow-sm p-6 mb-6 border border-gray-100">
           <h2 className="font-bold text-gray-900 mb-6 flex items-center gap-2">
-            <span className="w-1 h-4 bg-blue-500 rounded-full"></span>
+            <span className="w-1 h-4 bg-gray-900 rounded-full"></span>
             생활 습관
           </h2>
           <div className="grid grid-cols-2 gap-4">
@@ -236,11 +240,8 @@ export default function SurveyPage() {
                   <button key={String(val)}
                     type="button"
                     onClick={() => setForm({...form, is_smoking: val})}
-                    className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all
-                      ${form.is_smoking === val
-                        ? 'bg-blue-500 text-white border-blue-500 shadow-sm'
-                        : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
-                      }`}
+                    className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all cursor-pointer
+                      ${form.is_smoking === val ? selectedClass : unselectedClass}`}
                   >
                     {val ? '예' : '아니오'}
                   </button>
@@ -254,11 +255,8 @@ export default function SurveyPage() {
                   <button key={String(val)}
                     type="button"
                     onClick={() => setForm({...form, is_drinking: val})}
-                    className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all
-                      ${form.is_drinking === val
-                        ? 'bg-blue-500 text-white border-blue-500 shadow-sm'
-                        : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
-                      }`}
+                    className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all cursor-pointer
+                      ${form.is_drinking === val ? selectedClass : unselectedClass}`}
                   >
                     {val ? '예' : '아니오'}
                   </button>
@@ -269,9 +267,9 @@ export default function SurveyPage() {
         </div>
 
         {/* 질환 및 알레르기 */}
-        <div className="bg-white rounded-2xl shadow-sm p-6 mb-8 border border-gray-50">
+        <div className="bg-white rounded-2xl shadow-sm p-6 mb-8 border border-gray-100">
           <h2 className="font-bold text-gray-900 mb-6 flex items-center gap-2">
-            <span className="w-1 h-4 bg-blue-500 rounded-full"></span>
+            <span className="w-1 h-4 bg-gray-900 rounded-full"></span>
             질환 및 알레르기
           </h2>
           <div className="space-y-6">
@@ -295,11 +293,8 @@ export default function SurveyPage() {
                       }
                       setForm({...form, conditions: updated})
                     }}
-                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all border
-                      ${form.conditions.includes(item)
-                        ? 'bg-blue-500 text-white border-blue-500 shadow-sm'
-                        : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
-                      }`}
+                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all border cursor-pointer
+                      ${form.conditions.includes(item) ? chipSelected : chipUnselected}`}
                   >
                     {item}
                   </button>
@@ -324,11 +319,8 @@ export default function SurveyPage() {
                       }
                       setForm({...form, allergies: updated})
                     }}
-                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all border
-                      ${form.allergies.includes(item)
-                        ? 'bg-blue-500 text-white border-blue-500 shadow-sm'
-                        : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
-                      }`}
+                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all border cursor-pointer
+                      ${form.allergies.includes(item) ? chipSelected : chipUnselected}`}
                   >
                     {item}
                   </button>
@@ -338,13 +330,14 @@ export default function SurveyPage() {
           </div>
         </div>
 
-        {/* 버튼 */}
+        {/* 하단 버튼 */}
         <div className="flex gap-3">
           <button
             type="button"
             onClick={handleSkip}
             disabled={isSubmitting}
             className="flex-1 bg-white border border-gray-200 py-4 rounded-xl text-gray-500 text-sm font-bold hover:bg-gray-50 transition-all active:scale-[0.98] duration-150 disabled:opacity-50"
+
           >
             건너뛰기
           </button>
@@ -353,6 +346,7 @@ export default function SurveyPage() {
             onClick={handleSubmit}
             disabled={isSubmitting}
             className="flex-1 bg-blue-500 text-white py-4 rounded-xl text-sm font-bold shadow-sm hover:bg-blue-600 active:scale-[0.95] transition-all duration-150 disabled:opacity-50 disabled:cursor-wait"
+
           >
             {isSubmitting ? '저장 중...' : existingProfile ? '수정 완료' : '입력 완료'}
           </button>
