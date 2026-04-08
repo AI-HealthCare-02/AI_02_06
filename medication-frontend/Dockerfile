@@ -25,6 +25,13 @@ CMD ["npm", "run", "dev"]
 # =========================================
 FROM node:22-alpine AS prod
 
+# tini 설치 (PID 1 문제 해결)
+RUN apk add --no-cache tini wget
+
+# Non-root 사용자 생성
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
 WORKDIR /app
 
 # 패키지 파일 복사
@@ -41,7 +48,20 @@ RUN npm run build
 COPY public ./.next/standalone/public
 COPY .next/static ./.next/standalone/.next/static
 
+# 디렉토리 소유권 변경
+RUN chown -R nextjs:nodejs /app
+
+# Non-root 사용자로 전환
+USER nextjs
+
 EXPOSE 3000
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD wget -q --spider http://localhost:3000 || exit 1
+
+# tini를 entrypoint로 사용
+ENTRYPOINT ["/sbin/tini", "--"]
 
 # standalone 모드 실행
 CMD ["node", ".next/standalone/server.js"]
