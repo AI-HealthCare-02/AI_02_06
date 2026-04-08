@@ -1,129 +1,191 @@
 'use client'
-import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Camera, Pill, MessageCircle } from 'lucide-react'
+import { Camera, Pill, MessageCircle, ArrowRight } from 'lucide-react'
 
-function SlideShow({ router }) {
-  const [current, setCurrent] = useState(0)
+const features = [
+  {
+    icon: <Camera size={20} />,
+    title: '처방전 자동 인식',
+    desc: '사진 한 장으로 약품 정보를 AI가 자동 등록해요. 복잡한 입력은 필요 없어요.',
+  },
+  {
+    icon: <Pill size={20} />,
+    title: '스마트 복약 알림',
+    desc: '복약 시간을 절대 놓치지 않도록 맞춤 알림을 보내드려요.',
+  },
+  {
+    icon: <MessageCircle size={20} />,
+    title: 'AI 복약 상담',
+    desc: '약에 대한 궁금증을 AI에게 언제든지 물어보세요. 24시간 답변 가능해요.',
+  },
+]
 
-  const slides = [
-    { title: '어르신 복약 관리', desc: '복잡한 복약 일정을 쉽게 관리해요', bg: 'bg-blue-50' },
-    { title: '가족 건강 케어', desc: '가족의 복약을 한 곳에서 관리해요', bg: 'bg-green-50' },
-    { title: '만성질환 관리', desc: '꾸준한 복약 습관을 만들어드려요', bg: 'bg-purple-50' },
-    { title: '지금 바로 시작해보세요!', desc: '카카오 또는 네이버로 간편하게 시작해요', bg: 'bg-yellow-50', cta: true },
-  ]
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrent(prev => (prev + 1) % slides.length)
-    }, 1500)
-    return () => clearInterval(timer)
-  }, [])
-
-  const slide = slides[current]
-
-  return (
-    <div className="text-center">
-      <div className={`${slide.bg} rounded-2xl p-16 transition-all duration-500`}>
-        <h3 className="text-2xl font-bold mb-3">{slide.title}</h3>
-        <p className="text-gray-400 mb-6">{slide.desc}</p>
-        {slide.cta && (
-          <button
-            onClick={() => router.push('/login')}
-            className="bg-blue-500 text-white px-8 py-3 rounded-xl font-semibold cursor-pointer hover:bg-blue-600 active:scale-[0.98] transition-transform duration-150">
-            시작하기 →
-          </button>
-        )}
-      </div>
-      <div className="flex justify-center gap-2 mt-6">
-        {slides.map((_, i) => (
-          <button
-            key={i}
-            onClick={() => setCurrent(i)}
-            className={`h-2 rounded-full cursor-pointer transition-all duration-300
-              ${current === i ? 'bg-blue-500 w-6' : 'bg-gray-300 w-2'}`}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
+const useCases = [
+  { label: '어르신 복약 관리', desc: '복잡한 복약 일정을 한눈에' },
+  { label: '가족 건강 케어', desc: '가족의 복약을 한 곳에서' },
+  { label: '만성질환 관리', desc: '꾸준한 복약 습관 형성' },
+]
 
 export default function LandingPage() {
   const router = useRouter()
 
   return (
-    <main className="min-h-screen bg-white">
+    <div className="min-h-screen bg-white">
 
-      {/* 상단 네비게이션 */}
-      <div className="flex justify-between items-center px-10 py-4 border-b border-gray-100">
-        <h1 className="text-xl font-bold">Downforce</h1>
-        <button
-          onClick={() => router.push('/login')}
-          className="bg-blue-500 text-white px-6 py-2 rounded-xl text-sm font-semibold cursor-pointer hover:bg-blue-600">
-          로그인
-        </button>
-      </div>
+      {/* ── 히어로 섹션 ── full-width 다크 */}
+      <section
+        className="relative w-full min-h-[620px] flex items-center justify-center overflow-hidden"
+        style={{ backgroundColor: '#000' }}
+      >
+        {/* 그리드 패턴 */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            backgroundImage: `
+              linear-gradient(to right, rgba(255,255,255,0.07) 1px, transparent 1px),
+              linear-gradient(to bottom, rgba(255,255,255,0.07) 1px, transparent 1px)
+            `,
+            backgroundSize: '72px 72px',
+          }}
+        />
 
-      {/* 히어로 섹션 */}
-      <div className="max-w-5xl mx-auto px-10 py-20 flex items-center gap-16">
-        <div className="flex-1">
-          <p className="text-blue-500 text-sm font-semibold mb-4">AI 기반 복약 관리 서비스</p>
-          <h2 className="text-4xl font-bold leading-tight mb-6">
-            내 약을 더 안전하게<br />
-            <span className="text-blue-500">AI가 도와드릴게요</span>
-          </h2>
-          <p className="text-gray-400 text-lg mb-10 leading-relaxed">
-            처방전을 촬영하면 AI가 자동으로 분석해요.<br />
-            복약 시간 알림부터 부작용 안내까지<br />
-            건강한 복약 습관을 만들어드려요.
+        {/* 코너 마커 */}
+        <div className="absolute top-0 left-[180px] w-px h-7 bg-white/20" />
+        <div className="absolute top-0 left-[180px] h-px w-7 bg-white/20" />
+        <div className="absolute top-0 right-[180px] w-px h-7 bg-white/20" />
+        <div className="absolute top-0 right-[180px] h-px w-7 bg-white/20" />
+
+        {/* 그라디언트 블랍 */}
+        <div
+          className="absolute bottom-0 left-1/2 pointer-events-none"
+          style={{
+            transform: 'translateX(-340px)',
+            width: '580px',
+            height: '400px',
+            background: 'radial-gradient(ellipse at center bottom, rgba(249,115,22,0.36) 0%, rgba(239,68,68,0.2) 45%, transparent 70%)',
+          }}
+        />
+        <div
+          className="absolute bottom-0 left-1/2 pointer-events-none"
+          style={{
+            transform: 'translateX(-60px)',
+            width: '580px',
+            height: '400px',
+            background: 'radial-gradient(ellipse at center bottom, rgba(20,184,166,0.36) 0%, rgba(59,130,246,0.2) 45%, transparent 70%)',
+          }}
+        />
+
+        {/* 중앙 아이콘 */}
+        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 pointer-events-none select-none">
+          <div
+            style={{
+              width: '140px',
+              height: '140px',
+              background: 'linear-gradient(160deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.02) 100%)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: '40px',
+              transform: 'translateY(44px) rotate(12deg)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Pill size={44} style={{ color: 'rgba(255,255,255,0.15)' }} />
+          </div>
+        </div>
+
+        {/* 콘텐츠 */}
+        <div className="relative z-10 text-center px-6 max-w-3xl mx-auto py-28">
+          <p className="text-gray-500 text-xs font-medium mb-6 tracking-[0.2em] uppercase">
+            AI 기반 복약 관리 서비스
           </p>
-          <div className="flex gap-4">
+          <h1 className="text-5xl md:text-6xl lg:text-[72px] font-black text-white leading-[1.05] tracking-tight mb-6">
+            내 약을 더<br />
+            <span className="text-gray-400">안전하게</span>
+          </h1>
+          <p className="text-gray-500 text-base md:text-lg mb-10 leading-relaxed max-w-xl mx-auto">
+            처방전을 촬영하면 AI가 자동으로 분석해요.<br />
+            복약 시간 알림부터 부작용 안내까지 한 곳에서.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <button
               onClick={() => router.push('/login')}
-              className="bg-blue-500 text-white px-8 py-4 rounded-xl font-semibold cursor-pointer hover:bg-blue-600">
-              시작하기 →
+              className="px-7 py-3.5 bg-white text-black text-sm font-semibold rounded-full hover:bg-gray-100 transition-all shadow-lg cursor-pointer flex items-center justify-center gap-2"
+            >
+              지금 시작하기 <ArrowRight size={15} />
             </button>
-            <button className="border border-gray-200 px-8 py-4 rounded-xl text-gray-500 font-semibold cursor-pointer hover:bg-gray-50">
+            <button
+              className="px-7 py-3.5 text-white text-sm font-semibold rounded-full transition-all cursor-pointer"
+              style={{ border: '1px solid rgba(255,255,255,0.2)' }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
               더 알아보기
             </button>
           </div>
         </div>
+      </section>
 
-        {/* 오른쪽 카드 */}
-        <div className="flex-1 space-y-3">
-          <div className="bg-blue-50 rounded-2xl p-6">
-            <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center mb-3">
-              <Camera size={20} className="text-blue-500" />
+      {/* ── 기능 소개 ── */}
+      <section className="max-w-5xl mx-auto px-6 py-24">
+        <p className="text-center text-[11px] font-semibold text-gray-400 tracking-[0.2em] uppercase mb-3">Features</p>
+        <h2 className="text-3xl md:text-4xl font-black text-center text-gray-900 tracking-tight mb-16">
+          건강한 복약 습관의<br />모든 것
+        </h2>
+        <div className="grid md:grid-cols-3 gap-5">
+          {features.map((f, i) => (
+            <div
+              key={i}
+              className="p-8 bg-gray-50 rounded-2xl border border-gray-100 hover:border-gray-200 hover:bg-white hover:shadow-sm transition-all"
+            >
+              <div className="w-10 h-10 bg-gray-900 rounded-xl flex items-center justify-center text-white mb-5">
+                {f.icon}
+              </div>
+              <h3 className="font-bold text-gray-900 mb-2">{f.title}</h3>
+              <p className="text-gray-500 text-sm leading-relaxed">{f.desc}</p>
             </div>
-            <h3 className="font-bold mb-1">처방전 자동 인식</h3>
-            <p className="text-gray-400 text-sm">사진 한 장으로 약품 정보를 자동 등록</p>
-          </div>
-          <div className="bg-green-50 rounded-2xl p-6">
-            <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center mb-3">
-              <Pill size={20} className="text-green-500" />
-            </div>
-            <h3 className="font-bold mb-1">복약 알림</h3>
-            <p className="text-gray-400 text-sm">복약 시간을 놓치지 않도록 알려드려요</p>
-          </div>
-          <div className="bg-purple-50 rounded-2xl p-6">
-            <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center mb-3">
-              <MessageCircle size={20} className="text-purple-500" />
-            </div>
-            <h3 className="font-bold mb-1">AI 복약 상담</h3>
-            <p className="text-gray-400 text-sm">약에 대한 궁금증을 AI에게 물어보세요</p>
+          ))}
+        </div>
+      </section>
+
+      {/* ── 사용 사례 ── */}
+      <section className="border-t border-gray-100 py-20">
+        <div className="max-w-5xl mx-auto px-6">
+          <p className="text-center text-[11px] font-semibold text-gray-400 tracking-[0.2em] uppercase mb-3">Who it's for</p>
+          <h2 className="text-2xl md:text-3xl font-black text-center text-gray-900 mb-12">
+            이런 분들께 추천해요
+          </h2>
+          <div className="grid md:grid-cols-3 gap-4">
+            {useCases.map((u, i) => (
+              <div key={i} className="flex items-center gap-4 p-6 rounded-2xl border border-gray-100 hover:border-gray-200 hover:shadow-sm transition-all bg-white">
+                <div className="w-9 h-9 bg-gray-100 rounded-xl flex items-center justify-center text-sm font-black text-gray-500 shrink-0">
+                  {i + 1}
+                </div>
+                <div>
+                  <p className="font-bold text-gray-900 text-sm">{u.label}</p>
+                  <p className="text-gray-400 text-xs mt-0.5">{u.desc}</p>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* 슬라이드 섹션 */}
-      <div className="bg-gray-50 py-20">
-        <div className="max-w-3xl mx-auto px-10">
-          <h2 className="text-2xl font-bold text-center mb-12">이런 분들에게 추천해요</h2>
-          <SlideShow router={router} />
-        </div>
-      </div>
+      {/* ── CTA 섹션 ── */}
+      <section className="py-24 text-center" style={{ backgroundColor: '#0a0a0a' }}>
+        <p className="text-gray-500 text-xs font-medium mb-5 tracking-[0.2em] uppercase">Get started</p>
+        <h2 className="text-3xl md:text-4xl font-black text-white mb-4 tracking-tight">
+          지금 바로 시작해보세요
+        </h2>
+        <p className="text-gray-500 text-base mb-10">카카오 또는 네이버로 3초 만에 시작해요</p>
+        <button
+          onClick={() => router.push('/login')}
+          className="px-8 py-3.5 bg-white text-black font-semibold rounded-full hover:bg-gray-100 transition-all cursor-pointer text-sm shadow-lg"
+        >
+          무료로 시작하기
+        </button>
+      </section>
 
-    </main>
+    </div>
   )
 }
