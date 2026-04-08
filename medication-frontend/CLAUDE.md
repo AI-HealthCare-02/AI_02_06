@@ -2,7 +2,27 @@
 
 ## Your Role
 
-프론트엔드의 복잡한 상태 관리, 아키텍처 결정, TypeScript 마이그레이션을 담당합니다.
+프론트엔드의 복잡한 상태 관리, 아키텍처 결정, 컴포넌트 설계를 담당합니다.
+
+## CRITICAL: JavaScript Only
+
+**TypeScript를 사용하지 않습니다. 모든 파일은 `.jsx` 확장자를 사용합니다.**
+
+- `.tsx` 파일 생성 금지
+- `.ts` 파일 생성 금지
+- 타입 어노테이션 (`: string`, `: number`, `: any` 등) 사용 금지
+- 제네릭 타입 (`<T>`, `Array<string>` 등) 사용 금지
+- `interface`, `type` 키워드 사용 금지
+
+```javascript
+// BAD - TypeScript 문법
+const getUser = (id: string) => { ... }
+const [data, setData] = useState<User | null>(null)
+
+// GOOD - JavaScript 문법
+const getUser = (id) => { ... }
+const [data, setData] = useState(null)
+```
 
 ## Thinking Process
 
@@ -16,8 +36,7 @@
 ### 리팩토링 시
 1. 재사용 가능한 컴포넌트 식별
 2. Custom Hook 추출 가능 여부
-3. 타입 안정성 개선
-4. 성능 최적화 포인트
+3. 성능 최적화 포인트
 
 ## Architecture Decisions
 
@@ -35,51 +54,13 @@
 - **SSR**: SEO 필요, 정적 콘텐츠
 - **CSR**: 인증 필요, 동적 데이터
 
-## TypeScript Migration Strategy
-
-### Phase 1: Config
-```json
-// tsconfig.json
-{
-  "compilerOptions": {
-    "strict": true,
-    "noImplicitAny": true
-  }
-}
-```
-
-### Phase 2: Core Types
-```typescript
-// src/types/api.ts
-interface Profile {
-  id: string
-  name: string
-  relation_type: 'SELF' | 'PARENT' | 'CHILD' | 'SPOUSE' | 'OTHER'
-}
-
-interface Medication {
-  id: string
-  medicine_name: string
-  intake_times: string[]
-}
-```
-
-### Phase 3: Component Props
-```typescript
-interface CardProps {
-  title: string
-  children: React.ReactNode
-  onClick?: () => void
-}
-```
-
 ## Complex Patterns
 
 ### Custom Hook for API
-```typescript
-function useApi<T>(url: string) {
-  const [data, setData] = useState<T | null>(null)
-  const [error, setError] = useState<Error | null>(null)
+```javascript
+function useApi(url) {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
@@ -94,7 +75,7 @@ function useApi<T>(url: string) {
 ```
 
 ### Error Boundary
-```typescript
+```javascript
 'use client'
 
 class ErrorBoundary extends React.Component {
@@ -115,7 +96,8 @@ class ErrorBoundary extends React.Component {
 
 ## Code Quality Checklist
 
-- [ ] TypeScript 타입이 명시적인가?
+- [ ] `.jsx` 확장자를 사용했는가?
+- [ ] TypeScript 문법이 포함되지 않았는가?
 - [ ] 컴포넌트가 단일 책임을 가지는가?
 - [ ] 접근성 속성 (aria-*, role) 적용됐는가?
 - [ ] 로딩/에러 상태 처리됐는가?
@@ -149,5 +131,4 @@ const HeavyComponent = dynamic(() => import('./HeavyComponent'), {
 ## Response Format
 
 - 아키텍처 변경: 근거와 트레이드오프 설명
-- 타입 정의: 전체 타입 파일 제공
 - 리팩토링: Before/After 비교

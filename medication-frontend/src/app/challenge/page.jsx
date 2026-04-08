@@ -67,7 +67,7 @@ export default function ChallengePage() {
     { id: 'tpl_4', icon: <Icons.Salad />, title: '건강한 식단', desc: '21일 동안 균형 잡힌 식사를 해보세요', days: 21, difficulty: '보통', color: 'bg-yellow-50', textColor: 'text-yellow-500', iconColor: 'text-yellow-400' },
   ]
 
-  const getIconByTitle = (title: string) => {
+  const getIconByTitle = (title) => {
     if (title.includes('금연')) return <Icons.NoSmoking />
     if (title.includes('걷기')) return <Icons.Walking />
     if (title.includes('복약')) return <Icons.Pill />
@@ -75,8 +75,8 @@ export default function ChallengePage() {
     return <Icons.Target />
   }
 
-  const isAlreadyStarted = (templateTitle: string) => {
-    return ongoing.some((c: any) => c.title === templateTitle)
+  const isAlreadyStarted = (templateTitle) => {
+    return ongoing.some((c) => c.title === templateTitle)
   }
 
   useEffect(() => {
@@ -91,20 +91,20 @@ export default function ChallengePage() {
           return
         }
 
-        const selfProfile = profiles.find((p: any) => p.relation_type === 'SELF') || profiles[0]
+        const selfProfile = profiles.find((p) => p.relation_type === 'SELF') || profiles[0]
         setProfileId(selfProfile.id)
 
         const challengeRes = await api.get('/api/v1/challenges/')
         const activeChallenges = challengeRes.data
-          .filter((c: any) => c.challenge_status === 'IN_PROGRESS')
-          .map((c: any) => ({
+          .filter((c) => c.challenge_status === 'IN_PROGRESS')
+          .map((c) => ({
             ...c,
             icon: getIconByTitle(c.title),
             current: c.completed_dates?.length || 0,
           }))
 
         setOngoing(activeChallenges)
-      } catch (err: any) {
+      } catch (err) {
         if (err.response?.status !== 401) {
           showError('데이터를 불러오는데 실패했습니다.')
         }
@@ -115,7 +115,7 @@ export default function ChallengePage() {
     fetchData()
   }, [router])
 
-  const handleAccept = async (template: any) => {
+  const handleAccept = async (template) => {
     if (!profileId || processingIds.includes(template.id)) return
     setProcessingIds(prev => [...prev, template.id])
 
@@ -134,14 +134,14 @@ export default function ChallengePage() {
       }
       setOngoing(prev => [...prev, newChallenge])
       setActiveTab('진행중')
-    } catch (err: any) {
+    } catch (err) {
       showError(err.parsed?.message || '챌린지 시작에 실패했습니다.')
     } finally {
       setProcessingIds(prev => prev.filter(id => id !== template.id))
     }
   }
 
-  const handleCheck = async (challenge: any) => {
+  const handleCheck = async (challenge) => {
     if (processingIds.includes(challenge.id)) return
     const today = new Date().toISOString().split('T')[0]
     
@@ -171,7 +171,7 @@ export default function ChallengePage() {
             : c
         ))
       }
-    } catch (err: any) {
+    } catch (err) {
       showError(err.parsed?.message || '체크에 실패했습니다.')
     } finally {
       setProcessingIds(prev => prev.filter(id => id !== challenge.id))
@@ -258,7 +258,7 @@ export default function ChallengePage() {
         {activeTab === '진행중' && (
           <div className="space-y-4">
             {ongoing.length > 0 ? (
-              ongoing.map((item: any) => {
+              ongoing.map((item) => {
                 const isProcessing = processingIds.includes(item.id)
                 const today = new Date().toISOString().split('T')[0]
                 const checkedToday = item.completed_dates?.includes(today)
