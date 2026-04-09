@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { Home, FileText, Trophy, Pill, User, MessageCircle, X, Menu, LogOut, Send } from 'lucide-react'
+import LogoutModal, { useLogout } from '@/components/LogoutModal'
 
 function ChatModal({ onClose }) {
   const [messages, setMessages] = useState([
@@ -100,6 +101,7 @@ export default function Navigation() {
     window.addEventListener('scroll', handleScroll)
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
+  const { showLogoutModal, setShowLogoutModal, handleLogout } = useLogout()
 
   const menus = [
     { label: '홈',         path: '/main',       icon: <Home size={18} /> },
@@ -112,6 +114,7 @@ export default function Navigation() {
   return (
     <>
       {showChat && <ChatModal onClose={() => setShowChat(false)} />}
+      {showLogoutModal && <LogoutModal onClose={() => setShowLogoutModal(false)} onConfirm={handleLogout} />}
 
       <nav className={`fixed top-0 w-full z-50 transition-all duration-200 border-b
         ${scrolled
@@ -163,7 +166,8 @@ export default function Navigation() {
                 </button>
               </>
             ) : (
-              <button className="text-sm text-gray-500 hover:text-gray-900 transition-colors cursor-pointer px-3.5 py-1.5 hover:bg-gray-100 rounded-md flex items-center gap-1.5">
+              <button onClick={() => setShowLogoutModal(true)}
+              className="text-sm text-gray-500 hover:text-gray-900 transition-colors cursor-pointer px-3.5 py-1.5 hover:bg-gray-100 rounded-md flex items-center gap-1.5">
                 <LogOut size={15} />
                 로그아웃
               </button>
