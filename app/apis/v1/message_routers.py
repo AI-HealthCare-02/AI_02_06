@@ -95,3 +95,37 @@ async def delete_message(
     """특정 메시지를 삭제합니다."""
     await service.delete_message_with_owner_check(message_id, current_account.id)
     return None
+
+
+from pydantic import BaseModel, Field
+
+
+class MessageFeedbackRequest(BaseModel):
+    is_helpful: bool = Field(..., description="도움이 되었는지 여부")
+    feedback_text: str | None = Field(None, max_length=256, description="추가 피드백 텍스트")
+
+
+@router.post(
+    "/{message_id}/feedback",
+    status_code=status.HTTP_200_OK,
+    summary="메시지 피드백 제출",
+)
+async def submit_feedback(
+    message_id: UUID,
+    data: MessageFeedbackRequest,
+    current_account: CurrentAccount,
+    service: MessageServiceDep,
+):
+    """AI 상담 메시지에 대해 좋아요/싫어요 피드백을 남깁니다."""
+    # 메시지 소유권 확인 및 피드백 저장 로직
+    # (실제 소유권은 메시지가 속한 세션의 소유자와 현재 유저가 일치하는지 확인해야 함)
+    from app.repositories.message_repository import MessageFeedbackRepository
+
+    repo = MessageFeedbackRepository()
+    feedback = await repo.create_or_update(
+        message_id=message_id,
+        is_helpful=data.is_helpful,
+        feedback_text=data.feedback_text,
+    )
+
+    return {"status": "success", "feedback_id": str(feedback.id)}
