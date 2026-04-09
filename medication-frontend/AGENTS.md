@@ -27,77 +27,53 @@ medication-frontend/
 │       ├── api.js        # Axios + RTR
 │       ├── errors.js     # Error Handling
 │       └── tokenManager.js
-├── middleware.ts         # RS256 JWT 검증
+├── out/                  # Static Export 빌드 결과물
 ├── public/               # Static Assets
 └── package.json
 ```
 
-## Security Architecture (Zero Trust + RS256)
+## CRITICAL: JavaScript Only
 
-### Next.js 보안 역할: UI Gatekeeper
+**TypeScript를 사용하지 않습니다. 모든 파일은 `.jsx` 확장자를 사용합니다.**
 
-Next.js는 서비스의 첫 번째 방어선으로, 비로그인 사용자를 입구에서 차단합니다.
+- `.tsx` 파일 생성 금지
+- `.ts` 파일 생성 금지
+- 타입 어노테이션 (`: string`, `: number`, `: any` 등) 사용 금지
+- 제네릭 타입 (`<T>`, `Array<string>` 등) 사용 금지
+- `interface`, `type` 키워드 사용 금지
 
-| 항목 | Next.js (Frontend) | FastAPI (Backend) |
-|------|-------------------|-------------------|
-| **역할** | 세션 인증 Gatekeeper | 리소스 인증 + 최종 인가 |
-| **책임** | UI 자산 보호, 입장 통제 | 데이터 무결성, 최후의 보루 |
-| **키 유형** | RS256 Public Key | RS256 Private Key |
-| **검증 수준** | 서명 유효성 (Authentication) | 재인증 + 소유권 (Authorization) |
+## Deployment: Static Export
 
-> Next.js는 UI 진입을 위한 신분증 확인을, FastAPI는 실제 금고 내부 데이터에 대한 열람 권한 확인을 담당합니다.
+Next.js를 **Static Export** 모드로 빌드합니다.
 
-### 미들웨어 도입 이유
-
-1. **UX 최적화**: 브라우저 단 리다이렉트 시 발생하는 스켈레톤 UI 깜빡임 차단
-2. **공격 표면 축소**: 비로그인 사용자에게 JS 코드(API 주소, 서비스 구조) 노출 방지
-3. **리소스 필터링**: 무의미한 가짜 요청이 백엔드까지 도달하지 않도록 경량 필터 역할
-
-### middleware.ts 구현 요구사항
-
-```typescript
-// middleware.ts
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
-import jwt from 'jsonwebtoken'
-
-const PUBLIC_KEY = process.env.JWT_PUBLIC_KEY!
-
-export function middleware(request: NextRequest) {
-  const token = request.cookies.get('access_token')?.value
-
-  if (!token) {
-    return NextResponse.redirect(new URL('/login', request.url))
-  }
-
-  try {
-    // jwt.verify()가 수행하는 검증:
-    // 1. 위조 판별 (Signature Verification) - 서명 불일치 시 실패
-    // 2. 만료 검증 (Expiration Check) - exp 클레임 초과 시 실패
-    // 3. Algorithm Pinning - HS256 교체 공격 차단
-    jwt.verify(token, PUBLIC_KEY, { algorithms: ['RS256'] })
-    return NextResponse.next()
-  } catch {
-    // 위조되었거나 만료된 토큰 -> 로그인 페이지로 리다이렉트
-    return NextResponse.redirect(new URL('/login', request.url))
-  }
-}
-
-export const config = {
-  matcher: ['/main/:path*', '/mypage/:path*', '/medication/:path*']
+```javascript
+// next.config.mjs
+const nextConfig = {
+  output: "export",        // 정적 파일만 생성
+  trailingSlash: true,     // /page -> /page/index.html
+  images: { unoptimized: true },
 }
 ```
 
-### 핵심 보안 키워드
+### 빌드 및 배포
+```bash
+# 빌드
+npm run build
+# -> out/ 폴더에 정적 파일 생성
 
-- **RS256**: 비대칭 키 알고리즘 (Public Key로 검증만 가능)
-- **HttpOnly Cookie**: XSS 공격으로부터 토큰 보호
-- **Zero Trust**: 모든 요청을 의심, 매번 검증
-- **Algorithm Pinning**: `algorithms: ['RS256']` 명시로 HS256 교체 공격 차단
+# 배포
+# Nginx가 out/ 폴더를 직접 서빙
+```
+
+### Static Export 제약사항
+- `getServerSideProps` 사용 불가
+- `middleware.ts` 사용 불가
+- Next.js API Routes 사용 불가
+- Image Optimization 사용 불가 (unoptimized: true)
 
 ## Technology Stack
 
-- **Framework**: Next.js 16.2.2 (App Router)
+- **Framework**: Next.js 16.2.2 (App Router, Static Export)
 - **React**: 19.2.4
 - **Styling**: Tailwind CSS v4
 - **HTTP**: Axios with RTR interceptors
@@ -105,8 +81,8 @@ export const config = {
 
 ## Coding Conventions
 
-### File Naming
-- Pages: `page.jsx` or `page.tsx`
+### File Naming (JavaScript Only)
+- Pages: `page.jsx`
 - Components: `PascalCase.jsx`
 - Utilities: `camelCase.js`
 
@@ -158,9 +134,19 @@ className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
 // Cookie는 브라우저가 자동으로 전송
 // withCredentials: true 설정 필요
 const api = axios.create({
-  baseURL: '/api/v1',
+  baseURL: process.env.NEXT_PUBLIC_API_BASE_URL || '',
   withCredentials: true,  // HttpOnly Cookie 전송
 })
+```
+
+### 환경별 API URL (루트 .env에서 설정)
+```bash
+# 로컬 개발 (ENV=local 또는 ENV=dev)
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+
+# Docker 통합 / 프로덕션
+NEXT_PUBLIC_API_BASE_URL=
+# -> 비워두면 Nginx 프록시 사용 (/api/... -> FastAPI)
 ```
 
 ### Data Fetching Pattern
@@ -198,7 +184,7 @@ try {
 - API URL 하드코딩 금지 (`/api/v1/...` 사용)
 - `console.log` 프로덕션 코드에 남기기 금지
 - 인라인 스타일 사용 금지 (Tailwind 사용)
-- `any` 타입 사용 금지 (TypeScript 파일)
+- `.tsx`, `.ts` 파일 생성 금지 (JavaScript Only)
 - localStorage에 JWT 저장 금지 -> HttpOnly Cookie 사용
 
 ## State Management
@@ -220,8 +206,9 @@ router.back()
 ```
 
 ### Protected Routes
-- 인증 필요 페이지: `/main`, `/mypage`, `/medication` 등 (middleware.ts에서 처리)
-- 공개 페이지: `/`, `/login`
+인증 검증은 FastAPI에서 처리합니다.
+- 인증 필요 API 호출 시 401 응답 -> 로그인 페이지로 리다이렉트
+- 클라이언트에서 인증 상태 확인 후 UI 분기
 
 ## Loading States
 
@@ -237,23 +224,24 @@ if (isLoading) {
 }
 ```
 
-## Docker Deployment
+## Development
 
-Next.js는 **독립 Docker 컨테이너(Node.js 서버)**로 배포합니다.
+### 로컬 개발
+```bash
+# 1. 루트 .env 설정 (환경변수 통합 관리)
+# 프로젝트 루트에서 cp .env.example .env 후 필수 값 입력
 
-- Static Export 아님 (middleware.ts 사용을 위해)
-- 서버 사이드 보안 제어 가능
-- UX 깜빡임 없는 리다이렉트
+# 2. 개발 서버 실행 (루트 .env 자동 로드)
+npm run dev
+# -> http://localhost:3000
 
-```dockerfile
-# Dockerfile.prod 예시
-FROM node:20-alpine AS runner
-WORKDIR /app
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
+# 3. 백엔드는 Docker로 실행
+docker compose up fastapi redis
+```
 
-ENV NODE_ENV=production
-EXPOSE 3000
-CMD ["node", "server.js"]
+### 빌드 테스트
+```bash
+npm run build
+npx serve out
+# -> http://localhost:3000 에서 정적 파일 테스트
 ```

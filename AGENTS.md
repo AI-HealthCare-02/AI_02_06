@@ -9,9 +9,9 @@
 ```
 /
 ├── app/                    # FastAPI Backend (Port 8000)
-├── medication-frontend/    # Next.js Frontend (Port 3000)
+├── medication-frontend/    # Next.js Frontend (Static Export)
 ├── ai_worker/              # AI Processing Worker
-├── nginx/                  # Reverse Proxy Config
+├── nginx/                  # Reverse Proxy + Static File Server
 ├── docs/                   # Documentation
 └── docker-compose.yml      # Service Orchestration
 ```
@@ -20,54 +20,110 @@
 
 ### Service Communication
 ```
-Client -> Nginx:80 -> Frontend:3000 (UI)
+Client -> Nginx:80 -> Static Files (UI)
                    -> FastAPI:8000 (API)
 FastAPI <-> Redis:6379 <-> AI Worker (Async Tasks)
 FastAPI <-> PostgreSQL:5432 (Data)
 ```
 
 ### Technology Stack
-- **Frontend**: Next.js 16, React 19, Tailwind CSS v4
+- **Frontend**: Next.js 16 (Static Export), React 19, Tailwind CSS v4 (**JavaScript Only**)
 - **Backend**: FastAPI, Tortoise ORM, PostgreSQL 15
 - **AI Worker**: Python, RQ (Redis Queue), CPU-only PyTorch
 - **Infra**: Docker, Nginx, Redis, Let's Encrypt
 
-## Security Architecture (RS256 + Zero Trust)
+## Environment Configuration (local / dev / prod)
 
-### 핵심 보안 방향성
+### 환경별 동작 차이
+
+| 환경 | `ENV` | OAuth | Dev 로그인 | 용도 |
+|------|-------|-------|-----------|------|
+| **local** | `local` | Mock 서버 | 표시 | 로컬 개발 (Docker 없이) |
+| **dev** | `dev` | 실제 Kakao | 표시 | Docker 개발 환경 |
+| **prod** | `prod` | 실제 Kakao | 숨김 | 프로덕션 배포 |
+
+### 핵심 환경변수
+
+```bash
+# 공통
+ENV=local|dev|prod           # 환경 구분
+
+# Backend (FastAPI)
+API_BASE_URL=http://fastapi:8000   # Docker 내부 통신용
+FRONTEND_URL=http://localhost:3000      # 브라우저 리다이렉트용
+
+# Frontend (Next.js)
+NEXT_PUBLIC_ENV=local|dev|prod     # 클라이언트 환경 구분
+NEXT_PUBLIC_API_BASE_URL=          # 비워두면 Nginx 프록시 사용 (프로덕션)
+                                   # http://localhost:8000 (로컬 개발)
+```
+
+### OAuth 흐름 분기
+
+```python
+# FastAPI: oauth_routers.py
+if config.ENV == Env.LOCAL:
+    # Mock 서버로 리다이렉트 (카카오 앱 없이 테스트)
+    authorize_url = f"{config.FRONTEND_URL}/api/v1/mock/kakao/authorize"
+else:
+    # 실제 카카오 OAuth
+    authorize_url = "https://kauth.kakao.com/oauth/authorize"
+```
+
+### Dev 로그인 버튼 (Frontend)
+
+```javascript
+// login/page.jsx
+const IS_DEV_MODE = process.env.NEXT_PUBLIC_ENV !== 'prod'
+// prod 환경에서만 Dev 로그인 버튼 숨김
+```
+
+## Security Architecture (RS256)
+
+### 인증 방식
 
 1. **RS256 비대칭 키 인증**
    - FastAPI: Private Key로 JWT 서명 및 발행
-   - Next.js: Public Key로 서명 검증만 수행
-   - 키 유출 시에도 토큰 위조 불가능
+   - 클라이언트: 토큰을 HttpOnly Cookie로 저장
 
-2. **이중 방어 체계**
-   - Next.js: 세션 인증 Gatekeeper (UI 자산 보호)
-   - FastAPI: 재인증 + 최종 인가 (데이터 무결성)
-
-3. **Algorithm Pinning**
+2. **Algorithm Pinning**
    - `algorithms=['RS256']` 명시
    - HS256 교체 공격 (Algorithm Confusion Attack) 차단
 
-4. **Cookie 기반 JWT**
+3. **Cookie 기반 JWT**
    - localStorage 대신 HttpOnly Cookie 사용
    - XSS 공격으로부터 토큰 보호
 
-### 서비스별 보안 책임
+### 보안 검증 흐름
 
-| 서비스 | 역할 | 검증 수준 |
-|--------|------|-----------|
-| Next.js | UI Gatekeeper | 서명 유효성 (Authentication) |
-| FastAPI | Data Guardian | 재인증 + 소유권 (Authorization) |
+```
+Client Request
+    -> Nginx (Static Files / API Proxy)
+    -> FastAPI (토큰 검증 + 소유권 확인)
+    -> Response
+```
+
+FastAPI가 모든 인증/인가를 담당합니다:
+- **토큰 검증**: RS256 서명 확인, 만료 시간 확인
+- **소유권 확인**: 요청 리소스에 대한 접근 권한 검증
 
 ## Docker Deployment
 
-### 컨테이너 구성
-- **Next.js**: 독립 Node.js 컨테이너 (Static Export 아님)
-  - middleware.ts를 통한 서버단 보안 제어
+### 컨테이너 구성 (3개)
+- **Nginx**: Static File Server + Reverse Proxy
 - **FastAPI**: Uvicorn ASGI 서버
 - **AI Worker**: CPU-only 환경 (CUDA 의존성 제거)
-- **Nginx**: Reverse Proxy + SSL Termination
+
+### Frontend 배포 (Static Export)
+```bash
+# 1. 빌드 (로컬에서 실행)
+cd medication-frontend
+npm run build
+# -> out/ 폴더에 정적 파일 생성
+
+# 2. Docker 실행 (Nginx가 out/ 폴더 서빙)
+docker compose up nginx fastapi
+```
 
 ### AI Worker 최적화
 ```toml
@@ -82,6 +138,33 @@ torch = { index = "pytorch-cpu" }
 torchvision = { index = "pytorch-cpu" }
 ```
 
+## Development Workflow
+
+### 로컬 개발 (권장)
+```bash
+# 1. 루트 .env 설정 (환경변수 통합 관리)
+cp .env.example .env
+# 필수 값 입력: SECRET_KEY, DB_PASSWORD, KAKAO_CLIENT_ID 등
+
+# 2. 백엔드 서비스 실행
+docker compose up fastapi redis
+
+# 3. 프론트엔드 개발 서버 실행 (별도 터미널)
+cd medication-frontend
+npm run dev
+# -> http://localhost:3000 (루트 .env 자동 로드)
+```
+
+### Docker 통합 테스트
+```bash
+# 1. 프론트엔드 빌드
+cd medication-frontend && npm run build
+
+# 2. 전체 스택 실행
+docker compose up
+# -> http://localhost (Nginx)
+```
+
 ## Coding Conventions
 
 ### Language
@@ -91,7 +174,7 @@ torchvision = { index = "pytorch-cpu" }
 
 ### File Naming
 - Python: `snake_case.py`
-- TypeScript/JavaScript: `camelCase.ts` 또는 `PascalCase.tsx` (컴포넌트)
+- Frontend: `camelCase.js` 또는 `PascalCase.jsx` (컴포넌트) - **JavaScript Only**
 - Config: `kebab-case.yml`
 
 ### Import Order
@@ -120,6 +203,7 @@ async def get_items(account: CurrentAccount):
 - `git push --force` 금지
 - 하드코딩된 시크릿 금지
 - `= Depends()` 직접 사용 금지 -> `Annotated[T, Depends()]` 사용
+- Frontend에 `.ts`, `.tsx` 파일 생성 금지 (JavaScript Only)
 
 ## Key Files
 

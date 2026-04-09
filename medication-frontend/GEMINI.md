@@ -186,5 +186,5 @@ className="md:hidden"        // Mobile only
 ## Do NOTs
 
 - 복잡한 상태 로직 설계 (Claude에게 위임)
-- TypeScript 타입 설계 (Claude에게 위임)
+- `.tsx`, `.ts` 파일 생성 금지 (JavaScript Only 정책)
 - 아키텍처 변경 제안

@@ -6,15 +6,20 @@
 
 ## Quick Scaffolding
 
-### New Router
+### New Router (Annotated 패턴 필수)
 ```python
+from typing import Annotated
 from fastapi import APIRouter, Depends
-from app.dependencies.security import get_current_account
+from app.dependencies.auth import get_current_account
+from app.models.account import Account
 
 router = APIRouter(prefix="/items", tags=["Items"])
 
+# 타입 별칭 정의
+CurrentAccount = Annotated[Account, Depends(get_current_account)]
+
 @router.get("/")
-async def list_items():
+async def list_items(account: CurrentAccount):
     pass
 ```
 

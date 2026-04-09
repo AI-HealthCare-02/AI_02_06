@@ -211,7 +211,7 @@ async def kakao_callback(
     # 응답 생성 (FE 메인 페이지로 리다이렉트)
     from fastapi.responses import RedirectResponse
 
-    # FRONTEND_URL 환경변수 사용 (local: http://localhost:3000, dev: http://localhost, prod: https://도메인)
+    # FRONTEND_URL 환경변수 사용 (local: http://localhost:3000, dev: http://localhost:3000, prod: https://도메인)
     redirect_url = f"{config.FRONTEND_URL}/main"
     response = RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
