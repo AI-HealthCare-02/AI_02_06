@@ -4,11 +4,11 @@ import { useRouter } from 'next/navigation'
 import { User, Activity, Users, Home, Trash2, X, Check, Plus, FileText, LogOut } from 'lucide-react'
 import EmptyState from '@/components/EmptyState'
 import BottomNav from '@/components/BottomNav'
+import LogoutModal, { useLogout, DeleteAccountModal, useDeleteAccount } from '@/components/LogoutModal'
 import api, { handleApiError } from '@/lib/api'
 import toast from 'react-hot-toast'
 
 // --- 모달 컴포넌트들 (main의 UI 유지, donghoon의 데이터 필드 반영) ---
-
 function Modal({ title, children, onClose, onSave }) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
@@ -197,12 +197,8 @@ export default function MyPage() {
     } catch (err) { handleApiError(err) }
   }
 
-  const handleLogout = async () => {
-    try {
-      await api.post('/api/v1/auth/logout')
-      router.push('/')
-    } catch (err) { router.push('/') }
-  }
+  const { showLogoutModal, setShowLogoutModal, handleLogout } = useLogout()
+  const { showDeleteModal, setShowDeleteModal, handleDeleteAccount } = useDeleteAccount()
 
   if (isLoading) return <MyPageSkeleton />
 
@@ -274,8 +270,11 @@ export default function MyPage() {
                     <div className="bg-blue-500/10 px-3 py-1.5 rounded-full border border-blue-500/20"><span className="text-sm font-black text-blue-700">{relationLabels[userProfile?.relation_type]}</span></div>
                   </div>
                 </div>
-                <div className="mt-auto pt-10 flex gap-4">
-                  <button onClick={handleLogout} className="flex-1 bg-white border-2 border-gray-100 text-gray-400 py-5 rounded-[28px] text-sm font-black hover:bg-gray-50 cursor-pointer">로그아웃</button>
+                <div className="mt-auto pt-10 space-y-6">
+                  <button onClick={() => setShowLogoutModal(true)} className="w-full bg-white border-2 border-gray-100 text-gray-400 py-5 rounded-[28px] text-sm font-black hover:bg-gray-50 cursor-pointer transition-all">로그아웃</button>
+                  <div className="flex items-center justify-center">
+                    <button onClick={() => setShowDeleteModal(true)} className="text-xs text-gray-300 hover:text-red-400 transition-colors cursor-pointer underline underline-offset-2">회원 탈퇴</button>
+                  </div>
                 </div>
               </div>
             )}
@@ -325,6 +324,8 @@ export default function MyPage() {
       {modalType === 'basic' && <BasicInfoModal info={userProfile} onClose={() => setModalType(null)} onSave={handleSaveBasic} />}
       {modalType === 'health' && <HealthInfoModal info={userProfile?.health_survey} onClose={() => setModalType(null)} onSave={handleSaveHealth} />}
       {modalType === 'family' && <FamilyModal member={selectedFamilyMember} onClose={() => { setModalType(null); setSelectedFamilyMember(null); }} onSave={handleSaveFamily} />}
+      {showLogoutModal && <LogoutModal onClose={() => setShowLogoutModal(false)} onConfirm={handleLogout} />}
+      {showDeleteModal && <DeleteAccountModal onClose={() => setShowDeleteModal(false)} onConfirm={handleDeleteAccount} />}
       <BottomNav />
     </main>
   )
