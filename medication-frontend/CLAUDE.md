@@ -50,9 +50,10 @@ const [data, setData] = useState(null)
 - API 상태는 useEffect + useState로 충분
 - 필요 시 React Context로 확장
 
-### CSR vs SSR 가이드라인
-- **SSR**: SEO 필요, 정적 콘텐츠
-- **CSR**: 인증 필요, 동적 데이터
+### Static Export 환경
+- **SSR 사용 불가**: Static Export 모드에서는 서버 사이드 렌더링 불가
+- **모든 페이지가 CSR**: 클라이언트에서 데이터 페칭
+- **SEO**: 정적 메타데이터만 가능 (동적 SEO 불가)
 
 ## Complex Patterns
 
@@ -105,16 +106,18 @@ class ErrorBoundary extends React.Component {
 
 ## Performance Considerations
 
-### Image Optimization
+### Image (Static Export 제약)
 ```jsx
-import Image from 'next/image'
+// Static Export에서는 Image Optimization 비활성화
+// next.config.mjs: images: { unoptimized: true }
 
-<Image
+// 일반 img 태그 사용 권장
+<img
   src="/image.png"
   alt="Description"
   width={300}
   height={200}
-  priority  // LCP 이미지
+  loading="lazy"
 />
 ```
 

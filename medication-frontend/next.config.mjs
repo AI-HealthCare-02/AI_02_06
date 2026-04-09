@@ -1,21 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Docker 프로덕션 빌드용 standalone 출력
-  output: "standalone",
+  // Static Export - 정적 파일만 생성
+  output: "export",
 
-  // API 요청을 FastAPI로 프록시 (서버 사이드)
-  // - Docker 환경: API_URL=http://fastapi:8000 (docker-compose에서 설정)
-  // - 로컬 개발: http://localhost:8000 (기본값)
-  async rewrites() {
-    const apiUrl = process.env.API_URL || "http://localhost:8000";
-    console.log(`[Next.js] API rewrites destination: ${apiUrl}`);
+  // 정적 파일 경로에 trailing slash 추가 (Nginx 호환성)
+  trailingSlash: true,
 
-    return [
-      {
-        source: "/api/:path*",
-        destination: `${apiUrl}/api/:path*`,
-      },
-    ];
+  // Static Export에서는 Next.js Image Optimization 사용 불가
+  images: {
+    unoptimized: true,
   },
 };
 

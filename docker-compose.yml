@@ -108,57 +108,13 @@ services:
         max-size: "50m"
         max-file: "5"
 
-  # 4. Frontend (Next.js)
-  frontend:
-    container_name: nextjs-fe
-    build:
-      context: .
-      dockerfile: medication-frontend/Dockerfile
-      target: dev
-    env_file:
-      - .env
-    environment:
-      # Hot reload for Docker volume mounts
-      - WATCHPACK_POLLING=true
-      - CHOKIDAR_USEPOLLING=true
-      # Server-side API URL (Docker 내부 네트워크)
-      # next.config.mjs rewrites에서 사용
-      - API_URL=http://fastapi:8000
-    volumes:
-      - ./medication-frontend:/app
-      - /app/node_modules
-      - /app/.next
-    networks:
-      - frontend
-    ports:
-      - "3000:3000"
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    # 리소스 제한
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-        reservations:
-          memory: 256M
-    # 로깅 설정
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "20m"
-        max-file: "3"
-
-  # 5. Nginx (Reverse Proxy)
+  # 4. Nginx (Reverse Proxy + Static File Server)
   nginx:
     container_name: nginx
     image: nginx:alpine
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - ./medication-frontend/out:/usr/share/nginx/html:ro  # Static Export 빌드 결과물
       - static_volume:/vol/web/static
     ports:
       - "80:80"
@@ -172,8 +128,6 @@ services:
       start_period: 10s
     depends_on:
       fastapi:
-        condition: service_healthy
-      frontend:
         condition: service_healthy
     # 리소스 제한
     deploy:
@@ -194,7 +148,7 @@ volumes:
   static_volume:
 
 networks:
-  # 외부 접근용 네트워크 (nginx, fastapi, frontend)
+  # 외부 접근용 네트워크 (nginx, fastapi)
   frontend:
     driver: bridge
   # 내부 서비스용 네트워크 (fastapi, redis, ai-worker)
