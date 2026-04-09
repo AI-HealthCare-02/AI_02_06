@@ -57,8 +57,21 @@ function HealthInfoModal({ info, onClose, onSave }) {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">나이</label>
-            <input type="number" value={formData.age} onChange={(e) => setFormData({ ...formData, age: e.target.value })}
-              className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
+            <input 
+              type="number" 
+              value={formData.age} 
+              onChange={(e) => {
+                const val = parseInt(e.target.value)
+                if (!isNaN(val) && val >= 1 && val <= 120) 
+                  setFormData({ ...formData, age: val })
+            }}
+            onKeyDown={(e) => {
+              if (e.key === '-' || e.key === 'e' || e.key === '+') e.preventDefault()
+            }}
+            min="1"
+            max="120"
+            placeholder="나이를 입력하세요"
+            className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
           </div>
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">성별</label>
@@ -286,7 +299,7 @@ export default function MyPage() {
                   <button onClick={() => setModalType('health')} className="text-xs font-black text-gray-600 hover:bg-gray-100 px-4 py-2 rounded-xl transition-all border border-gray-200 cursor-pointer">수정하기</button>
                 </div>
                 <div className="grid sm:grid-cols-2 gap-6">
-                  <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">나이</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.age || '-'}세</p></div>
+                  <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">나이</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.age ? `${userProfile.health_survey.age}세` : '미입력'}</p></div>
                   <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">성별</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.gender === 'MALE' ? '남성' : '여성'}</p></div>
                   <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">보유 질환</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.conditions?.join(', ') || '없음'}</p></div>
                   <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">특이 알레르기</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.allergies?.join(', ') || '없음'}</p></div>
