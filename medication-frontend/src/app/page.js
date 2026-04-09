@@ -1,123 +1,181 @@
 'use client'
-import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { Camera, Pill, MessageCircle, ArrowRight } from 'lucide-react'
 
-function SlideShow({ router }) {
-  const [current, setCurrent] = useState(0)
+const features = [
+  {
+    Icon: Camera,
+    title: '처방전 자동 인식',
+    desc: '사진 한 장으로 약품 정보를 AI가 자동 등록해요. 복잡한 입력은 필요 없어요.',
+  },
+  {
+    Icon: Pill,
+    title: '스마트 복약 알림',
+    desc: '복약 시간을 절대 놓치지 않도록 맞춤 알림을 보내드려요.',
+  },
+  {
+    Icon: MessageCircle,
+    title: 'AI 복약 상담',
+    desc: '약에 대한 궁금증을 AI에게 언제든지 물어보세요. 24시간 답변 가능해요.',
+  },
+]
 
-  const slides = [
-    { icon: '👴', title: '어르신 복약 관리', desc: '복잡한 복약 일정을 쉽게 관리해요', bg: 'bg-blue-50' },
-    { icon: '👨‍👩‍👧', title: '가족 건강 케어', desc: '가족의 복약을 한 곳에서 관리해요', bg: 'bg-green-50' },
-    { icon: '💊', title: '만성질환 관리', desc: '꾸준한 복약 습관을 만들어드려요', bg: 'bg-purple-50' },
-    { icon: '🚀', title: '지금 바로 시작해보세요!', desc: '카카오 또는 네이버로 간편하게 시작해요', bg: 'bg-yellow-50', cta: true },
-  ]
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrent(prev => (prev + 1) % slides.length)
-    }, 1500)
-    return () => clearInterval(timer)
-  }, [])
-
-  const slide = slides[current]
-
-  return (
-    <div className="text-center">
-      <div className={`${slide.bg} rounded-2xl p-16 transition-all duration-500`}>
-        <p className="text-6xl mb-6">{slide.icon}</p>
-        <h3 className="text-2xl font-bold mb-3">{slide.title}</h3>
-        <p className="text-gray-400 mb-6">{slide.desc}</p>
-        {slide.cta && (
-          <button
-            onClick={() => router.push('/login')}
-            className="bg-blue-500 text-white px-8 py-3 rounded-xl font-semibold cursor-pointer hover:bg-blue-600 active:scale-[0.98] transition-transform duration-150">
-            시작하기 →
-          </button>
-        )}
-      </div>
-      <div className="flex justify-center gap-2 mt-6">
-        {slides.map((_, i) => (
-          <button
-            key={i}
-            onClick={() => setCurrent(i)}
-            className={`h-2 rounded-full cursor-pointer transition-all duration-300
-              ${current === i ? 'bg-blue-500 w-6' : 'bg-gray-300 w-2'}`}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
+const useCases = [
+  { label: '어르신 복약 관리', desc: '복잡한 복약 일정을 한눈에' },
+  { label: '가족 건강 케어', desc: '가족의 복약을 한 곳에서' },
+  { label: '만성질환 관리', desc: '꾸준한 복약 습관 형성' },
+]
 
 export default function LandingPage() {
   const router = useRouter()
 
   return (
-    <main className="min-h-screen bg-white">
+    <div className="min-h-screen bg-white">
 
-      {/* 상단 네비게이션 */}
-      <div className="flex justify-between items-center px-10 py-4 border-b border-gray-100">
-        <h1 className="text-xl font-bold">💊 Downforce</h1>
-        <button
-          onClick={() => router.push('/login')}
-          className="bg-blue-500 text-white px-6 py-2 rounded-xl text-sm font-semibold cursor-pointer hover:bg-blue-600">
-          로그인
-        </button>
-      </div>
+      {/* ── 히어로 섹션 ── full-width 다크 */}
+      <section
+        className="relative w-full min-h-[620px] flex items-center justify-center overflow-hidden bg-black"
+      >
+        {/* 그리드 패턴 */}
+        <div
+          className="absolute inset-0 pointer-events-none opacity-20"
+          style={{
+            backgroundImage: `
+              linear-gradient(to right, rgba(255,255,255,0.1) 1px, transparent 1px),
+              linear-gradient(to bottom, rgba(255,255,255,0.1) 1px, transparent 1px)
+            `,
+            backgroundSize: '72px 72px',
+          }}
+        />
 
-      {/* 히어로 섹션 */}
-      <div className="max-w-5xl mx-auto px-10 py-20 flex items-center gap-16">
-        <div className="flex-1">
-          <p className="text-blue-500 text-sm font-semibold mb-4">AI 기반 복약 관리 서비스</p>
-          <h2 className="text-4xl font-bold leading-tight mb-6">
-            내 약을 더 안전하게<br />
-            <span className="text-blue-500">AI가 도와드릴게요</span>
-          </h2>
-          <p className="text-gray-400 text-lg mb-10 leading-relaxed">
-            처방전을 촬영하면 AI가 자동으로 분석해요.<br />
-            복약 시간 알림부터 부작용 안내까지<br />
-            건강한 복약 습관을 만들어드려요.
+        {/* 코너 마커 */}
+        <div className="absolute top-0 left-1/2 -translate-x-[400px] w-px h-10 bg-white/10 hidden md:block" />
+        <div className="absolute top-0 right-1/2 translate-x-[400px] w-px h-10 bg-white/10 hidden md:block" />
+
+        {/* 그라디언트 블랍 */}
+        <div
+          className="absolute bottom-0 left-1/2 pointer-events-none opacity-40 md:opacity-100"
+          style={{
+            transform: 'translateX(-340px)',
+            width: '580px',
+            height: '400px',
+            background: 'radial-gradient(ellipse at center bottom, rgba(249,115,22,0.3) 0%, transparent 70%)',
+          }}
+        />
+        <div
+          className="absolute bottom-0 left-1/2 pointer-events-none opacity-40 md:opacity-100"
+          style={{
+            transform: 'translateX(-60px)',
+            width: '580px',
+            height: '400px',
+            background: 'radial-gradient(ellipse at center bottom, rgba(20,184,166,0.3) 0%, transparent 70%)',
+          }}
+        />
+
+        {/* 중앙 아이콘 */}
+        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 pointer-events-none select-none">
+          <div className="w-[140px] h-[140px] bg-white/5 border border-white/10 rounded-[40px] translate-y-12 rotate-12 flex items-center justify-center backdrop-blur-sm">
+            <Pill size={44} className="text-white/10" />
+          </div>
+        </div>
+
+        {/* 콘텐츠 */}
+        <div className="relative z-10 text-center px-6 max-w-3xl mx-auto py-28">
+          <p className="text-gray-500 text-[11px] font-black mb-6 tracking-[0.3em] uppercase">
+            AI 기반 지능형 복약 관리
           </p>
-          <div className="flex gap-4">
+          <h1 className="text-5xl md:text-7xl lg:text-8xl font-black text-white leading-[1.05] tracking-tighter mb-8">
+            복약의 새로운<br />
+            <span className="text-gray-600">기준</span>
+          </h1>
+          <p className="text-gray-500 text-base md:text-lg mb-12 leading-relaxed max-w-xl mx-auto font-medium">
+            처방전 촬영으로 시작하는 스마트한 건강 관리.<br className="hidden md:block" />
+            AI가 당신의 안전한 복약 파트너가 되어드립니다.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <button
               onClick={() => router.push('/login')}
-              className="bg-blue-500 text-white px-8 py-4 rounded-xl font-semibold cursor-pointer hover:bg-blue-600">
-              시작하기 →
+              className="px-10 py-4 bg-white text-black text-sm font-black rounded-full hover:scale-105 transition-all shadow-xl cursor-pointer flex items-center justify-center gap-2 group"
+            >
+              지금 시작하기 
+              <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
             </button>
-            <button className="border border-gray-200 px-8 py-4 rounded-xl text-gray-500 font-semibold cursor-pointer hover:bg-gray-50">
-              더 알아보기
+            <button
+              className="px-10 py-4 text-white text-sm font-black rounded-full border border-white/20 hover:bg-white/5 transition-all cursor-pointer"
+            >
+              서비스 소개
             </button>
           </div>
         </div>
+      </section>
 
-        {/* 오른쪽 카드 */}
-        <div className="flex-1 space-y-3">
-          <div className="bg-blue-50 rounded-2xl p-6">
-            <p className="text-2xl mb-2">📷</p>
-            <h3 className="font-bold mb-1">처방전 자동 인식</h3>
-            <p className="text-gray-400 text-sm">사진 한 장으로 약품 정보를 자동 등록</p>
+      {/* ── 기능 소개 ── */}
+      <section className="max-w-6xl mx-auto px-6 py-32">
+        <div className="text-center mb-20">
+          <p className="text-[11px] font-black text-gray-400 tracking-[0.3em] uppercase mb-4">Core Value</p>
+          <h2 className="text-4xl md:text-5xl font-black text-gray-900 tracking-tighter">
+            더 쉽고, 더 정확하게
+          </h2>
+        </div>
+        <div className="grid md:grid-cols-3 gap-8">
+          {features.map(({ Icon, title, desc }, i) => (
+            <div
+              key={i}
+              className="p-10 bg-slate-50 rounded-[40px] border border-transparent hover:border-slate-200 hover:bg-white hover:shadow-xl transition-all duration-300 group"
+            >
+              <div className="w-14 h-14 bg-gray-900 rounded-2xl flex items-center justify-center text-white mb-8 group-hover:scale-110 transition-transform shadow-lg">
+                <Icon size={24} />
+              </div>
+              <h3 className="text-xl font-black text-gray-900 mb-4">{title}</h3>
+              <p className="text-gray-500 text-base leading-relaxed font-medium">{desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── 사용 사례 ── */}
+      <section className="bg-slate-50 py-32">
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="text-center mb-16">
+            <p className="text-[11px] font-black text-gray-400 tracking-[0.3em] uppercase mb-4">Target</p>
+            <h2 className="text-3xl md:text-4xl font-black text-gray-900 tracking-tighter">
+              모두를 위한 건강 관리
+            </h2>
           </div>
-          <div className="bg-green-50 rounded-2xl p-6">
-            <p className="text-2xl mb-2">💊</p>
-            <h3 className="font-bold mb-1">복약 알림</h3>
-            <p className="text-gray-400 text-sm">복약 시간을 놓치지 않도록 알려드려요</p>
-          </div>
-          <div className="bg-purple-50 rounded-2xl p-6">
-            <p className="text-2xl mb-2">🤖</p>
-            <h3 className="font-bold mb-1">AI 복약 상담</h3>
-            <p className="text-gray-400 text-sm">약에 대한 궁금증을 AI에게 물어보세요</p>
+          <div className="grid md:grid-cols-3 gap-6">
+            {useCases.map((u, i) => (
+              <div key={i} className="flex flex-col p-10 rounded-[40px] bg-white border border-slate-100 hover:shadow-xl transition-all duration-300">
+                <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-lg font-black text-slate-300 mb-6">
+                  0{i + 1}
+                </div>
+                <h3 className="font-black text-gray-900 text-xl mb-3">{u.label}</h3>
+                <p className="text-gray-500 font-medium">{u.desc}</p>
+              </div>
+            ))}
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* 슬라이드 섹션 */}
-      <div className="bg-gray-50 py-20">
-        <div className="max-w-3xl mx-auto px-10">
-          <h2 className="text-2xl font-bold text-center mb-12">이런 분들에게 추천해요</h2>
-          <SlideShow router={router} />
+      {/* ── CTA 섹션 ── */}
+      <section className="py-32 text-center bg-black relative overflow-hidden">
+        <div className="absolute inset-0 opacity-10">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-blue-500 rounded-full blur-[120px]" />
         </div>
-      </div>
+        <div className="relative z-10">
+          <p className="text-gray-500 text-xs font-black mb-6 tracking-[0.3em] uppercase">Join us today</p>
+          <h2 className="text-4xl md:text-5xl font-black text-white mb-6 tracking-tighter">
+            안전한 복약의 시작
+          </h2>
+          <p className="text-gray-500 text-lg mb-12 font-medium">지금 바로 무료로 체험해보세요</p>
+          <button
+            onClick={() => router.push('/login')}
+            className="px-12 py-5 bg-white text-black font-black rounded-full hover:scale-110 transition-all cursor-pointer text-base shadow-2xl"
+          >
+            시작하기
+          </button>
+        </div>
+      </section>
 
-    </main>
+    </div>
   )
 }

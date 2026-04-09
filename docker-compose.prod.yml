@@ -1,53 +1,139 @@
 services:
-  # 1. Redis (메시지 브로커 및 캐싱)
+  # 1. Redis (메시지 브로커 및 캐싱) - 내부 전용
   redis:
     image: redis:alpine
     container_name: redis
     networks:
-      - ws
+      - backend
+    # 프로덕션에서는 포트 노출하지 않음 (내부 통신만)
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 5s
+    restart: unless-stopped
+    # 리소스 제한
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          memory: 128M
+    # 로깅 설정
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # 2. API Server (FastAPI) - 외부 AWS DB 연결
   fastapi:
     container_name: fastapi
     image: ${DOCKER_USER}/${DOCKER_REPOSITORY}:app-${APP_VERSION}
-    env_file: .env
+    env_file:
+      - .env
+      - ./app/.env
     volumes:
       - static_volume:/app/templates
       - media_volume:/app/media
-    restart: always
+    restart: unless-stopped
     networks:
-      - ws
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     depends_on:
       redis:
         condition: service_healthy
+    # 리소스 제한
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          memory: 512M
+    # 로깅 설정
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
 
   # 3. AI Worker (Model 학습 및 추론)
   ai-worker:
     container_name: ai-worker
     image: ${DOCKER_USER}/${DOCKER_REPOSITORY}:ai-${AI_WORKER_VERSION}
-    env_file: .env
-    restart: always
-    mem_limit: 4G
+    env_file:
+      - .env
+      - ./ai_worker/.env
+    restart: unless-stopped
     networks:
-      - ws
+      - frontend  # 외부 API 접근용 (CLOVA OCR, OpenAI)
+      - backend   # Redis 통신용
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "python"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     depends_on:
       redis:
         condition: service_healthy
+    # 리소스 제한 (AI 작업용 대용량)
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          memory: 2G
+    # 로깅 설정
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
 
   # 4. Frontend (Next.js) - 프로덕션 빌드
   frontend:
     container_name: nextjs-fe
     image: ${DOCKER_USER}/${DOCKER_REPOSITORY}:frontend-${APP_VERSION}
-    env_file: .env
-    restart: always
+    env_file:
+      - .env
+      - ./medication-frontend/.env
+    environment:
+      # Server-side API URL (Docker 내부 네트워크)
+      - API_URL=http://fastapi:8000
+    restart: unless-stopped
     networks:
-      - ws
+      - frontend
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    # 리소스 제한
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          memory: 256M
+    # 로깅 설정
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   # 5. Nginx (Reverse Proxy + SSL)
   nginx:
@@ -63,10 +149,33 @@ services:
       - "80:80"
       - "443:443"
     networks:
-      - ws
-    depends_on:
-      - fastapi
       - frontend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      fastapi:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    # 리소스 제한
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          memory: 64M
+    # 로깅 설정
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
 
   # 6. Certbot (SSL 인증서 자동 갱신)
   certbot:
@@ -78,6 +187,18 @@ services:
       - certbot-www:/var/www/certbot
     depends_on:
       - nginx
+    # 리소스 제한
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+    # 로깅 설정
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   static_volume:
@@ -90,6 +211,12 @@ volumes:
     name: certbot-www
 
 networks:
-  ws:
-    name: ws
+  # 외부 접근용 네트워크 (nginx, fastapi, frontend)
+  frontend:
+    name: frontend
     driver: bridge
+  # 내부 서비스용 네트워크 (fastapi, redis, ai-worker)
+  backend:
+    name: backend
+    driver: bridge
+    internal: true

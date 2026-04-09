@@ -1,10 +1,24 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import api, { parseApiError, showError } from '../../lib/api'
+import { Pill } from 'lucide-react'
+
+// 환경 변수: local, dev, prod
+// - local/dev: 개발자 로그인 버튼 표시
+// - prod: 개발자 로그인 버튼 숨김
+const ENV = process.env.NEXT_PUBLIC_ENV || 'local'
+const IS_DEV_MODE = ENV !== 'prod'
+
+// API Base URL (브라우저에서 직접 호출용)
+// - local: http://localhost:8000
+// - dev/prod (Docker): '' (Nginx 프록시)
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || ''
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
+  const router = useRouter()
 
   const handleKakaoLogin = async () => {
     setIsLoading(true)
@@ -15,9 +29,11 @@ export default function LoginPage() {
       const { client_id, redirect_uri, authorize_url, state } = data
 
       // 2. BE에서 받은 state 저장 (CSRF 방지)
-      sessionStorage.setItem('oauth_state', state)
+      localStorage.setItem('oauth_state', state)
 
       // 3. 카카오(Mock) 인증 페이지로 리다이렉트
+      // - local/dev: Mock 서버 (authorize_url이 API_BASE_URL/api/v1/mock/kakao/authorize)
+      // - prod: 실제 카카오 서버 (https://kauth.kakao.com/oauth/authorize)
       const params = new URLSearchParams({
         client_id,
         redirect_uri,
@@ -26,7 +42,7 @@ export default function LoginPage() {
       })
 
       window.location.href = `${authorize_url}?${params.toString()}`
-    } catch (err: any) {
+    } catch (err) {
       console.error('카카오 로그인 설정 조회 실패:', err)
       const parsed = err.parsed || parseApiError(err)
       showError(parsed.message)
@@ -34,16 +50,14 @@ export default function LoginPage() {
     }
   }
 
-  const handleTestLogin = async () => {
+  const handleTestLogin = () => {
     setIsLoading(true)
-    try {
-      // 1. 테스트 로그인 API 호출 (백엔드에 약속된 특수 코드 전송)
-      // 로컬 개발 환경(localhost:8000)으로 직접 호출하여 쿠키를 설정함
-      window.location.href = `http://localhost:8000/api/v1/auth/kakao/callback?code=dev_test_login&state=dev_mode`
-    } catch (err) {
-      console.error('테스트 로그인 실패:', err)
-      setIsLoading(false)
-    }
+    // 테스트 로그인 API 호출 (백엔드에 약속된 특수 코드 전송)
+    // 쿠키 설정을 위해 브라우저 리다이렉트 사용
+    // - local: http://localhost:8000/api/v1/auth/kakao/callback
+    // - dev (Docker): /api/v1/auth/kakao/callback (Nginx 프록시)
+    const callbackUrl = `${API_BASE_URL}/api/v1/auth/kakao/callback?code=dev_test_login&state=dev_mode`
+    window.location.href = callbackUrl
   }
 
   return (
@@ -52,7 +66,9 @@ export default function LoginPage() {
       <div className="bg-white p-10 rounded-2xl shadow-sm w-96 text-center">
 
         {/* 로고 */}
-        <div className="text-5xl mb-4">💊</div>
+        <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+          <Pill size={32} className="text-blue-500" />
+        </div>
         <h1 className="text-2xl font-bold mb-1">복약 안내</h1>
         <p className="text-gray-400 text-sm mb-8">내 약을 안전하게 관리하세요</p>
 
@@ -65,14 +81,16 @@ export default function LoginPage() {
           {isLoading ? '연결 중...' : '카카오로 로그인'}
         </button>
 
-        {/* 테스트 로그인 버튼 (개발용) */}
-        <button
-          onClick={handleTestLogin}
-          disabled={isLoading}
-          className="w-full bg-slate-800 text-white py-3 rounded-xl font-semibold text-sm mb-3 cursor-pointer hover:bg-black transition-all disabled:opacity-50"
-        >
-          테스트 유저로 로그인 (Dev)
-        </button>
+        {/* 개발자 로그인 버튼 (local/dev 환경에서만 표시) */}
+        {IS_DEV_MODE && (
+          <button
+            onClick={handleTestLogin}
+            disabled={isLoading}
+            className="w-full bg-slate-800 text-white py-3 rounded-xl font-semibold text-sm mb-3 cursor-pointer hover:bg-black transition-all disabled:opacity-50"
+          >
+            개발자로 로그인 ({ENV})
+          </button>
+        )}
 
         {/* 구분선 */}
         <div className="flex items-center gap-3 my-4">
