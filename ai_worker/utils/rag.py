@@ -2,7 +2,8 @@ import json
 import os
 from pathlib import Path
 
-from openai import OpenAI, OpenAIError
+from openai import AsyncOpenAI, OpenAIError
+from openai.types.chat import ChatCompletionMessageParam
 
 # 개발/배포 환경에 따른 모델 설정
 _ENV = os.environ.get("APP_ENV", "dev")
@@ -21,11 +22,11 @@ class RAGGenerator:
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OPENAI_API_KEY 환경변수가 설정되지 않았습니다.")
-        self.client = OpenAI(api_key=api_key)
+        self.client = AsyncOpenAI(api_key=api_key)
         self.model = _CHAT_MODEL
         self._medicines = _load_medicines()
 
-    def generate_guide(self, user_medicines: list[dict], context_chunks: list[str]) -> str:
+    async def generate_guide(self, user_medicines: list[dict], context_chunks: list[str]) -> str:
         """추출된 약 정보와 청크 데이터를 바탕으로 복약 가이드 생성"""
         context_text = "\n---\n".join(context_chunks)
         medicines_text = "\n".join(
@@ -49,7 +50,7 @@ class RAGGenerator:
 """
 
         try:
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
@@ -58,7 +59,7 @@ class RAGGenerator:
         except OpenAIError as e:
             raise RuntimeError(f"OpenAI API 호출 실패: {e}") from e
 
-    def generate_chat_response(self, question: str, history: list[dict]) -> str:
+    async def generate_chat_response(self, question: str, history: list[dict]) -> str:
         """사용자 질문과 대화 이력을 바탕으로 복약 상담 답변 생성"""
         # 질문에서 medicines.json 키워드 매칭
         matched = [m for m in self._medicines if m["name"] in question or m["ingredient"] in question]
@@ -79,13 +80,13 @@ class RAGGenerator:
 [참고 데이터]
 {context_text}"""
 
-        messages = [{"role": "system", "content": system_prompt}]
+        messages: list[ChatCompletionMessageParam] = [{"role": "system", "content": system_prompt}]
         for h in history:
             messages.append({"role": h["role"], "content": h["content"]})
         messages.append({"role": "user", "content": question})
 
         try:
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 temperature=0.3,

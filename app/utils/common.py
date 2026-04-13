@@ -1,5 +1,5 @@
 import re
-from typing import Type, TypeVar
+from typing import TypeVar
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -16,7 +16,7 @@ def normalize_phone_number(phone_number: str) -> str:
     return phone_number
 
 
-async def get_object_or_404(model: Type[T], id: UUID, detail: str | None = None) -> T:
+async def get_object_or_404(model: type[T], id: UUID, detail: str | None = None) -> T:
     """
     Tortoise 모델에서 ID로 객체를 조회하고, 없으면 404 에러를 발생시킵니다.
     """

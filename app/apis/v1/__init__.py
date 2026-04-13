@@ -4,6 +4,7 @@ from app.apis.v1.challenge_routers import router as challenge_router
 from app.apis.v1.chat_session_routers import router as chat_session_router
 from app.apis.v1.health_routers import router as health_router
 from app.apis.v1.intake_log_routers import router as intake_log_router
+from app.apis.v1.jobs_routers import router as jobs_router
 from app.apis.v1.medication_routers import router as medication_router
 from app.apis.v1.message_routers import router as message_router
 from app.apis.v1.mock_oauth_routers import mock_router
@@ -22,3 +23,4 @@ v1_routers.include_router(profile_router)
 v1_routers.include_router(chat_session_router)
 v1_routers.include_router(message_router)
 v1_routers.include_router(ocr_router)
+v1_routers.include_router(jobs_router)

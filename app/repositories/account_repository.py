@@ -4,6 +4,7 @@ Account Repository
 accounts 테이블 데이터 접근 계층
 """
 
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from app.models.accounts import Account, AuthProvider
@@ -58,6 +59,13 @@ class AccountRepository:
 
     async def deactivate(self, account: Account) -> Account:
         """계정 비활성화"""
+        account.is_active = False
+        await account.save()
+        return account
+
+    async def soft_delete(self, account: Account) -> Account:
+        """계정 소프트 삭제 (deleted_at 설정, is_active False)"""
+        account.deleted_at = datetime.now(timezone.utc)
         account.is_active = False
         await account.save()
         return account
