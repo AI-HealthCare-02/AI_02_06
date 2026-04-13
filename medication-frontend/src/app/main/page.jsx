@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
+import { showError } from '@/lib/errors'
 import { Pill, FileText, Flame, Ban, X, Check, Plus, MessageCircle } from 'lucide-react'
 
 // 스켈레톤은 main의 레이아웃을 따름
@@ -98,20 +99,61 @@ function ChatModal({ onClose }) {
   const [messages, setMessages] = useState([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요 💊' }])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [sessionId, setSessionId] = useState(null)
+  const [profileId, setProfileId] = useState(null)
   const bottomRef = useRef(null)
+
+  useEffect(() => {
+    const initChat = async () => {
+      try {
+        const profileRes = await api.get('/api/v1/profiles/')
+        if (profileRes.data && profileRes.data.length > 0) {
+          setProfileId(profileRes.data[0].id)
+        }
+      } catch (err) {
+        console.error('채팅 초기화 실패:', err)
+      }
+    }
+    initChat()
+  }, [])
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return
-    const msg = input.trim()
+    const messageContent = input.trim()
     setInput('')
-    setMessages(prev => [...prev, { role: 'user', content: msg }])
+    setMessages(prev => [...prev, { role: 'user', content: messageContent }])
     setIsLoading(true)
-    setTimeout(() => {
-      setMessages(prev => [...prev, { role: 'assistant', content: '곧 실제 AI와 연결될 예정입니다!' }])
+
+    try {
+      let currentSessionId = sessionId
+
+      if (!currentSessionId) {
+        if (!profileId) {
+          throw new Error('프로필 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.')
+        }
+
+        const sessionRes = await api.post('/api/v1/chat-sessions/', {
+          profile_id: profileId,
+          title: messageContent.substring(0, 20) + (messageContent.length > 20 ? '...' : '')
+        })
+        currentSessionId = sessionRes.data.id
+        setSessionId(currentSessionId)
+      }
+
+      const askRes = await api.post('/api/v1/messages/ask', {
+        session_id: currentSessionId,
+        content: messageContent
+      })
+
+      const aiReply = askRes.data.assistant_message.content
+      setMessages(prev => [...prev, { role: 'assistant', content: aiReply }])
+    } catch (err) {
+      setMessages(prev => [...prev, { role: 'assistant', content: '오류가 발생했습니다. 잠시 후 다시 시도해주세요.' }])
+    } finally {
       setIsLoading(false)
-    }, 1000)
+    }
   }
 
   return (
@@ -124,7 +166,9 @@ function ChatModal({ onClose }) {
         <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50">
           {messages.map((m, i) => (
             <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[80%] p-4 rounded-2xl text-sm ${m.role === 'user' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-100 text-gray-800'}`}>{m.content}</div>
+              <div className={`max-w-[80%] p-4 rounded-2xl text-sm shadow-sm whitespace-pre-wrap ${m.role === 'user' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-100 text-gray-800'}`}>
+                {m.content}
+              </div>
             </div>
           ))}
           <div ref={bottomRef} />
