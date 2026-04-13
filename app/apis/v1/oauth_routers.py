@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse as Response
-from fastapi.responses import Response as BaseResponse
+from fastapi.responses import Response as PlainResponse
 
 from app.core import config
 from app.core.config import Env
@@ -330,10 +330,10 @@ async def delete_account(
     request: Request,
     current_account: Annotated[Account, Depends(get_current_account)],
     oauth_service: Annotated[OAuthService, Depends(get_oauth_service)],
-) -> BaseResponse:
+) -> PlainResponse:
     await oauth_service.delete_account(current_account)
 
-    response = BaseResponse(status_code=status.HTTP_204_NO_CONTENT)
+    response = PlainResponse(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(
         key="access_token",
         httponly=True,
@@ -361,7 +361,7 @@ async def delete_account(
 async def logout(
     request: Request,
     oauth_service: Annotated[OAuthService, Depends(get_oauth_service)],
-) -> BaseResponse:
+) -> PlainResponse:
     # 쿠키에서 refresh token 추출
     refresh_token = request.cookies.get("refresh_token")
 
@@ -370,7 +370,7 @@ async def logout(
         await oauth_service.revoke_refresh_token(refresh_token)
 
     # 쿠키 삭제
-    response = BaseResponse(status_code=status.HTTP_204_NO_CONTENT)
+    response = PlainResponse(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(
         key="access_token",
         httponly=True,
