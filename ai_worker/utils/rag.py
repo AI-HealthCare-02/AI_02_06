@@ -21,6 +21,24 @@ class RAGGenerator:
     def __init__(self) -> None:
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
+            # FastAPI 백엔드에서 실행되는 경우 `.env`는 Settings로만 읽힐 수 있어 fallback 제공
+            try:
+                from app.core.config import config as app_config
+
+                api_key = app_config.OPENAI_API_KEY
+            except Exception:
+                api_key = None
+
+        if not api_key:
+            # Worker 컨텍스트 fallback
+            try:
+                from ai_worker.core.config import config as worker_config
+
+                api_key = worker_config.OPENAI_API_KEY
+            except Exception:
+                api_key = None
+
+        if not api_key:
             raise ValueError("OPENAI_API_KEY 환경변수가 설정되지 않았습니다.")
         self.client = AsyncOpenAI(api_key=api_key)
         self.model = _CHAT_MODEL
