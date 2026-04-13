@@ -328,10 +328,10 @@ async def delete_account(
     request: Request,
     current_account: Annotated[Account, Depends(get_current_account)],
     oauth_service: Annotated[OAuthService, Depends(get_oauth_service)],
-) -> BaseResponse:
+) -> Response:
     await oauth_service.delete_account(current_account)
 
-    response = BaseResponse(status_code=status.HTTP_204_NO_CONTENT)
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(
         key="access_token",
         httponly=True,
