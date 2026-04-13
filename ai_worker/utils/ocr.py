@@ -58,12 +58,12 @@ def call_clova_ocr(image_path: str) -> dict:
                 timeout=30,
             )
         response.raise_for_status()
-    except requests.Timeout:
-        raise OCRError("CLOVA OCR 요청 시간이 초과되었습니다.")
+    except requests.Timeout as e:
+        raise OCRError("CLOVA OCR 요청 시간이 초과되었습니다.") from e
     except requests.HTTPError as e:
-        raise OCRError(f"CLOVA OCR API 오류: {e.response.status_code} - {e.response.text}")
+        raise OCRError(f"CLOVA OCR API 오류: {e.response.status_code} - {e.response.text}") from e
     except requests.RequestException as e:
-        raise OCRError(f"CLOVA OCR 요청 실패: {e}")
+        raise OCRError(f"CLOVA OCR 요청 실패: {e}") from e
 
     return response.json()
 

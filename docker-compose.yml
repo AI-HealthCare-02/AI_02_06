@@ -1,4 +1,38 @@
 services:
+  # 0. PostgreSQL (Database)
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    networks:
+      - backend
+    ports:
+      - "${DB_EXPOSE_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-pw1234}
+      POSTGRES_DB: ${DB_NAME:-downforce_db}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-downforce_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # 리소스 제한
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
   # 1. Redis (메시지 브로커 및 캐싱)
   redis:
     image: redis:alpine
@@ -55,6 +89,8 @@ services:
       retries: 3
       start_period: 40s
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     # 리소스 제한
@@ -146,6 +182,7 @@ services:
 
 volumes:
   static_volume:
+  postgres_data:
 
 networks:
   # 외부 접근용 네트워크 (nginx, fastapi)
