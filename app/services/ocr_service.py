@@ -7,9 +7,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-import requests
+import httpx
 from fastapi import UploadFile
-from openai import OpenAI, OpenAIError
+from openai import AsyncOpenAI, OpenAIError
 
 # 환경변수 우선, 없으면 OS 기본 임시 디렉토리 사용 (보안상 /tmp 하드코딩 방지)
 _UPLOAD_DIR = Path(os.environ.get("ALLOWED_IMAGE_DIR", tempfile.gettempdir())) / "ocr_images"
@@ -23,7 +23,7 @@ def _load_medicines() -> list[dict[str, Any]]:
         return json.load(f)
 
 
-def _call_clova_ocr(image_path: Path) -> str:
+async def _call_clova_ocr(image_path: Path) -> str:
     invoke_url = os.environ.get("CLOVA_OCR_INVOKE_URL")
     secret_key = os.environ.get("CLOVA_OCR_SECRET_KEY")
     if not invoke_url or not secret_key:
@@ -36,27 +36,28 @@ def _call_clova_ocr(image_path: Path) -> str:
         "version": "V2",
         "timestamp": int(round(time.time() * 1000)),
     }
-    with open(image_path, "rb") as f:
-        response = requests.post(
-            invoke_url,
-            headers={"X-OCR-SECRET": secret_key},
-            data={"message": json.dumps(request_json).encode("UTF-8")},
-            files=[("file", f)],
-            timeout=30,
-        )
-    response.raise_for_status()
-    fields = response.json()["images"][0]["fields"]
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        with open(image_path, "rb") as f:
+            files = {"file": f}
+            response = await client.post(
+                invoke_url,
+                headers={"X-OCR-SECRET": secret_key},
+                data={"message": json.dumps(request_json).encode("UTF-8")},
+                files=files,
+            )
+        response.raise_for_status()
+        fields = response.json()["images"][0]["fields"]
     return " ".join(field["inferText"] for field in fields)
 
 
-def _generate_guide(medicines: list[dict[str, Any]]) -> str:
+async def _generate_guide(medicines: list[dict[str, Any]]) -> str:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise ValueError("OPENAI_API_KEY 환경변수가 설정되지 않았습니다.")
 
     env = os.environ.get("APP_ENV", "dev")
     model = "gpt-4o" if env == "prod" else "gpt-4o-mini"
-    client = OpenAI(api_key=api_key)
+    client = AsyncOpenAI(api_key=api_key)
 
     medicines_text = "\n".join(f"- {m['name']} ({m['ingredient']})" for m in medicines)
     context_chunks = []
@@ -84,7 +85,7 @@ def _generate_guide(medicines: list[dict[str, Any]]) -> str:
    "⚠️ 이 안내는 참고용이며, 정확한 진단과 처방은 반드시 전문 의료인과 상의하십시오."
 """
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
@@ -99,20 +100,24 @@ class OCRService:
         self._medicines = _load_medicines()
 
     async def extract_text_from_image(self, file: UploadFile) -> dict[str, Any]:
-        image_path = _UPLOAD_DIR / f"{uuid.uuid4()}_{file.filename}"
+        safe_name = Path(file.filename or "upload").name
+        image_path = _UPLOAD_DIR / f"{uuid.uuid4()}_{safe_name}"
         with image_path.open("wb") as f:
             shutil.copyfileobj(file.file, f)
 
         try:
-            ocr_text = _call_clova_ocr(image_path)
-            if not ocr_text.strip():
-                raise ValueError("이미지에서 텍스트를 추출할 수 없습니다.")
-
-            matched = [m for m in self._medicines if m["name"] in ocr_text]
-            if not matched:
-                raise ValueError("처방전에서 인식된 약 정보가 없습니다. 사진을 다시 찍어주세요.")
-
-            guide = _generate_guide(matched)
-            return {"status": "success", "filename": file.filename, "guide": guide}
+            return await self.extract_from_path(image_path=image_path, original_filename=file.filename)
         finally:
             image_path.unlink(missing_ok=True)
+
+    async def extract_from_path(self, image_path: Path, original_filename: str | None = None) -> dict[str, Any]:
+        ocr_text = await _call_clova_ocr(image_path)
+        if not ocr_text.strip():
+            raise ValueError("이미지에서 텍스트를 추출할 수 없습니다.")
+
+        matched = [m for m in self._medicines if m["name"] in ocr_text]
+        if not matched:
+            raise ValueError("처방전에서 인식된 약 정보가 없습니다. 사진을 다시 찍어주세요.")
+
+        guide = await _generate_guide(matched)
+        return {"status": "success", "filename": original_filename, "guide": guide}

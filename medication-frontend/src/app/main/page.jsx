@@ -31,6 +31,31 @@ function SurveyModal({ onClose, userName }) {
     is_smoking: null, is_drinking: null,
     conditions: [], allergies: []
   })
+  const [isSaving, setIsSaving] = useState(false)
+
+  const btnSelected = 'bg-gray-900 text-white border-gray-900'
+  const btnUnselected = 'bg-white text-gray-400 border-gray-100 hover:border-gray-300'
+  const chipSelected = 'bg-gray-900 text-white border-gray-900'
+  const chipUnselected = 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
+
+  const handleSave = async () => {
+    if (!form.age || !form.gender) {
+      showError('나이와 성별은 필수입니다.')
+      return
+    }
+    setIsSaving(true)
+    await onSave({
+      age: parseInt(form.age) || null,
+      gender: form.gender || null,
+      height: parseInt(form.height) || null,
+      weight: parseFloat(form.weight) || null,
+      is_smoking: form.is_smoking,
+      is_drinking: form.is_drinking,
+      conditions: form.conditions.length > 0 ? form.conditions : null,
+      allergies: form.allergies.length > 0 ? form.allergies : null,
+    })
+    setIsSaving(false)
+  }
 
   // 기존 프로필 데이터 로드
   useEffect(() => {
@@ -313,6 +338,7 @@ function MainPageContent() {
   const [showSurvey, setShowSurvey] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [userName, setUserName] = useState('사용자')
+  const [selfProfileId, setSelfProfileId] = useState(null)
   const [greeting, setGreeting] = useState({ msg: '반가워요', sub: '오늘 하루도 건강하게 시작해봐요' })
 
   // 설문 팝업 쿼리 파라미터 감지
@@ -329,10 +355,17 @@ function MainPageContent() {
       try {
         setIsLoading(true)
         const profileRes = await api.get('/api/v1/profiles/')
-        if (profileRes.data?.length > 0) {
-          const self = profileRes.data.find(p => p.relation_type === 'SELF') || profileRes.data[0]
+        const profiles = profileRes.data || []
+        const self = profiles.find(p => p.relation_type === 'SELF')
+
+        if (self) {
           setUserName(self.name.split('(')[0])
+          setSelfProfileId(self.id)
+          if (!self.health_survey) setShowSurvey(true)
+        } else {
+          setShowSurvey(true)
         }
+
         const hour = new Date().getHours()
         if (hour < 12) setGreeting({ msg: '좋은 아침이에요', sub: '오늘 하루도 건강하게 시작해봐요' })
         else if (hour < 17) setGreeting({ msg: '좋은 오후예요', sub: '점심 식사 후 약 챙기셨나요?' })
@@ -341,6 +374,23 @@ function MainPageContent() {
     }
     initPage()
   }, [])
+
+  const handleSurveySave = async (healthSurvey) => {
+    try {
+      if (selfProfileId) {
+        await api.patch(`/api/v1/profiles/${selfProfileId}`, { health_survey: healthSurvey })
+      } else {
+        await api.post('/api/v1/profiles/', {
+          relation_type: 'SELF',
+          name: userName || '나',
+          health_survey: healthSurvey,
+        })
+      }
+      setShowSurvey(false)
+    } catch (err) {
+      showError('건강 정보 저장에 실패했습니다.')
+    }
+  }
 
   if (isLoading) return <MainSkeleton />
 
