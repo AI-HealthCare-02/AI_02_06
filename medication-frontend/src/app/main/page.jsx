@@ -23,60 +23,172 @@ function MainSkeleton() {
   )
 }
 
-// 설문 모달 - 디자인은 main, 필드는 donghoon (음주/흡연 포함)
-function SurveyModal({ onClose }) {
-  const [form, setForm] = useState({ 
-    age: '', gender: '', is_smoking: null, is_drinking: null 
+// 설문 모달 - 신규 유저 온보딩
+function SurveyModal({ onClose, onSave, userName }) {
+  const [form, setForm] = useState({
+    age: '', gender: '', height: '', weight: '',
+    is_smoking: null, is_drinking: null,
+    conditions: [], allergies: [],
   })
+  const [isSaving, setIsSaving] = useState(false)
+
+  const btnSelected = 'bg-gray-900 text-white border-gray-900'
+  const btnUnselected = 'bg-white text-gray-400 border-gray-100 hover:border-gray-300'
+  const chipSelected = 'bg-gray-900 text-white border-gray-900'
+  const chipUnselected = 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
+
+  const handleSave = async () => {
+    if (!form.age || !form.gender) {
+      showError('나이와 성별은 필수입니다.')
+      return
+    }
+    setIsSaving(true)
+    await onSave({
+      age: parseInt(form.age) || null,
+      gender: form.gender || null,
+      height: parseInt(form.height) || null,
+      weight: parseFloat(form.weight) || null,
+      is_smoking: form.is_smoking,
+      is_drinking: form.is_drinking,
+      conditions: form.conditions.length > 0 ? form.conditions : null,
+      allergies: form.allergies.length > 0 ? form.allergies : null,
+    })
+    setIsSaving(false)
+  }
 
   return (
     <div className="fixed inset-0 bg-black/40 z-[100] flex items-center justify-center p-6 backdrop-blur-sm">
       <div className="bg-white rounded-[32px] w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl">
         <div className="p-8 border-b border-gray-50 sticky top-0 bg-white z-10">
           <h2 className="font-black text-2xl text-gray-900">건강 정보 입력</h2>
-          <p className="text-gray-400 text-sm mt-1">영빈 님에게 딱 맞는 복약 가이드를 준비할게요</p>
+          <p className="text-gray-400 text-sm mt-1">{userName} 님에게 딱 맞는 복약 가이드를 준비할게요</p>
         </div>
-        
+
         <div className="p-8 space-y-8">
+          {/* 기본 정보 */}
           <div>
-            <h3 className="font-bold mb-4 text-gray-800">기본 정보</h3>
+            <h3 className="font-bold mb-4 text-gray-800">기본 정보 <span className="text-red-400 text-xs">*필수</span></h3>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="text-gray-400 text-xs font-bold mb-1.5 block">나이 *</label>
+                <input type="number" placeholder="세" min={1} max={120}
+                  value={form.age}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val === '' || (parseInt(val) >= 1 && parseInt(val) <= 120)) setForm({...form, age: val})
+                  }}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none transition-colors"
+                />
+              </div>
+              <div>
+                <label className="text-gray-400 text-xs font-bold mb-1.5 block">성별 *</label>
+                <div className="flex gap-2">
+                  {['MALE', 'FEMALE'].map(g => (
+                    <button key={g} type="button" onClick={() => setForm({...form, gender: g})}
+                      className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all cursor-pointer ${form.gender === g ? btnSelected : btnUnselected}`}>
+                      {g === 'MALE' ? '남성' : '여성'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-4">
-              <input type="number" placeholder="나이" className="bg-gray-50 border border-gray-100 rounded-2xl px-4 py-3 text-sm focus:border-gray-900 outline-none" />
-              <div className="flex gap-2">
-                {['M', 'F'].map(g => (
-                  <button key={g} onClick={() => setForm({...form, gender: g})}
-                    className={`flex-1 py-3 rounded-2xl text-xs font-black border transition-all
-                      ${form.gender === g ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-400 border-gray-100'}`}>
-                    {g === 'M' ? '남성' : '여성'}
-                  </button>
-                ))}
+              <div>
+                <label className="text-gray-400 text-xs font-bold mb-1.5 block">키 (cm)</label>
+                <input type="number" placeholder="cm" min={50} max={250}
+                  value={form.height}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val === '' || (parseInt(val) >= 50 && parseInt(val) <= 250)) setForm({...form, height: val})
+                  }}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none transition-colors"
+                />
+              </div>
+              <div>
+                <label className="text-gray-400 text-xs font-bold mb-1.5 block">몸무게 (kg)</label>
+                <input type="number" placeholder="kg" min={1} max={300} step={0.1}
+                  value={form.weight}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val === '' || (parseFloat(val) >= 1 && parseFloat(val) <= 300)) setForm({...form, weight: val})
+                  }}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none transition-colors"
+                />
               </div>
             </div>
           </div>
 
+          {/* 생활 습관 */}
           <div>
             <h3 className="font-bold mb-4 text-gray-800">생활 습관</h3>
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-gray-400 text-[10px] font-bold uppercase tracking-widest px-1">흡연 여부</label>
+              <div>
+                <label className="text-gray-400 text-xs font-bold mb-1.5 block">흡연 여부</label>
                 <div className="flex gap-2">
                   {[true, false].map(v => (
-                    <button key={String(v)} onClick={() => setForm({...form, is_smoking: v})}
-                      className={`flex-1 py-3 rounded-2xl text-[10px] font-black border transition-all
-                        ${form.is_smoking === v ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-400 border-gray-100'}`}>
+                    <button key={String(v)} type="button" onClick={() => setForm({...form, is_smoking: v})}
+                      className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all cursor-pointer ${form.is_smoking === v ? btnSelected : btnUnselected}`}>
                       {v ? '예' : '아니오'}
                     </button>
                   ))}
                 </div>
               </div>
-              <div className="space-y-2">
-                <label className="text-gray-400 text-[10px] font-bold uppercase tracking-widest px-1">음주 여부</label>
+              <div>
+                <label className="text-gray-400 text-xs font-bold mb-1.5 block">음주 여부</label>
                 <div className="flex gap-2">
                   {[true, false].map(v => (
-                    <button key={String(v)} onClick={() => setForm({...form, is_drinking: v})}
-                      className={`flex-1 py-3 rounded-2xl text-[10px] font-black border transition-all
-                        ${form.is_drinking === v ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-400 border-gray-100'}`}>
+                    <button key={String(v)} type="button" onClick={() => setForm({...form, is_drinking: v})}
+                      className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all cursor-pointer ${form.is_drinking === v ? btnSelected : btnUnselected}`}>
                       {v ? '예' : '아니오'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 질환 및 알레르기 */}
+          <div>
+            <h3 className="font-bold mb-4 text-gray-800">질환 및 알레르기</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="text-gray-400 text-xs font-bold mb-2 block">기저질환</label>
+                <div className="flex flex-wrap gap-2">
+                  {['고혈압', '당뇨', '고지혈증', '심장질환', '뇌졸중', '천식', '신장질환', '갑상선질환', '없음'].map(item => (
+                    <button key={item} type="button"
+                      onClick={() => {
+                        let updated
+                        if (item === '없음') {
+                          updated = form.conditions.includes(item) ? [] : ['없음']
+                        } else {
+                          const withoutNone = form.conditions.filter(c => c !== '없음')
+                          updated = withoutNone.includes(item) ? withoutNone.filter(c => c !== item) : [...withoutNone, item]
+                        }
+                        setForm({...form, conditions: updated})
+                      }}
+                      className={`px-4 py-2 rounded-full text-xs font-bold transition-all border cursor-pointer ${form.conditions.includes(item) ? chipSelected : chipUnselected}`}>
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-gray-400 text-xs font-bold mb-2 block">알레르기</label>
+                <div className="flex flex-wrap gap-2">
+                  {['페니실린', '아스피린', '항생제', '소염제', '없음'].map(item => (
+                    <button key={item} type="button"
+                      onClick={() => {
+                        let updated
+                        if (item === '없음') {
+                          updated = form.allergies.includes(item) ? [] : ['없음']
+                        } else {
+                          const withoutNone = form.allergies.filter(a => a !== '없음')
+                          updated = withoutNone.includes(item) ? withoutNone.filter(a => a !== item) : [...withoutNone, item]
+                        }
+                        setForm({...form, allergies: updated})
+                      }}
+                      className={`px-4 py-2 rounded-full text-xs font-bold transition-all border cursor-pointer ${form.allergies.includes(item) ? chipSelected : chipUnselected}`}>
+                      {item}
                     </button>
                   ))}
                 </div>
@@ -85,8 +197,11 @@ function SurveyModal({ onClose }) {
           </div>
 
           <div className="pt-4 flex gap-4">
-            <button onClick={onClose} className="flex-1 border border-gray-100 py-4 rounded-2xl text-gray-400 font-bold hover:bg-gray-50 transition-all">다음에</button>
-            <button onClick={onClose} className="flex-1 bg-gray-900 text-white py-4 rounded-2xl font-black hover:bg-gray-700 transition-all">저장하기</button>
+            <button onClick={onClose} className="flex-1 border border-gray-100 py-4 rounded-2xl text-gray-400 font-bold hover:bg-gray-50 transition-all cursor-pointer">다음에</button>
+            <button onClick={handleSave} disabled={isSaving}
+              className="flex-1 bg-gray-900 text-white py-4 rounded-2xl font-black hover:bg-gray-700 transition-all cursor-pointer disabled:opacity-50">
+              {isSaving ? '저장 중...' : '저장하기'}
+            </button>
           </div>
         </div>
       </div>
@@ -188,6 +303,7 @@ export default function MainPage() {
   const [showSurvey, setShowSurvey] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [userName, setUserName] = useState('사용자')
+  const [selfProfileId, setSelfProfileId] = useState(null)
   const [greeting, setGreeting] = useState({ msg: '반가워요', sub: '오늘 하루도 건강하게 시작해봐요' })
 
   useEffect(() => {
@@ -195,10 +311,17 @@ export default function MainPage() {
       try {
         setIsLoading(true)
         const profileRes = await api.get('/api/v1/profiles/')
-        if (profileRes.data?.length > 0) {
-          const self = profileRes.data.find(p => p.relation_type === 'SELF') || profileRes.data[0]
+        const profiles = profileRes.data || []
+        const self = profiles.find(p => p.relation_type === 'SELF')
+
+        if (self) {
           setUserName(self.name.split('(')[0])
+          setSelfProfileId(self.id)
+          if (!self.health_survey) setShowSurvey(true)
+        } else {
+          setShowSurvey(true)
         }
+
         const hour = new Date().getHours()
         if (hour < 12) setGreeting({ msg: '좋은 아침이에요', sub: '오늘 하루도 건강하게 시작해봐요' })
         else if (hour < 17) setGreeting({ msg: '좋은 오후예요', sub: '점심 식사 후 약 챙기셨나요?' })
@@ -208,11 +331,28 @@ export default function MainPage() {
     initPage()
   }, [])
 
+  const handleSurveySave = async (healthSurvey) => {
+    try {
+      if (selfProfileId) {
+        await api.patch(`/api/v1/profiles/${selfProfileId}`, { health_survey: healthSurvey })
+      } else {
+        await api.post('/api/v1/profiles/', {
+          relation_type: 'SELF',
+          name: userName || '나',
+          health_survey: healthSurvey,
+        })
+      }
+      setShowSurvey(false)
+    } catch (err) {
+      showError('건강 정보 저장에 실패했습니다.')
+    }
+  }
+
   if (isLoading) return <MainSkeleton />
 
   return (
     <>
-      {showSurvey && <SurveyModal onClose={() => setShowSurvey(false)} />}
+      {showSurvey && <SurveyModal onClose={() => setShowSurvey(false)} onSave={handleSurveySave} userName={userName} />}
       {showChat && <ChatModal onClose={() => setShowChat(false)} />}
 
       {/* ── 히어로 섹션 (main의 다크 테마 + donghoon의 이름 데이터) ── */}

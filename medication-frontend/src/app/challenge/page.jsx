@@ -5,6 +5,7 @@ import Header from '../../components/Header'
 import BottomNav from '../../components/BottomNav'
 import EmptyState from '../../components/EmptyState'
 import api, { showError } from '../../lib/api'
+import toast from 'react-hot-toast'
 
 // SVG 아이콘 컴포넌트
 const Icons = {
@@ -58,6 +59,7 @@ export default function ChallengePage() {
   const [activeTab, setActiveTab] = useState('추천')
   const [profileId, setProfileId] = useState(null)
   const [ongoing, setOngoing] = useState([])
+  const [completed, setCompleted] = useState([])
   const [processingIds, setProcessingIds] = useState([])
 
   const recommended = [
@@ -103,7 +105,15 @@ export default function ChallengePage() {
             current: c.completed_dates?.length || 0,
           }))
 
+        const completedChallenges = challengeRes.data
+          .filter((c) => c.challenge_status === 'COMPLETED')
+          .map((c) => ({
+            ...c,
+            icon: getIconByTitle(c.title),
+          }))
+
         setOngoing(activeChallenges)
+        setCompleted(completedChallenges)
       } catch (err) {
         if (err.response?.status !== 401) {
           showError('데이터를 불러오는데 실패했습니다.')
@@ -163,7 +173,9 @@ export default function ChallengePage() {
 
       if (response.data.challenge_status === 'COMPLETED') {
         setOngoing(prev => prev.filter(c => c.id !== challenge.id))
-        showError('축하합니다! 챌린지를 완료했습니다! 🎉')
+        setCompleted(prev => [{ ...response.data, icon: challenge.icon }, ...prev])
+        toast.success('챌린지를 완료했습니다! 수고하셨어요.')
+        setActiveTab('완료')
       } else {
         setOngoing(prev => prev.map(c =>
           c.id === challenge.id
@@ -175,6 +187,17 @@ export default function ChallengePage() {
       showError(err.parsed?.message || '체크에 실패했습니다.')
     } finally {
       setProcessingIds(prev => prev.filter(id => id !== challenge.id))
+    }
+  }
+
+  const handleAbandon = async (challenge) => {
+    if (!confirm(`'${challenge.title}' 챌린지를 포기하시겠습니까?`)) return
+    try {
+      await api.delete(`/api/v1/challenges/${challenge.id}`)
+      setOngoing(prev => prev.filter(c => c.id !== challenge.id))
+      toast.success('챌린지가 삭제되었습니다.')
+    } catch (err) {
+      showError(err.parsed?.message || '삭제에 실패했습니다.')
     }
   }
 
@@ -196,19 +219,24 @@ export default function ChallengePage() {
 
       <div className="max-w-3xl mx-auto px-6 py-6">
         <div className="flex gap-8 mb-8 border-b border-gray-200">
-          {['추천', '진행중'].map((tab) => (
+          {['추천', '진행중', '완료'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={`pb-3 text-sm font-bold cursor-pointer transition-colors relative active:scale-[0.98]
-                ${activeTab === tab 
-                  ? 'text-gray-900 border-b-2 border-gray-900' 
+                ${activeTab === tab
+                  ? 'text-gray-900 border-b-2 border-gray-900'
                   : 'text-gray-400 hover:text-gray-600'}`}
             >
               {tab}
               {tab === '진행중' && ongoing.length > 0 && (
                 <span className="ml-1.5 bg-gray-900 text-white text-[10px] px-1.5 py-0.5 rounded-full">
                   {ongoing.length}
+                </span>
+              )}
+              {tab === '완료' && completed.length > 0 && (
+                <span className="ml-1.5 bg-green-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">
+                  {completed.length}
                 </span>
               )}
             </button>
@@ -270,9 +298,23 @@ export default function ChallengePage() {
                       </div>
                       <div className="flex-1">
                         <h3 className="font-bold text-gray-900">{item.title}</h3>
-                        <p className="text-gray-400 text-xs mt-0.5">{item.current}일째 진행 중!</p>
+                        <p className="text-gray-400 text-xs mt-0.5">
+                          {item.current}일째 진행 중
+                          {item.started_date && <span className="ml-1">· {item.started_date} 시작</span>}
+                        </p>
                       </div>
-                      <span className="text-blue-500 text-sm font-bold">{item.current}/{item.target_days}일</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-blue-500 text-sm font-bold">{item.current}/{item.target_days}일</span>
+                        <button
+                          onClick={() => handleAbandon(item)}
+                          className="w-7 h-7 flex items-center justify-center rounded-full text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all cursor-pointer"
+                          title="챌린지 포기"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+                            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                     <div className="w-full bg-gray-100 rounded-full h-2 mb-4 overflow-hidden">
                       <div
@@ -297,6 +339,33 @@ export default function ChallengePage() {
               })
             ) : (
               <EmptyState title="진행 중인 챌린지가 없어요" message="새로운 습관을 시작해보세요!" onAction={() => setActiveTab('추천')} actionLabel="추천 챌린지 보기" />
+            )}
+          </div>
+        )}
+        {activeTab === '완료' && (
+          <div className="space-y-4">
+            {completed.length > 0 ? (
+              completed.map((item) => (
+                <div key={item.id} className="bg-white rounded-2xl shadow-sm p-6 border border-gray-50 opacity-80">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center text-green-400">
+                      {item.icon}
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-bold text-gray-900">{item.title}</h3>
+                      <p className="text-gray-400 text-xs mt-0.5">
+                        {item.target_days}일 달성
+                        {item.started_date && <span className="ml-1">· {item.started_date} 시작</span>}
+                      </p>
+                    </div>
+                    <span className="bg-green-50 text-green-500 text-xs font-bold px-3 py-1.5 rounded-full border border-green-100">
+                      완료
+                    </span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <EmptyState title="완료한 챌린지가 없어요" message="도전을 시작하고 목표를 달성해보세요!" onAction={() => setActiveTab('추천')} actionLabel="추천 챌린지 보기" />
             )}
           </div>
         )}
