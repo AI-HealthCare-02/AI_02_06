@@ -20,10 +20,8 @@ class OAuthCallbackRequest(BaseModel):
 
 
 class OAuthLoginResponse(BaseModel):
-    """소셜 로그인 성공 응답"""
+    """소셜 로그인 성공 응답 (access_token은 HttpOnly 쿠키로 전달)"""
 
-    access_token: str = Field(description="JWT Access Token")
-    token_type: str = Field(default="Bearer", description="토큰 타입")
     is_new_user: bool = Field(description="신규 가입 여부")
 
 

@@ -34,11 +34,6 @@ function SurveyModal({ onClose, userName }) {
   })
   const [isSaving, setIsSaving] = useState(false)
 
-  const btnSelected = 'bg-gray-900 text-white border-gray-900'
-  const btnUnselected = 'bg-white text-gray-400 border-gray-100 hover:border-gray-300'
-  const chipSelected = 'bg-gray-900 text-white border-gray-900'
-  const chipUnselected = 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
-
   const handleSave = async () => {
     if (!form.age || !form.gender) {
       showError('나이와 성별은 필수입니다.')

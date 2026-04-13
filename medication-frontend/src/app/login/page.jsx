@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import api, { parseApiError, showError } from '../../lib/api'
 import { Pill } from 'lucide-react'
 
@@ -11,14 +10,9 @@ import { Pill } from 'lucide-react'
 const ENV = process.env.NEXT_PUBLIC_ENV || 'local'
 const IS_DEV_MODE = ENV !== 'prod'
 
-// API Base URL (브라우저에서 직접 호출용)
-// - local: http://localhost:8000
-// - dev/prod (Docker): '' (Nginx 프록시)
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || ''
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
-  const router = useRouter()
 
   const handleKakaoLogin = async () => {
     setIsLoading(true)
@@ -50,14 +44,25 @@ export default function LoginPage() {
     }
   }
 
-  const handleTestLogin = () => {
+  const handleTestLogin = async () => {
     setIsLoading(true)
-    // 테스트 로그인 API 호출 (백엔드에 약속된 특수 코드 전송)
-    // 쿠키 설정을 위해 브라우저 리다이렉트 사용
-    // - local: http://localhost:8000/api/v1/auth/kakao/callback
-    // - dev (Docker): /api/v1/auth/kakao/callback (Nginx 프록시)
-    const callbackUrl = `${API_BASE_URL}/api/v1/auth/kakao/callback?code=dev_test_login&state=dev_mode`
-    window.location.href = callbackUrl
+    try {
+      // 테스트 로그인: state 검증 없이 즉시 토큰 발급 (local/dev 전용)
+      // access_token, refresh_token은 HttpOnly 쿠키로 자동 저장됨
+      const { data } = await api.get('/api/v1/auth/kakao/callback', {
+        params: { code: 'dev_test_login', state: 'dev_mode' },
+      })
+      if (data.is_new_user) {
+        window.location.href = '/survey'
+      } else {
+        window.location.href = '/main'
+      }
+    } catch (err) {
+      console.error('개발자 로그인 실패:', err)
+      const parsed = err.parsed || parseApiError(err)
+      showError(parsed.message)
+      setIsLoading(false)
+    }
   }
 
   return (
