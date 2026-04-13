@@ -15,5 +15,8 @@ class Config(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
 
+    # LLM (OpenAI)
+    OPENAI_API_KEY: str | None = None
+
 
 config = Config()
