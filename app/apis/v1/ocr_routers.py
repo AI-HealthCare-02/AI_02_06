@@ -1,8 +1,12 @@
+import shutil
+import uuid
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
-from app.services.ocr_service import OCRService
+from app.queues.rq import get_queue
+from app.services.ocr_service import _UPLOAD_DIR, OCRService
 
 router = APIRouter(prefix="/ocr", tags=["AI Integration"])
 
@@ -19,7 +23,7 @@ def get_ocr_service() -> OCRService:
 
 @router.post(
     "/upload",
-    status_code=status.HTTP_200_OK,
+    status_code=status.HTTP_202_ACCEPTED,
     summary="이미지 업로드 및 OCR 추출",
     description="사용자가 업로드한 처방전 이미지를 바탕으로 약품 정보를 추출합니다. (JPG, PNG, WEBP 지원, 최대 5MB)"
 )
@@ -41,10 +45,9 @@ async def upload_image_for_ocr(
         )
 
     # 2. 파일 크기 검증
-    # Note: 파일 크기를 확인하기 위해 포인터를 끝으로 이동시킵니다.
-    await file.seek(0, 2)
-    file_size = await file.tell()
-    await file.seek(0)  # 다시 처음으로 되돌림
+    # Note: UploadFile은 tell()/whence seek()가 타입/버전별로 흔들리므로, read()로 size를 계산합니다.
+    data = await file.read()
+    file_size = len(data)
 
     if file_size > MAX_FILE_SIZE:
         raise HTTPException(
@@ -56,7 +59,18 @@ async def upload_image_for_ocr(
         )
 
     try:
-        result = await ocr_service.extract_text_from_image(file)
-        return result
+        safe_name = Path(file.filename or "upload").name
+        image_path = _UPLOAD_DIR / f"{uuid.uuid4()}_{safe_name}"
+        with image_path.open("wb") as f:
+            f.write(data)
+
+        q = get_queue("ai")
+        job = q.enqueue(
+            "ai_worker.tasks.ocr_tasks.run_ocr_from_path",
+            str(image_path),
+            original_filename=file.filename,
+            job_timeout=120,
+        )
+        return {"job_id": job.id, "status": "queued"}
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e

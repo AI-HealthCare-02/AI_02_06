@@ -103,9 +103,18 @@ class MessageService:
 
         try:
             rag = RAGGenerator()
-            reply = rag.generate_chat_response(content, history)
-        except Exception:
-            reply = "죄송합니다. 현재 AI 응답을 생성할 수 없습니다. 잠시 후 다시 시도해주세요."
+            reply = await rag.generate_chat_response(content, history)
+        except (ValueError, RuntimeError) as e:
+            # 실패를 201 성공으로 숨기지 않기 위해, 저장한 user_msg를 정리하고 에러를 표면화합니다.
+            await self.repository.soft_delete(user_msg)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error": "ai_unavailable",
+                    "error_description": "현재 AI 응답을 생성할 수 없습니다. 잠시 후 다시 시도해주세요.",
+                    "cause": str(e),
+                },
+            ) from e
 
         assistant_msg = await self.repository.create_assistant_message(session_id, reply)
         return user_msg, assistant_msg

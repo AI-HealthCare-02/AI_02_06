@@ -5,17 +5,19 @@ import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse as Response
-from fastapi.responses import Response as PlainResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.responses import Response
 
 from app.core import config
 from app.core.config import Env
+from app.dependencies.security import get_current_account
 from app.dtos.oauth import (
     OAuthConfigResponse,
     OAuthErrorResponse,
     OAuthLoginResponse,
     TokenRefreshResponse,
 )
+from app.models.accounts import Account
 from app.services.oauth import OAuthService
 from app.services.rate_limiter import RateLimiter, get_rate_limiter
 
@@ -282,10 +284,8 @@ async def refresh_token(
     tokens = await oauth_service.refresh_access_token(refresh_token_str)
 
     # 응답 생성
-    response = Response(
-        content=TokenRefreshResponse(
-            access_token=tokens["access_token"],
-        ).model_dump(),
+    response = JSONResponse(
+        content=TokenRefreshResponse(access_token=tokens["access_token"]).model_dump(),
         status_code=status.HTTP_200_OK,
     )
 
@@ -314,6 +314,39 @@ async def refresh_token(
     return response
 
 
+@oauth_router.delete(
+    "/account",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="회원 탈퇴",
+    description="계정을 소프트 삭제하고 모든 토큰을 무효화합니다.",
+    responses={
+        204: {"description": "회원 탈퇴 성공 (본문 없음)"},
+        401: {"description": "인증 실패", "model": OAuthErrorResponse},
+    },
+)
+async def delete_account(
+    request: Request,
+    current_account: Annotated[Account, Depends(get_current_account)],
+    oauth_service: Annotated[OAuthService, Depends(get_oauth_service)],
+) -> Response:
+    await oauth_service.delete_account(current_account)
+
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    response.delete_cookie(
+        key="access_token",
+        httponly=True,
+        secure=config.ENV == Env.PROD,
+        samesite="lax",
+    )
+    response.delete_cookie(
+        key="refresh_token",
+        httponly=True,
+        secure=config.ENV == Env.PROD,
+        samesite="lax",
+    )
+    return response
+
+
 @oauth_router.post(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -326,7 +359,7 @@ async def refresh_token(
 async def logout(
     request: Request,
     oauth_service: Annotated[OAuthService, Depends(get_oauth_service)],
-) -> PlainResponse:
+) -> Response:
     # 쿠키에서 refresh token 추출
     refresh_token = request.cookies.get("refresh_token")
 
@@ -335,7 +368,7 @@ async def logout(
         await oauth_service.revoke_refresh_token(refresh_token)
 
     # 쿠키 삭제
-    response = PlainResponse(status_code=status.HTTP_204_NO_CONTENT)
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(
         key="access_token",
         httponly=True,
