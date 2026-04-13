@@ -5,8 +5,8 @@ import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse as Response
-from fastapi.responses import Response as BaseResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.responses import Response
 
 from app.core import config
 from app.core.config import Env
@@ -284,10 +284,8 @@ async def refresh_token(
     tokens = await oauth_service.refresh_access_token(refresh_token_str)
 
     # 응답 생성
-    response = Response(
-        content=TokenRefreshResponse(
-            access_token=tokens["access_token"],
-        ).model_dump(),
+    response = JSONResponse(
+        content=TokenRefreshResponse(access_token=tokens["access_token"]).model_dump(),
         status_code=status.HTTP_200_OK,
     )
 
@@ -361,7 +359,7 @@ async def delete_account(
 async def logout(
     request: Request,
     oauth_service: Annotated[OAuthService, Depends(get_oauth_service)],
-) -> BaseResponse:
+) -> Response:
     # 쿠키에서 refresh token 추출
     refresh_token = request.cookies.get("refresh_token")
 
@@ -370,7 +368,7 @@ async def logout(
         await oauth_service.revoke_refresh_token(refresh_token)
 
     # 쿠키 삭제
-    response = BaseResponse(status_code=status.HTTP_204_NO_CONTENT)
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(
         key="access_token",
         httponly=True,

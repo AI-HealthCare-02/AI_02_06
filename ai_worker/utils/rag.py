@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 from openai import AsyncOpenAI, OpenAIError
+from openai.types.chat import ChatCompletionMessageParam
 
 # 개발/배포 환경에 따른 모델 설정
 _ENV = os.environ.get("APP_ENV", "dev")
@@ -79,7 +80,7 @@ class RAGGenerator:
 [참고 데이터]
 {context_text}"""
 
-        messages = [{"role": "system", "content": system_prompt}]
+        messages: list[ChatCompletionMessageParam] = [{"role": "system", "content": system_prompt}]
         for h in history:
             messages.append({"role": h["role"], "content": h["content"]})
         messages.append({"role": "user", "content": question})

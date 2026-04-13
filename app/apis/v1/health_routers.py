@@ -2,8 +2,10 @@
 Health Check Endpoints
 """
 
-from fastapi import APIRouter
-from fastapi import HTTPException, status
+import os
+
+import redis
+from fastapi import APIRouter, HTTPException, status
 from tortoise import Tortoise
 
 router = APIRouter(prefix="/health", tags=["Health"])
@@ -30,9 +32,6 @@ async def readiness_check():
 
     # Redis check (optional: only if configured)
     try:
-        import redis
-        import os
-
         redis_url = os.environ.get("REDIS_URL")
         if redis_url:
             r = redis.from_url(redis_url, socket_timeout=2)

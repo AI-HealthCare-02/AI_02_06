@@ -8,6 +8,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
+from pydantic import BaseModel, Field
 
 from app.dependencies.security import get_current_account
 from app.dtos.message import ChatAskRequest, ChatAskResponse, MessageCreate, MessageResponse
@@ -95,9 +96,6 @@ async def delete_message(
     """특정 메시지를 삭제합니다."""
     await service.delete_message_with_owner_check(message_id, current_account.id)
     return None
-
-
-from pydantic import BaseModel, Field
 
 
 class MessageFeedbackRequest(BaseModel):

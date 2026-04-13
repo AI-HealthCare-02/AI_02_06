@@ -13,7 +13,7 @@ class MedicationGuideService:
         self.medicine_db: list[dict[str, Any]] = DataChunker.load_json(str(_MEDICINES_PATH))
         self.rag = RAGGenerator()
 
-    def process(self, image_path: str) -> str:
+    async def process(self, image_path: str) -> str:
         try:
             ocr_result = call_clova_ocr(image_path)
         except (OCRError, FileNotFoundError) as e:
@@ -28,4 +28,4 @@ class MedicationGuideService:
             raise ValueError("처방전에서 인식된 약 정보가 없습니다. 사진을 다시 찍어주세요.")
 
         chunks = DataChunker.json_to_chunks(matched)
-        return self.rag.generate_guide(matched, chunks)
+        return await self.rag.generate_guide(matched, chunks)

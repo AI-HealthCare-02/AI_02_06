@@ -45,10 +45,9 @@ async def upload_image_for_ocr(
         )
 
     # 2. 파일 크기 검증
-    # Note: 파일 크기를 확인하기 위해 포인터를 끝으로 이동시킵니다.
-    await file.seek(0, 2)
-    file_size = await file.tell()
-    await file.seek(0)  # 다시 처음으로 되돌림
+    # Note: UploadFile은 tell()/whence seek()가 타입/버전별로 흔들리므로, read()로 size를 계산합니다.
+    data = await file.read()
+    file_size = len(data)
 
     if file_size > MAX_FILE_SIZE:
         raise HTTPException(
@@ -63,7 +62,7 @@ async def upload_image_for_ocr(
         safe_name = Path(file.filename or "upload").name
         image_path = _UPLOAD_DIR / f"{uuid.uuid4()}_{safe_name}"
         with image_path.open("wb") as f:
-            shutil.copyfileobj(file.file, f)
+            f.write(data)
 
         q = get_queue("ai")
         job = q.enqueue(
@@ -74,4 +73,4 @@ async def upload_image_for_ocr(
         )
         return {"job_id": job.id, "status": "queued"}
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
