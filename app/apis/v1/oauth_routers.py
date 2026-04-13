@@ -10,12 +10,14 @@ from fastapi.responses import Response as BaseResponse
 
 from app.core import config
 from app.core.config import Env
+from app.dependencies.security import get_current_account
 from app.dtos.oauth import (
     OAuthConfigResponse,
     OAuthErrorResponse,
     OAuthLoginResponse,
     TokenRefreshResponse,
 )
+from app.models.accounts import Account
 from app.services.oauth import OAuthService
 from app.services.rate_limiter import RateLimiter, get_rate_limiter
 
@@ -311,6 +313,39 @@ async def refresh_token(
         max_age=config.REFRESH_TOKEN_EXPIRE_MINUTES * 60,
     )
 
+    return response
+
+
+@oauth_router.delete(
+    "/account",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="회원 탈퇴",
+    description="계정을 소프트 삭제하고 모든 토큰을 무효화합니다.",
+    responses={
+        204: {"description": "회원 탈퇴 성공 (본문 없음)"},
+        401: {"description": "인증 실패", "model": OAuthErrorResponse},
+    },
+)
+async def delete_account(
+    request: Request,
+    current_account: Annotated[Account, Depends(get_current_account)],
+    oauth_service: Annotated[OAuthService, Depends(get_oauth_service)],
+) -> BaseResponse:
+    await oauth_service.delete_account(current_account)
+
+    response = BaseResponse(status_code=status.HTTP_204_NO_CONTENT)
+    response.delete_cookie(
+        key="access_token",
+        httponly=True,
+        secure=config.ENV == Env.PROD,
+        samesite="lax",
+    )
+    response.delete_cookie(
+        key="refresh_token",
+        httponly=True,
+        secure=config.ENV == Env.PROD,
+        samesite="lax",
+    )
     return response
 
 
