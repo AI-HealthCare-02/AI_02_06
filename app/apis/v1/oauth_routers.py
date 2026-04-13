@@ -214,7 +214,11 @@ async def kakao_callback(
     from fastapi.responses import RedirectResponse
 
     # FRONTEND_URL 환경변수 사용 (local: http://localhost:3000, dev: http://localhost:3000, prod: https://도메인)
-    redirect_url = f"{config.FRONTEND_URL}/main"
+    # Dev 로그인 또는 신규 가입자는 설문 팝업 표시를 위해 쿼리 파라미터 추가
+    if is_dev_login or is_new_user:
+        redirect_url = f"{config.FRONTEND_URL}/main?showSurvey=true"
+    else:
+        redirect_url = f"{config.FRONTEND_URL}/main"
     response = RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
     # Access Token을 HttpOnly 쿠키로 설정 (XSS 방지)
