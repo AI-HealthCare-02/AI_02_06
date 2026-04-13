@@ -5,8 +5,7 @@ import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse, RedirectResponse
-from starlette.responses import Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 
 from app.core import config
 from app.core.config import Env
