@@ -7,7 +7,6 @@ Phase 4: RQ 태스크 큐 통합 예정
 
 import signal
 import sys
-import time
 from pathlib import Path
 
 # 프로젝트 루트를 Python 경로에 추가
@@ -54,7 +53,7 @@ def health_check() -> dict:
 
 
 def main():
-    """메인 워커 루프"""
+    """RQ 기반 워커 실행"""
     global shutdown_requested
 
     # 시그널 핸들러 등록
@@ -64,28 +63,22 @@ def main():
     logger.info("AI Worker starting...")
     logger.info(f"Timezone: {config.TIMEZONE}")
 
-    # Redis 연결 대기
-    retry_count = 0
-    max_retries = 30
-    while not check_redis_connection() and retry_count < max_retries:
-        retry_count += 1
-        logger.info(f"Waiting for Redis... ({retry_count}/{max_retries})")
-        time.sleep(2)
-
-    if retry_count >= max_retries:
-        logger.error("Failed to connect to Redis after max retries")
+    if not check_redis_connection():
+        logger.error("Redis connection failed. Ensure REDIS_URL is reachable.")
         sys.exit(1)
 
+    from redis import Redis
+    from rq import Connection, Queue, Worker
+
+    redis_conn = Redis.from_url(config.REDIS_URL)
+    queues = [Queue("ai"), Queue("default")]
+
     logger.info("Redis connected successfully")
-    logger.info("AI Worker ready - waiting for tasks...")
+    logger.info("RQ Worker ready - waiting for tasks...")
 
-    # 메인 루프 (Phase 4에서 RQ 워커로 대체 예정)
-    while not shutdown_requested:
-        # TODO: Phase 4에서 RQ 워커 구현
-        # 현재는 헬스체크용 대기 상태 유지
-        time.sleep(1)
-
-    logger.info("AI Worker shutdown complete")
+    with Connection(redis_conn):
+        worker = Worker(queues)
+        worker.work(with_scheduler=True)
 
 
 if __name__ == "__main__":

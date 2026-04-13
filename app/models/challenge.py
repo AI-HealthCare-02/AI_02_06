@@ -23,3 +23,21 @@ class Challenge(models.Model):
     class Meta:
         table = "challenges"
         indexes = (("profile_id", "challenge_status"),)
+
+
+class UserChallenge(models.Model):
+    id = fields.UUIDField(pk=True)
+
+    profile = fields.ForeignKeyField("models.Profile", related_name="user_challenges")
+    challenge = fields.ForeignKeyField("models.Challenge", related_name="user_participants")
+
+    is_active = fields.BooleanField(default=True, description="챌린지 참여 활성화 여부")
+    progress_rate = fields.IntField(default=0, description="진행률 (0-100)")
+    completed_at = fields.DatetimeField(null=True, description="챌린지 최종 달성 일시")
+
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+
+    class Meta:
+        table = "user_challenges"
+        indexes = (("profile_id", "challenge_id", "is_active"),)
