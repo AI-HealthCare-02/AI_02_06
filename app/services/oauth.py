@@ -321,3 +321,13 @@ class OAuthService:
     async def revoke_refresh_token(self, token: str) -> bool:
         """Refresh Token 무효화 (로그아웃)"""
         return await self.refresh_token_repo.revoke(token)
+
+    async def delete_account(self, account: Account) -> None:
+        """
+        회원 탈퇴 처리
+
+        1. 해당 계정의 모든 refresh token 무효화
+        2. 계정 soft delete (deleted_at 설정)
+        """
+        await self.refresh_token_repo.revoke_all_for_account(account.id)
+        await self.account_repo.soft_delete(account)
