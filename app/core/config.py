@@ -79,11 +79,7 @@ class Config(BaseSettings):
     # LLM (OpenAI)
     OPENAI_API_KEY: str | None = None
 
-<<<<<<< HEAD
-    # Kakao OAuth (Mock 기본값)
-=======
-    # Kakao OAuth
->>>>>>> 4bf49523a37ab14ff27ac94f00c779e5f5634fd4
+    # Kakao OAuth (충돌 마커 제거 완료)
     KAKAO_CLIENT_ID: str = _DEFAULT_KAKAO_CLIENT_ID
     KAKAO_CLIENT_SECRET: str = _DEFAULT_KAKAO_CLIENT_SECRET
     KAKAO_REDIRECT_URI: str | None = None
