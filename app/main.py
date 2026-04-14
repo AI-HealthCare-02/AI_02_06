@@ -82,8 +82,8 @@ elif config.ENV == Env.DEV:
     cors_methods = ["*"]
     cors_headers = ["*"]
 else:
-    # 로컬 환경: localhost만 허용
-    cors_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    # 로컬/개발 환경: 느슨한 설정
+    cors_origins = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost", "http://localhost:80"]
     cors_methods = ["*"]
     cors_headers = ["*"]
 

@@ -1,11 +1,10 @@
 import os
 import secrets
 import zoneinfo
-from dataclasses import field
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -52,11 +51,17 @@ _DEFAULT_KAKAO_CLIENT_SECRET = "mock_kakao_client_secret"
 
 
 class Config(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="allow")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="allow",
+    )
 
     ENV: Env = Env.LOCAL
     SECRET_KEY: str = _DEFAULT_SECRET_KEY
-    TIMEZONE: zoneinfo.ZoneInfo = field(default_factory=lambda: zoneinfo.ZoneInfo("Asia/Seoul"))
+
+    TIMEZONE: zoneinfo.ZoneInfo = Field(default_factory=lambda: zoneinfo.ZoneInfo("Asia/Seoul"))
+
     TEMPLATE_DIR: str = os.path.join(Path(__file__).resolve().parent.parent, "templates")
 
     # DB 설정 (ENV에 따라 자동 설정되지 않음 - 민감 정보)
@@ -79,7 +84,10 @@ class Config(BaseSettings):
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 14 * 24 * 60
     JWT_LEEWAY: int = 5
 
-    # Kakao OAuth
+    # LLM (OpenAI)
+    OPENAI_API_KEY: str | None = None
+
+    # Kakao OAuth (충돌 마커 제거 완료)
     KAKAO_CLIENT_ID: str = _DEFAULT_KAKAO_CLIENT_ID
     KAKAO_CLIENT_SECRET: str = _DEFAULT_KAKAO_CLIENT_SECRET
     KAKAO_REDIRECT_URI: str | None = None
