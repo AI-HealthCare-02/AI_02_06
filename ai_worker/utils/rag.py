@@ -1,6 +1,5 @@
-import os
-from typing import List, Dict, Any, Optional
 from openai import AsyncOpenAI
+
 from app.core.config import config
 
 
@@ -11,8 +10,9 @@ class RAGGenerator:
     """
 
     def __init__(self):
-        # OpenAI 클라이언트 초기화 (API Key는 config에서 주입)
-        self.client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+        # API Key가 없는 환경(테스트/CI)에서도 모듈 import가 깨지지 않도록 lazy 처리합니다.
+        self._api_key = config.OPENAI_API_KEY
+        self.client = AsyncOpenAI(api_key=self._api_key) if self._api_key else None
         self.model = "gpt-4o-mini"  # 혹은 사용 중인 모델명
 
     async def get_relevant_documents(self, query: str) -> str:
@@ -25,14 +25,20 @@ class RAGGenerator:
         return context
 
     async def generate_chat_response(
-            self,
-            messages: List[Dict[str, str]],
-            system_prompt: Optional[str] = None
+        self,
+        messages: list[dict[str, str]],
+        system_prompt: str | None = None,
     ) -> str:
         """
         사용자의 메시지 히스토리와 검색된 컨텍스트를 결합하여 답변을 생성합니다.
         """
         try:
+            if self.client is None:
+                return (
+                    "현재 AI 응답을 생성할 수 있는 설정이 준비되지 않았어요. "
+                    "관리자에게 OPENAI_API_KEY 설정을 요청해 주시겠어요?"
+                )
+
             # 1. 컨텍스트 확보 (가장 최근 메시지 기준)
             user_query = messages[-1]["content"] if messages else ""
             context = await self.get_relevant_documents(user_query)
@@ -48,9 +54,7 @@ class RAGGenerator:
             instruction = system_prompt if system_prompt else default_system
 
             # 3. OpenAI API 호출을 위한 메시지 구성
-            prompt_messages = [
-                {"role": "system", "content": f"{instruction}\n\n[Context]\n{context}"}
-            ]
+            prompt_messages = [{"role": "system", "content": f"{instruction}\n\n[Context]\n{context}"}]
             prompt_messages.extend(messages)
 
             # 4. LLM 추론
@@ -58,7 +62,7 @@ class RAGGenerator:
                 model=self.model,
                 messages=prompt_messages,
                 temperature=0.7,
-                max_tokens=500
+                max_tokens=500,
             )
 
             return response.choices[0].message.content

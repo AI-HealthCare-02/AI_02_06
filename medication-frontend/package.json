@@ -5,10 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-<<<<<<< HEAD
-=======
     "build:local": "dotenv -e ../.env -- next build",
->>>>>>> 4bf49523a37ab14ff27ac94f00c779e5f5634fd4
     "start": "next start",
     "lint": "eslint"
   },
