@@ -2,43 +2,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Home, User, Camera, Trophy, ClipboardList, MessageCircle, X, Send } from 'lucide-react'
-import api from '@/lib/api'
-import { showError } from '@/lib/errors'
 
-// 실제 AI와 연동된 ChatModal
+// 동훈 님의 예쁜 스타일이 이식된 ChatModal
 function ChatModal({ onClose }) {
   const [messages, setMessages] = useState([
     { role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요 💊' }
   ])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [sessionId, setSessionId] = useState(null)
-  const [profileId, setProfileId] = useState(null)
-  const scrollRef = useRef(null)
-
-  // 초기 프로필 로드 및 세션 준비
-  useEffect(() => {
-    const initChat = async () => {
-      try {
-        // 1. 프로필 목록 조회 (첫 번째 프로필 사용)
-        const profileRes = await api.get('/api/v1/profiles/')
-        if (profileRes.data && profileRes.data.length > 0) {
-          const pId = profileRes.data[0].id
-          setProfileId(pId)
-
-          // 2. 해당 프로필의 최근 세션이 있는지 확인 (선택 사항)
-          // 여기서는 간단하게 매번 새 세션을 생성하거나, 
-          // 첫 메시지 전송 시 생성하도록 구현합니다.
-        } else {
-          // 프로필이 없는 경우 처리 (필요 시 설문 페이지로 유도)
-          console.warn('사용 가능한 프로필이 없습니다.')
-        }
-      } catch (err) {
-        console.error('채팅 초기화 실패:', err)
-      }
-    }
-    initChat()
-  }, [])
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   // 메시지 추가 시 자동 스크롤
   useEffect(() => {
@@ -47,53 +19,22 @@ function ChatModal({ onClose }) {
     }
   }, [messages, isLoading])
 
-  const handleSend = async () => {
-    const messageContent = input.trim()
-    if (!messageContent || isLoading) return
+  const handleSend = () => {
+    const message = input.trim()
+    if (!message || isLoading) return
     
     setInput('')
-    setMessages(prev => [...prev, { role: 'user', content: messageContent }])
+    setMessages(prev => [...prev, { role: 'user', content: message }])
     setIsLoading(true)
 
-    try {
-      let currentSessionId = sessionId
-
-      // 1. 세션이 없으면 먼저 생성
-      if (!currentSessionId) {
-        if (!profileId) {
-          // 프로필이 아직 로드되지 않았거나 없는 경우 임시 처리
-          throw new Error('프로필 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.')
-        }
-
-        const sessionRes = await api.post('/api/v1/chat-sessions/', {
-          profile_id: profileId,
-          title: messageContent.substring(0, 20) + (messageContent.length > 20 ? '...' : '')
-        })
-        currentSessionId = sessionRes.data.id
-        setSessionId(currentSessionId)
-      }
-
-      // 2. AI에게 질문 전송
-      const askRes = await api.post('/api/v1/messages/ask', {
-        session_id: currentSessionId,
-        content: messageContent
-      })
-
-      // 3. AI 응답 추가
-      const aiReply = askRes.data.assistant_message.content
+    // 테스트용 mock 응답
+    setTimeout(() => {
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: aiReply
+        content: '지금은 테스트 중이에요. 곧 실제 AI와 연결될 거예요!'
       }])
-    } catch (err) {
-      showError(err)
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: '죄송합니다. 메시지를 처리하는 중에 오류가 발생했습니다. 다시 시도해 주세요.'
-      }])
-    } finally {
       setIsLoading(false)
-    }
+    }, 1500)
   }
 
   return (

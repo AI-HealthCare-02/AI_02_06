@@ -7,7 +7,7 @@ class Medication(models.Model):
     # profiles 테이블과 연결
     profile = fields.ForeignKeyField("models.Profile", related_name="medications")
 
-    medicine_name = fields.CharField(max_length=128, db_index=True, description="약품명")
+    medicine_name = fields.CharField(max_length=128, description="약품명")
     dose_per_intake = fields.CharField(max_length=32, null=True, description="1회 복용량 (예: 1정, 5ml)")
     intake_instruction = fields.CharField(max_length=256, null=True, description="복용 지시사항")
 

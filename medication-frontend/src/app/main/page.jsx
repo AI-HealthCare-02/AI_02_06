@@ -1,8 +1,7 @@
 'use client'
 import { useState, useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import api from '@/lib/api'
-import { showError } from '@/lib/errors'
+import api, { showError } from '@/lib/api'
 import { Pill, FileText, Flame, Ban, X, Check, Plus, MessageCircle } from 'lucide-react'
 
 // 스켈레톤은 main의 레이아웃을 따름
@@ -32,31 +31,6 @@ function SurveyModal({ onClose, userName }) {
     is_smoking: null, is_drinking: null,
     conditions: [], allergies: []
   })
-  const [isSaving, setIsSaving] = useState(false)
-
-  const btnSelected = 'bg-gray-900 text-white border-gray-900'
-  const btnUnselected = 'bg-white text-gray-400 border-gray-100 hover:border-gray-300'
-  const chipSelected = 'bg-gray-900 text-white border-gray-900'
-  const chipUnselected = 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
-
-  const handleSave = async () => {
-    if (!form.age || !form.gender) {
-      showError('나이와 성별은 필수입니다.')
-      return
-    }
-    setIsSaving(true)
-    await onSave({
-      age: parseInt(form.age) || null,
-      gender: form.gender || null,
-      height: parseInt(form.height) || null,
-      weight: parseFloat(form.weight) || null,
-      is_smoking: form.is_smoking,
-      is_drinking: form.is_drinking,
-      conditions: form.conditions.length > 0 ? form.conditions : null,
-      allergies: form.allergies.length > 0 ? form.allergies : null,
-    })
-    setIsSaving(false)
-  }
 
   // 기존 프로필 데이터 로드
   useEffect(() => {
@@ -128,6 +102,8 @@ function SurveyModal({ onClose, userName }) {
 
   const selectedClass = 'bg-gray-900 text-white border-gray-900'
   const unselectedClass = 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
+  const chipSelected = 'bg-gray-900 text-white border-gray-900'
+  const chipUnselected = 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
@@ -290,61 +266,20 @@ function ChatModal({ onClose }) {
   const [messages, setMessages] = useState([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요 💊' }])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [sessionId, setSessionId] = useState(null)
-  const [profileId, setProfileId] = useState(null)
   const bottomRef = useRef(null)
-
-  useEffect(() => {
-    const initChat = async () => {
-      try {
-        const profileRes = await api.get('/api/v1/profiles/')
-        if (profileRes.data && profileRes.data.length > 0) {
-          setProfileId(profileRes.data[0].id)
-        }
-      } catch (err) {
-        console.error('채팅 초기화 실패:', err)
-      }
-    }
-    initChat()
-  }, [])
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return
-    const messageContent = input.trim()
+    const msg = input.trim()
     setInput('')
-    setMessages(prev => [...prev, { role: 'user', content: messageContent }])
+    setMessages(prev => [...prev, { role: 'user', content: msg }])
     setIsLoading(true)
-
-    try {
-      let currentSessionId = sessionId
-
-      if (!currentSessionId) {
-        if (!profileId) {
-          throw new Error('프로필 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.')
-        }
-
-        const sessionRes = await api.post('/api/v1/chat-sessions/', {
-          profile_id: profileId,
-          title: messageContent.substring(0, 20) + (messageContent.length > 20 ? '...' : '')
-        })
-        currentSessionId = sessionRes.data.id
-        setSessionId(currentSessionId)
-      }
-
-      const askRes = await api.post('/api/v1/messages/ask', {
-        session_id: currentSessionId,
-        content: messageContent
-      })
-
-      const aiReply = askRes.data.assistant_message.content
-      setMessages(prev => [...prev, { role: 'assistant', content: aiReply }])
-    } catch (err) {
-      setMessages(prev => [...prev, { role: 'assistant', content: '오류가 발생했습니다. 잠시 후 다시 시도해주세요.' }])
-    } finally {
+    setTimeout(() => {
+      setMessages(prev => [...prev, { role: 'assistant', content: '곧 실제 AI와 연결될 예정입니다!' }])
       setIsLoading(false)
-    }
+    }, 1000)
   }
 
   return (
@@ -357,9 +292,7 @@ function ChatModal({ onClose }) {
         <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50">
           {messages.map((m, i) => (
             <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[80%] p-4 rounded-2xl text-sm shadow-sm whitespace-pre-wrap ${m.role === 'user' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-100 text-gray-800'}`}>
-                {m.content}
-              </div>
+              <div className={`max-w-[80%] p-4 rounded-2xl text-sm ${m.role === 'user' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-100 text-gray-800'}`}>{m.content}</div>
             </div>
           ))}
           <div ref={bottomRef} />
@@ -380,7 +313,6 @@ function MainPageContent() {
   const [showSurvey, setShowSurvey] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [userName, setUserName] = useState('사용자')
-  const [selfProfileId, setSelfProfileId] = useState(null)
   const [greeting, setGreeting] = useState({ msg: '반가워요', sub: '오늘 하루도 건강하게 시작해봐요' })
 
   // 설문 팝업 쿼리 파라미터 감지
@@ -397,17 +329,10 @@ function MainPageContent() {
       try {
         setIsLoading(true)
         const profileRes = await api.get('/api/v1/profiles/')
-        const profiles = profileRes.data || []
-        const self = profiles.find(p => p.relation_type === 'SELF')
-
-        if (self) {
+        if (profileRes.data?.length > 0) {
+          const self = profileRes.data.find(p => p.relation_type === 'SELF') || profileRes.data[0]
           setUserName(self.name.split('(')[0])
-          setSelfProfileId(self.id)
-          if (!self.health_survey) setShowSurvey(true)
-        } else {
-          setShowSurvey(true)
         }
-
         const hour = new Date().getHours()
         if (hour < 12) setGreeting({ msg: '좋은 아침이에요', sub: '오늘 하루도 건강하게 시작해봐요' })
         else if (hour < 17) setGreeting({ msg: '좋은 오후예요', sub: '점심 식사 후 약 챙기셨나요?' })
@@ -416,23 +341,6 @@ function MainPageContent() {
     }
     initPage()
   }, [])
-
-  const handleSurveySave = async (healthSurvey) => {
-    try {
-      if (selfProfileId) {
-        await api.patch(`/api/v1/profiles/${selfProfileId}`, { health_survey: healthSurvey })
-      } else {
-        await api.post('/api/v1/profiles/', {
-          relation_type: 'SELF',
-          name: userName || '나',
-          health_survey: healthSurvey,
-        })
-      }
-      setShowSurvey(false)
-    } catch (err) {
-      showError('건강 정보 저장에 실패했습니다.')
-    }
-  }
 
   if (isLoading) return <MainSkeleton />
 
