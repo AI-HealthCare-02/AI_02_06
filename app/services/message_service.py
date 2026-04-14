@@ -91,7 +91,10 @@ class MessageService:
         return await self.repository.create_assistant_message(session_id, content)
 
     async def ask_and_reply(self, session_id: UUID, content: str) -> tuple[ChatMessage, ChatMessage]:
-        """유저 메시지 저장 → RAG 호출 → AI 응답 저장 후 둘 다 반환"""
+        """
+        사용자 메시지 저장, 약사 페르소나에 맞춰 응답 생성 후,
+        사용자 메시지와 약사 메시지를 모두 반환합니다.
+        """
         user_msg = await self.repository.create_user_message(session_id, content)
 
         recent = await self.repository.get_recent_by_session(session_id, limit=10)
@@ -101,9 +104,22 @@ class MessageService:
             if m.id != user_msg.id
         ]
 
+        # "다정한 퍼스널 약사" 페르소나 적용
+        system_prompt = (
+            "당신은 친절하고 상냥한 '퍼스널 약사'입니다. "
+            "사용자의 복약 관련 질문에 대해 따뜻하고 이해하기 쉬운 언어로 답변해주세요. "
+            "답변 시에는 항상 '~해요', '~일까요?' 와 같은 부드러운 구어체를 사용해주세요. "
+            "복약, 영양제 추천, 건강 정보 등 서비스의 핵심 기능에 관련된 질문에 집중해주세요. "
+            "만약 날씨, 정치, 연예 등 복약과 관련 없는 질문을 받는다면, "
+            "정중하게 답변을 거절하고 '저는 복약 및 건강 정보에 대해 안내해 드리는 약사이니, "
+            "영양제 추천이나 복약 관련 질문을 해주시면 더 잘 도와드릴 수 있어요.' 와 같이 서비스를 안내해주세요. "
+            "사용자와의 대화는 항상 긍정적이고 편안한 분위기를 유지해주세요."
+        )
+
         try:
             rag = RAGGenerator()
-            reply = await rag.generate_chat_response(content, history)
+            # RAGGenerator에 system_prompt를 전달하도록 수정
+            reply = await rag.generate_chat_response(content, history, system_prompt=system_prompt)
         except (ValueError, RuntimeError) as e:
             # 실패를 201 성공으로 숨기지 않기 위해, 저장한 user_msg를 정리하고 에러를 표면화합니다.
             await self.repository.soft_delete(user_msg)

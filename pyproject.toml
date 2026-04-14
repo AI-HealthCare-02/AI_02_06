@@ -6,17 +6,18 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "asyncpg>=0.31.0",
-    "bleach>=6.3.0",
-    "cryptography>=46.0.3",
-    "httpx>=0.28.1",
-    "myapplication>=0.1.0",
+    "rq>=2.7.0",           # AI Worker와 Backend 공통 핵심 의존성으로 승격
+    "redis>=7.1.0",        # RQ의 브로커 역할을 위해 필수
     "pydantic>=2.12.5",
     "pydantic-settings>=2.12.0",
-    "python-dateutil>=2.9.0.post0",
-    "redis>=7.1.0",
+    "httpx>=0.28.1",
     "requests>=2.33.1",
+    "bleach>=6.3.0",
+    "cryptography>=46.0.3",
+    "python-dateutil>=2.9.0.post0",
     "tomlkit>=0.14.0",
     "tzdata>=2024.1",
+    "myapplication>=0.1.0",
 ]
 
 [dependency-groups]
@@ -31,15 +32,13 @@ app = [
     "asyncpg>=0.30.0",
     "bcrypt<=4.0.1",
     "fastapi[standard]>=0.128.0",
-    "httpx>=0.28.1",
     "openai>=1.0.0",
     "orjson>=3.11.5",
     "passlib[bcrypt]>=1.7.4",
     "pyjwt>=2.10.1",
-    "rq>=2.7.0",
-    "requests>=2.28.0",
     "tortoise-orm>=0.25.3",
     "uvicorn>=0.40.0",
+    # "rq>=2.7.0" -> 상단 dependencies로 이동되었으므로 여기서 제거됨
 ]
 dev = [
     "bandit>=1.7.0",
@@ -73,43 +72,26 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 
 [tool.ruff]
-# 기본 라인 길이 설정
 line-length = 120
-target-version = "py312"
+target-version = "py313"
 
 [tool.ruff.lint]
-# 사용할 린트 규칙들 선택
-select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes
-    "I",   # isort
-    "C90", # mccabe
-    "B",   # flake8-bugbear
-    "UP",  # pyupgrade
-    "N",   # pep8-naming
-]
+select = ["E", "W", "F", "I", "C90", "B", "UP", "N"]
 ignore = ["UP046", "E501"]
 
-# 특정 파일에서 무시할 규칙들
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "db/migrations/*" = ["ALL"]
 
 [tool.ruff.format]
-# 포매터 설정
 quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.bandit]
-# 보안 검사 설정
 exclude_dirs = ["tests", "app/db/migrations"]
-skips = [
-    "B101",  # assert 사용 허용 (테스트 코드)
-    "B311",  # random 모듈 허용 (보안 목적 아닌 경우)
-]
+skips = ["B101", "B311"]
 
 [tool.mypy]
 python_version = "3.13"

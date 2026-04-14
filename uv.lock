@@ -36,6 +36,7 @@ dependencies = [
     { name = "python-dateutil" },
     { name = "redis" },
     { name = "requests" },
+    { name = "rq" },
     { name = "tomlkit" },
     { name = "tzdata" },
 ]
@@ -54,13 +55,10 @@ app = [
     { name = "asyncpg" },
     { name = "bcrypt" },
     { name = "fastapi", extra = ["standard"] },
-    { name = "httpx" },
     { name = "openai" },
     { name = "orjson" },
     { name = "passlib", extra = ["bcrypt"] },
     { name = "pyjwt" },
-    { name = "requests" },
-    { name = "rq" },
     { name = "tortoise-orm" },
     { name = "uvicorn" },
 ]
@@ -89,6 +87,7 @@ requires-dist = [
     { name = "python-dateutil", specifier = ">=2.9.0.post0" },
     { name = "redis", specifier = ">=7.1.0" },
     { name = "requests", specifier = ">=2.33.1" },
+    { name = "rq", specifier = ">=2.7.0" },
     { name = "tomlkit", specifier = ">=0.14.0" },
     { name = "tzdata", specifier = ">=2024.1" },
 ]
@@ -105,13 +104,10 @@ app = [
     { name = "asyncpg", specifier = ">=0.30.0" },
     { name = "bcrypt", specifier = "<=4.0.1" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.128.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "orjson", specifier = ">=3.11.5" },
     { name = "passlib", extras = ["bcrypt"], specifier = ">=1.7.4" },
     { name = "pyjwt", specifier = ">=2.10.1" },
-    { name = "requests", specifier = ">=2.28.0" },
-    { name = "rq", specifier = ">=2.7.0" },
     { name = "tortoise-orm", specifier = ">=0.25.3" },
     { name = "uvicorn", specifier = ">=0.40.0" },
 ]
