@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Trash2 } from 'lucide-react'
 import BottomNav from '@/components/BottomNav'
@@ -30,7 +30,7 @@ function ResultSkeleton() {
   )
 }
 
-export default function OcrResultPage() {
+function OcrResultContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const draftId = searchParams.get('draft_id')
@@ -204,5 +204,14 @@ export default function OcrResultPage() {
 
       <BottomNav />
     </main>
+  )
+}
+
+// Suspense로 감싸서 export (useSearchParams 필수)
+export default function OcrResultPage() {
+  return (
+    <Suspense fallback={<ResultSkeleton />}>
+      <OcrResultContent />
+    </Suspense>
   )
 }
