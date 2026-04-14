@@ -7,9 +7,10 @@ AI Worker Entry Point - Fixed Version
 
 import signal
 import sys
-import redis
 import time
 from pathlib import Path
+
+import redis
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -64,7 +65,6 @@ def main():
     if retry_count >= max_retries:
         logger.error("Failed to connect to Redis after max retries")
         sys.exit(1)
-
     logger.info("Redis connected successfully")
 
     # RQ 관련 임포트 (버전 호환성을 위해 내부에서 호출)
