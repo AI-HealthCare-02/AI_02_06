@@ -29,15 +29,15 @@ _ENV_URLS = {
         # Dev 환경: EC2 백엔드 + Vercel Preview (PR별 자동 배포)
         "COOKIE_DOMAIN": "52.78.62.12",
         "API_BASE_URL": "http://52.78.62.12",
-        "FRONTEND_URL": "https://downforce-dev.vercel.app",
-        "KAKAO_REDIRECT_URI": "https://downforce-dev.vercel.app/auth/kakao/callback",
+        "FRONTEND_URL": "https://ai-02-06.vercel.app",
+        "KAKAO_REDIRECT_URI": "https://ai-02-06.vercel.app/auth/kakao/callback",
     },
     Env.PROD: {
         # Prod 환경: EC2 백엔드 + Vercel Production
         "COOKIE_DOMAIN": "52.78.62.12",
         "API_BASE_URL": "http://52.78.62.12",
-        "FRONTEND_URL": "https://downforce.vercel.app",
-        "KAKAO_REDIRECT_URI": "https://downforce.vercel.app/auth/kakao/callback",
+        "FRONTEND_URL": "https://ai-02-06.vercel.app",
+        "KAKAO_REDIRECT_URI": "https://ai-02-06.vercel.app/auth/kakao/callback",
     },
 }
 

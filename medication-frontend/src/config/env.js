@@ -17,12 +17,12 @@ const ENV_CONFIG = {
   dev: {
     // Dev 환경: EC2 백엔드 + Vercel Preview
     API_BASE_URL: 'http://52.78.62.12',
-    KAKAO_REDIRECT_URI: 'https://downforce-dev.vercel.app/auth/kakao/callback',
+    KAKAO_REDIRECT_URI: 'https://ai-02-06.vercel.app/auth/kakao/callback',
   },
   prod: {
     // Prod 환경: EC2 백엔드 + Vercel Production
     API_BASE_URL: 'http://52.78.62.12',
-    KAKAO_REDIRECT_URI: 'https://downforce.vercel.app/auth/kakao/callback',
+    KAKAO_REDIRECT_URI: 'https://ai-02-06.vercel.app/auth/kakao/callback',
   },
 }
 
