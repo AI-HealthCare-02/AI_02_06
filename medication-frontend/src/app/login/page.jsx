@@ -1,20 +1,27 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import api, { parseApiError, showError } from '../../lib/api'
 import { Pill } from 'lucide-react'
 
 // 환경 변수: local, dev, prod
-// - local/dev: 개발자 로그인 버튼 표시
+// - local: 개발자 로그인 버튼 표시 (빠른 개발용)
+// - dev: 개발자 로그인 버튼 숨김 (카카오 로그인 테스트용)
 // - prod: 개발자 로그인 버튼 숨김
 const ENV = process.env.NEXT_PUBLIC_ENV || 'local'
-const IS_DEV_MODE = ENV !== 'prod'
+const SHOW_DEV_LOGIN = ENV === 'local'
 
+// API Base URL (브라우저에서 직접 호출용)
+// - local: http://localhost:8000
+// - dev/prod (Docker): '' (Nginx 프록시)
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || ''
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
+  const router = useRouter()
 
-  const handleKakaoLogin = async (scenario = null) => {
+  const handleKakaoLogin = async () => {
     setIsLoading(true)
 
     try {
@@ -35,8 +42,6 @@ export default function LoginPage() {
         state,
       })
 
-      if (scenario) params.append('scenario', scenario)
-
       window.location.href = `${authorize_url}?${params.toString()}`
     } catch (err) {
       console.error('카카오 로그인 설정 조회 실패:', err)
@@ -46,23 +51,34 @@ export default function LoginPage() {
     }
   }
 
-  const handleTestLogin = async () => {
+const handleTestLogin = async () => {
     setIsLoading(true)
+
     try {
-      // 테스트 로그인: state 검증 없이 즉시 토큰 발급 (local/dev 전용)
-      // access_token, refresh_token은 HttpOnly 쿠키로 자동 저장됨
-      const { data } = await api.get('/api/v1/auth/kakao/callback', {
-        params: { code: 'dev_test_login', state: 'dev_mode' },
+      // 1. 브라우저 이동 없이 백그라운드(Axios)에서 백엔드 API 호출
+      // api 객체를 사용하므로 프록시(localhost:3000 -> localhost:8000)를 안전하게 탑니다.
+      const response = await api.get('/api/v1/auth/kakao/callback', {
+        params: {
+          code: 'dev_test_login',
+          state: 'dev_mode'
+        }
       })
-      if (data.is_new_user) {
-        window.location.href = '/survey'
-      } else {
-        window.location.href = '/main'
+
+      // 2. 백엔드가 정상적으로 토큰(쿠키)과 JSON(200 OK)을 응답했다면?
+      if (response.status === 200) {
+        const { show_survey } = response.data
+
+        // 프론트엔드가 주도적으로 화면 전환
+        if (show_survey) {
+          router.push('/main?showSurvey=true')
+        } else {
+          router.push('/main')
+        }
       }
     } catch (err) {
-      console.error('개발자 로그인 실패:', err)
+      console.error('개발용 로그인 실패:', err)
       const parsed = err.parsed || parseApiError(err)
-      showError(parsed.message)
+      showError(parsed.message || '로그인 처리 중 오류가 발생했습니다.')
       setIsLoading(false)
     }
   }
@@ -88,25 +104,14 @@ export default function LoginPage() {
           {isLoading ? '연결 중...' : '카카오로 로그인'}
         </button>
 
-        {/* 개발자 로그인 버튼 (local/dev 환경에서만 표시) */}
-        {IS_DEV_MODE && (
+        {/* 개발자 로그인 버튼 (local 환경에서만 표시) */}
+        {SHOW_DEV_LOGIN && (
           <button
             onClick={handleTestLogin}
             disabled={isLoading}
             className="w-full bg-slate-800 text-white py-3 rounded-xl font-semibold text-sm mb-3 cursor-pointer hover:bg-black transition-all disabled:opacity-50"
           >
             개발자로 로그인 ({ENV})
-          </button>
-        )}
-
-        {/* [TEST ONLY] 신규 유저 테스트 버튼 - 확인 후 삭제 */}
-        {IS_DEV_MODE && (
-          <button
-            onClick={() => handleKakaoLogin('new_user')}
-            disabled={isLoading}
-            className="w-full bg-blue-500 text-white py-3 rounded-xl font-semibold text-sm mb-3 cursor-pointer hover:bg-blue-600 transition-all disabled:opacity-50"
-          >
-            [TEST] 신규 유저로 로그인
           </button>
         )}
 

@@ -1,8 +1,8 @@
 """
-AI Worker Entry Point - Fixed Version
-- RQ 버전 호환성 해결
-- Redis 객체 누락 수정
-- 아키텍처 가드레일 강화
+AI Worker Entry Point - Final Merged Version
+- Redis 연결 재시도 로직 포함 (안정성)
+- RQ 버전 호환성 해결 (직접 주입 방식)
+- 충돌 마커 제거 완료
 """
 
 import signal
@@ -54,7 +54,7 @@ def main():
     logger.info("AI Worker starting...")
     logger.info(f"Timezone: {config.TIMEZONE}")
 
-    # Redis 연결 대기
+    # 1. Redis 연결 대기 (재시도 로직 적용)
     retry_count = 0
     max_retries = 30
     while not check_redis_connection() and retry_count < max_retries:
@@ -63,22 +63,25 @@ def main():
         time.sleep(2)
 
     if retry_count >= max_retries:
-        logger.error("Failed to connect to Redis after max retries")
+        logger.error("Failed to connect to Redis after max retries. Exiting.")
         sys.exit(1)
+
     logger.info("Redis connected successfully")
 
-    # RQ 관련 임포트 (버전 호환성을 위해 내부에서 호출)
+    # 2. RQ 관련 임포트 (버전 호환성을 위해 내부에서 호출)
     from rq import Queue, Worker
 
-    # Redis 연결 객체 생성
+    # 3. Redis 연결 객체 생성
     redis_conn = redis.from_url(config.REDIS_URL)
 
-    # 큐 및 워커 설정
+    # 4. 큐 및 워커 설정
+    # [아키텍트 팁] Connection 컨텍스트 매니저 대신 직접 주입하여 버전 이슈 원천 차단
     queues = [Queue("ai", connection=redis_conn), Queue("default", connection=redis_conn)]
 
     logger.info("AI Worker ready - waiting for tasks...")
 
     try:
+        # with_scheduler=True로 스케줄러 기능 활성화
         worker = Worker(queues, connection=redis_conn)
         worker.work(with_scheduler=True)
     except Exception as e:

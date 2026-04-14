@@ -1,11 +1,10 @@
 import os
 import secrets
 import zoneinfo
-from dataclasses import field
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,21 +14,29 @@ class Env(StrEnum):
     PROD = "prod"
 
 
+# ============================================================
+# 환경별 URL 설정 (ENV 값에 따라 자동 적용)
+# ============================================================
+# local/dev: 로컬 Docker 환경 (동일한 설정, 로그인 버튼만 다름)
+# prod: EC2 + Vercel 배포 환경
 _ENV_URLS = {
     Env.LOCAL: {
+        # Local 환경: 로컬 Docker (dev 로그인 버튼 표시)
         "COOKIE_DOMAIN": "localhost",
         "API_BASE_URL": "http://localhost:8000",
         "FRONTEND_URL": "http://localhost:3000",
         "KAKAO_REDIRECT_URI": "http://localhost:3000/auth/kakao/callback",
     },
     Env.DEV: {
-        "COOKIE_DOMAIN": "52.78.62.12",
-        "API_BASE_URL": "http://52.78.62.12",
-        "FRONTEND_URL": "https://ai-02-06.vercel.app",
-        "KAKAO_REDIRECT_URI": "https://ai-02-06.vercel.app/auth/kakao/callback",
+        # Dev 환경: 로컬 Docker (dev 로그인 버튼 숨김, 카카오 테스트용)
+        "COOKIE_DOMAIN": "localhost",
+        "API_BASE_URL": "http://localhost:8000",
+        "FRONTEND_URL": "http://localhost:3000",
+        "KAKAO_REDIRECT_URI": "http://localhost:3000/auth/kakao/callback",
     },
     Env.PROD: {
-        "COOKIE_DOMAIN": "52.78.62.12",
+        # Prod 환경: EC2 백엔드 + Vercel 프론트엔드
+        "COOKIE_DOMAIN": None,  # Vercel 도메인용 (크로스 도메인 쿠키)
         "API_BASE_URL": "http://52.78.62.12",
         "FRONTEND_URL": "https://ai-02-06.vercel.app",
         "KAKAO_REDIRECT_URI": "https://ai-02-06.vercel.app/auth/kakao/callback",
@@ -37,22 +44,27 @@ _ENV_URLS = {
 }
 
 _DEFAULT_SECRET_KEY = f"dev-only-secret-key-{secrets.token_hex(16)}"
-_DEFAULT_DB_PASSWORD = "pw1234"
+_DEFAULT_DB_PASSWORD = "downforce_admin"
 _DEFAULT_KAKAO_CLIENT_ID = "mock_kakao_client_id"
 _DEFAULT_KAKAO_CLIENT_SECRET = "mock_kakao_client_secret"
 
 
 class Config(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="allow")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="allow",
+    )
 
     ENV: Env = Env.LOCAL
     SECRET_KEY: str = _DEFAULT_SECRET_KEY
-    TIMEZONE: zoneinfo.ZoneInfo = field(default_factory=lambda: zoneinfo.ZoneInfo("Asia/Seoul"))
+    TIMEZONE: zoneinfo.ZoneInfo = Field(default_factory=lambda: zoneinfo.ZoneInfo("Asia/Seoul"))
     TEMPLATE_DIR: str = os.path.join(Path(__file__).resolve().parent.parent, "templates")
 
-    DB_HOST: str = "localhost"
+    # DB 설정 (ENV에 따라 자동 설정되지 않음 - 민감 정보)
+    DB_HOST: str = "postgres"
     DB_PORT: int = 5432
-    DB_USER: str = "root"
+    DB_USER: str = "downforce_admin"
     DB_PASSWORD: str = _DEFAULT_DB_PASSWORD
     DB_NAME: str = "downforce_db"
     DB_CONNECT_TIMEOUT: int = 5
@@ -104,4 +116,5 @@ class Config(BaseSettings):
         return self
 
 
+# 싱글톤 인스턴스
 config = Config()
