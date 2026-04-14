@@ -51,14 +51,36 @@ export default function LoginPage() {
     }
   }
 
-  const handleTestLogin = () => {
+const handleTestLogin = async () => {
     setIsLoading(true)
-    // 테스트 로그인 API 호출 (백엔드에 약속된 특수 코드 전송)
-    // 쿠키 설정을 위해 브라우저 리다이렉트 사용
-    // - local: http://localhost:8000/api/v1/auth/kakao/callback
-    // - dev (Docker): /api/v1/auth/kakao/callback (Nginx 프록시)
-    const callbackUrl = `${API_BASE_URL}/api/v1/auth/kakao/callback?code=dev_test_login&state=dev_mode`
-    window.location.href = callbackUrl
+
+    try {
+      // 1. 브라우저 이동 없이 백그라운드(Axios)에서 백엔드 API 호출
+      // api 객체를 사용하므로 프록시(localhost:3000 -> localhost:8000)를 안전하게 탑니다.
+      const response = await api.get('/api/v1/auth/kakao/callback', {
+        params: {
+          code: 'dev_test_login',
+          state: 'dev_mode'
+        }
+      })
+
+      // 2. 백엔드가 정상적으로 토큰(쿠키)과 JSON(200 OK)을 응답했다면?
+      if (response.status === 200) {
+        const { show_survey } = response.data
+
+        // 프론트엔드가 주도적으로 화면 전환
+        if (show_survey) {
+          router.push('/main?showSurvey=true')
+        } else {
+          router.push('/main')
+        }
+      }
+    } catch (err) {
+      console.error('개발용 로그인 실패:', err)
+      const parsed = err.parsed || parseApiError(err)
+      showError(parsed.message || '로그인 처리 중 오류가 발생했습니다.')
+      setIsLoading(false)
+    }
   }
 
   return (

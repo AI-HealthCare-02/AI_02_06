@@ -101,9 +101,9 @@ function KakaoCallbackContent() {
           params: { code, state },
         })
 
-        // 4. 신규 사용자면 설문조사, 기존 사용자면 메인으로 리다이렉트
-        const { is_new_user } = response.data
-        if (is_new_user) {
+        // 4. 신규 사용자거나 dev 사용자면 설문조사, 기존 사용자면 메인으로 리다이렉트
+        const { show_survey } = response.data
+        if (show_survey) {
           router.replace('/survey')
         } else {
           router.replace('/main')

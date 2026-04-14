@@ -5,8 +5,7 @@ import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse as Response
-from fastapi.responses import Response as BaseResponse
+from fastapi.responses import JSONResponse, Response
 
 from app.core import config
 from app.core.config import Env
@@ -157,7 +156,7 @@ async def kakao_callback(
     state: Annotated[str | None, Query(description="CSRF 방지용 상태값")] = None,
     error: Annotated[str | None, Query(description="에러 코드")] = None,
     error_description: Annotated[str | None, Query(description="에러 설명")] = None,
-) -> Response:
+) -> JSONResponse:
     # 카카오에서 에러 응답이 온 경우
     if error:
         raise HTTPException(
@@ -208,16 +207,15 @@ async def kakao_callback(
     # 서비스 JWT 토큰 발급 및 DB 저장
     tokens = await oauth_service.issue_tokens(account)
 
-    # 응답 생성 (FE 메인 페이지로 리다이렉트)
-    from fastapi.responses import RedirectResponse
-
-    # FRONTEND_URL 환경변수 사용 (local: http://localhost:3000, dev: http://localhost:3000, prod: https://도메인)
-    # Dev 로그인 또는 신규 가입자는 설문 팝업 표시를 위해 쿼리 파라미터 추가
-    if is_dev_login or is_new_user:
-        redirect_url = f"{config.FRONTEND_URL}/main?showSurvey=true"
-    else:
-        redirect_url = f"{config.FRONTEND_URL}/main"
-    response = RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+    response = JSONResponse(
+        content={
+            "status": "success",
+            "message": "Login successful",
+            "is_new_user": is_new_user,
+            "show_survey": is_dev_login or is_new_user,
+        },
+        status_code=status.HTTP_200_OK,
+    )
 
     # Access Token을 HttpOnly 쿠키로 설정 (XSS 방지)
     response.set_cookie(
@@ -269,7 +267,7 @@ Refresh Token으로 새 Access Token을 발급합니다.
 async def refresh_token(
     request: Request,
     oauth_service: Annotated[OAuthService, Depends(get_oauth_service)],
-) -> Response:
+) -> JSONResponse:
     # 쿠키에서 refresh token 추출
     refresh_token_str = request.cookies.get("refresh_token")
 
@@ -286,7 +284,7 @@ async def refresh_token(
     tokens = await oauth_service.refresh_access_token(refresh_token_str)
 
     # 응답 생성
-    response = Response(
+    response = JSONResponse(
         content=TokenRefreshResponse(
             access_token=tokens["access_token"],
         ).model_dump(),
@@ -330,7 +328,7 @@ async def refresh_token(
 async def logout(
     request: Request,
     oauth_service: Annotated[OAuthService, Depends(get_oauth_service)],
-) -> BaseResponse:
+) -> Response:
     # 쿠키에서 refresh token 추출
     refresh_token = request.cookies.get("refresh_token")
 
@@ -339,7 +337,7 @@ async def logout(
         await oauth_service.revoke_refresh_token(refresh_token)
 
     # 쿠키 삭제
-    response = BaseResponse(status_code=status.HTTP_204_NO_CONTENT)
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(
         key="access_token",
         httponly=True,

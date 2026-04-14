@@ -156,7 +156,7 @@ services:
     networks:
       - frontend
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
+      test: ["CMD", "curl", "-f", "http://localhost:80/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -190,4 +190,4 @@ networks:
   # 내부 서비스용 네트워크 (fastapi, redis, ai-worker)
   backend:
     driver: bridge
-    internal: true
+#    internal: true
