@@ -5,6 +5,7 @@ import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 from fastapi.responses import JSONResponse as Response
 from fastapi.responses import Response as BaseResponse
 
@@ -208,16 +209,12 @@ async def kakao_callback(
     # 서비스 JWT 토큰 발급 및 DB 저장
     tokens = await oauth_service.issue_tokens(account)
 
-    # 응답 생성 (FE 메인 페이지로 리다이렉트)
-    from fastapi.responses import RedirectResponse
-
-    # FRONTEND_URL 환경변수 사용 (local: http://localhost:3000, dev: http://localhost:3000, prod: https://도메인)
-    # Dev 로그인 또는 신규 가입자는 설문 팝업 표시를 위해 쿼리 파라미터 추가
-    if is_dev_login or is_new_user:
-        redirect_url = f"{config.FRONTEND_URL}/main?showSurvey=true"
-    else:
-        redirect_url = f"{config.FRONTEND_URL}/main"
-    response = RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+    # 응답 생성 (JSON + HttpOnly 쿠키)
+    # FE에서 is_new_user 값으로 라우팅 결정 (/survey 또는 /main)
+    response = JSONResponse(
+        content=OAuthLoginResponse(is_new_user=is_new_user).model_dump(),
+        status_code=status.HTTP_200_OK,
+    )
 
     # Access Token을 HttpOnly 쿠키로 설정 (XSS 방지)
     response.set_cookie(

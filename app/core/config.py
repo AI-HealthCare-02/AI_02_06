@@ -76,6 +76,9 @@ class Config(BaseSettings):
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 14 * 24 * 60
     JWT_LEEWAY: int = 5
 
+    # LLM (OpenAI)
+    OPENAI_API_KEY: str | None = None
+
     # Kakao OAuth
     KAKAO_CLIENT_ID: str = _DEFAULT_KAKAO_CLIENT_ID
     KAKAO_CLIENT_SECRET: str = _DEFAULT_KAKAO_CLIENT_SECRET

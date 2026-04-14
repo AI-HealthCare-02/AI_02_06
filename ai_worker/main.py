@@ -1,12 +1,13 @@
 """
-AI Worker Entry Point
-
-Phase 1: 기본 실행 및 헬스체크 지원
-Phase 4: RQ 태스크 큐 통합 예정
+AI Worker Entry Point - Fixed Version
+- RQ 버전 호환성 해결
+- Redis 객체 누락 수정
+- 아키텍처 가드레일 강화
 """
 
 import signal
 import sys
+import redis
 import time
 from pathlib import Path
 
@@ -33,24 +34,12 @@ def signal_handler(signum, frame):
 def check_redis_connection() -> bool:
     """Redis 연결 상태 확인"""
     try:
-        import redis
-
         r = redis.from_url(config.REDIS_URL, socket_timeout=5)
         r.ping()
         return True
     except Exception as e:
         logger.warning(f"Redis connection failed: {e}")
         return False
-
-
-def health_check() -> dict:
-    """헬스체크 상태 반환"""
-    redis_ok = check_redis_connection()
-    return {
-        "status": "healthy" if redis_ok else "degraded",
-        "redis": "connected" if redis_ok else "disconnected",
-        "worker": "running",
-    }
 
 
 def main():
@@ -77,15 +66,24 @@ def main():
         sys.exit(1)
 
     logger.info("Redis connected successfully")
+
+    # RQ 관련 임포트 (버전 호환성을 위해 내부에서 호출)
+    from rq import Queue, Worker
+
+    # Redis 연결 객체 생성
+    redis_conn = redis.from_url(config.REDIS_URL)
+
+    # 큐 및 워커 설정
+    queues = [Queue("ai", connection=redis_conn), Queue("default", connection=redis_conn)]
+
     logger.info("AI Worker ready - waiting for tasks...")
 
-    # 메인 루프 (Phase 4에서 RQ 워커로 대체 예정)
-    while not shutdown_requested:
-        # TODO: Phase 4에서 RQ 워커 구현
-        # 현재는 헬스체크용 대기 상태 유지
-        time.sleep(1)
-
-    logger.info("AI Worker shutdown complete")
+    try:
+        worker = Worker(queues, connection=redis_conn)
+        worker.work(with_scheduler=True)
+    except Exception as e:
+        logger.error(f"Worker crashed: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
