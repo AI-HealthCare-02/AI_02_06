@@ -3,8 +3,12 @@ import os
 import asyncio
 from pathlib import Path
 
-from openai import AsyncOpenAI, OpenAIError
-from openai.types.chat import ChatCompletionMessageParam
+from openai import AsyncOpenAI, OpenAI, OpenAIError
+
+# ai_worker logger 임포트
+from ai_worker.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 # ai_worker logger 임포트
 from ai_worker.core.logger import get_logger
@@ -47,16 +51,15 @@ class RAGGenerator:
             raise ValueError("OPENAI_API_KEY 환경변수가 설정되지 않았습니다.")
 
         self.client = AsyncOpenAI(api_key=api_key)
+        self._sync_client = OpenAI(api_key=api_key)
         self.model = _CHAT_MODEL
         self._medicines = _load_medicines()
 
-    async def generate_guide(self, user_medicines: list[dict], context_chunks: list[str]) -> str:
+    def generate_guide(self, user_medicines: list[dict], context_chunks: list[str]) -> str:
         """추출된 약 정보와 청크 데이터를 바탕으로 복약 가이드 생성"""
         # 줄바꿈 에러 방지를 위해 \n 명시적 사용
         context_text = "\n---\n".join(context_chunks)
-        medicines_text = "\n".join(
-            f"- {m['name']} ({m['ingredient']})" for m in user_medicines
-        )
+        medicines_text = "\n".join(f"- {m['name']} ({m['ingredient']})" for m in user_medicines)
 
         prompt = f"""당신은 전문 약사 AI입니다. 아래 환자 복용 약물과 참고 데이터를 바탕으로
 친절하고 상세한 복약 가이드를 작성해주세요.
@@ -71,11 +74,11 @@ class RAGGenerator:
 1. 병용 금기 성분과 음식을 강조해서 알려주세요.
 2. 복용 시 주의사항(면책사항)을 포함해주세요.
 3. 마지막에 반드시 다음 문구를 포함하세요:
-   "⚠️ 이 안내는 참고용이며, 정확한 진단과 처방은 반드시 전문 의료인과 상의하십시오."
+   "이 안내는 참고용이며, 정확한 진단과 처방은 반드시 전문 의료인과 상의하십시오."
 """
 
         try:
-            response = await self.client.chat.completions.create(
+            response = self._sync_client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
@@ -137,7 +140,11 @@ class RAGGenerator:
             )
 
         # 5. 메시지 구성
+<<<<<<< HEAD
         messages: list[ChatCompletionMessageParam] = [{"role": "system", "content": final_system_prompt}]
+=======
+        messages = [{"role": "system", "content": final_system_prompt}]
+>>>>>>> 4bf49523a37ab14ff27ac94f00c779e5f5634fd4
         for h in history:
             # history 딕셔너리 키 값 안전하게 추출
             messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
@@ -171,4 +178,8 @@ class RAGGenerator:
             logger.error(f"최대 재시도 횟수 초과: {last_error}")
             raise RuntimeError(f"AI 응답 생성 실패 (OpenAI): {last_error}") from last_error
 
+<<<<<<< HEAD
         raise RuntimeError("알 수 없는 이유로 응답 생성에 실패했습니다.")
+=======
+        raise RuntimeError("알 수 없는 이유로 응답 생성에 실패했습니다.")
+>>>>>>> 4bf49523a37ab14ff27ac94f00c779e5f5634fd4

@@ -5,7 +5,9 @@ import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse as Response
+from fastapi.responses import Response as BaseResponse
 
 from app.core import config
 from app.core.config import Env
@@ -207,12 +209,12 @@ async def kakao_callback(
     # 서비스 JWT 토큰 발급 및 DB 저장
     tokens = await oauth_service.issue_tokens(account)
 
-    # 응답 생성 (FE 메인 페이지로 리다이렉트)
-    from fastapi.responses import RedirectResponse
-
-    # FRONTEND_URL 환경변수 사용 (local: http://localhost:3000, dev: http://localhost:3000, prod: https://도메인)
-    redirect_url = f"{config.FRONTEND_URL}/main"
-    response = RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+    # 응답 생성 (JSON + HttpOnly 쿠키)
+    # FE에서 is_new_user 값으로 라우팅 결정 (/survey 또는 /main)
+    response = JSONResponse(
+        content=OAuthLoginResponse(is_new_user=is_new_user).model_dump(),
+        status_code=status.HTTP_200_OK,
+    )
 
     # Access Token을 HttpOnly 쿠키로 설정 (XSS 방지)
     response.set_cookie(
@@ -281,8 +283,10 @@ async def refresh_token(
     tokens = await oauth_service.refresh_access_token(refresh_token_str)
 
     # 응답 생성
-    response = JSONResponse(
-        content=TokenRefreshResponse(access_token=tokens["access_token"]).model_dump(),
+    response = Response(
+        content=TokenRefreshResponse(
+            access_token=tokens["access_token"],
+        ).model_dump(),
         status_code=status.HTTP_200_OK,
     )
 
@@ -323,7 +327,7 @@ async def refresh_token(
 async def logout(
     request: Request,
     oauth_service: Annotated[OAuthService, Depends(get_oauth_service)],
-) -> Response:
+) -> BaseResponse:
     # 쿠키에서 refresh token 추출
     refresh_token = request.cookies.get("refresh_token")
 
@@ -332,7 +336,7 @@ async def logout(
         await oauth_service.revoke_refresh_token(refresh_token)
 
     # 쿠키 삭제
-    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    response = BaseResponse(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(
         key="access_token",
         httponly=True,

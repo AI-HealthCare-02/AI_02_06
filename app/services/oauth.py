@@ -7,7 +7,6 @@ OAuth 인증 서비스
 
 import httpx
 from fastapi import HTTPException, status
-from tortoise.transactions import in_transaction
 
 from app.core import config
 from app.core.config import Env
@@ -110,47 +109,40 @@ class OAuthService:
         nickname = "테스트유저"
         provider_account_id = "test_dev_id_12345"
 
-        async with in_transaction() as conn:
-            account = await self.account_repo.get_by_provider(
+        account = await self.account_repo.get_by_provider(
+            provider=AuthProvider.KAKAO,
+            provider_account_id=provider_account_id,
+        )
+
+        is_new_user = False
+        if not account:
+            # 1. 계정 생성
+            account = await self.account_repo.create(
                 provider=AuthProvider.KAKAO,
                 provider_account_id=provider_account_id,
+                nickname=nickname,
+            )
+            is_new_user = True
+
+        # 2. 본인(SELF) 프로필 자동 생성 체크 (모델 직접 사용)
+        from app.models.profiles import Profile, RelationType
+
+        self_profile = await Profile.filter(
+            account_id=account.id, relation_type=RelationType.SELF, deleted_at__isnull=True
+        ).first()
+
+        if not self_profile:
+            from uuid import uuid4
+
+            await Profile.create(
+                id=uuid4(),
+                account_id=account.id,
+                name=f"{nickname}(본인)",
+                relation_type=RelationType.SELF,
+                health_survey={"age": 25, "gender": "MALE", "conditions": ["테스트"], "allergies": ["없음"]},
             )
 
-            is_new_user = False
-            if not account:
-                # 1. 계정 생성 (트랜잭션 연결 사용)
-                from uuid import uuid4
-
-                account = await Account.create(
-                    using_db=conn,
-                    id=uuid4(),
-                    auth_provider=AuthProvider.KAKAO,
-                    provider_account_id=provider_account_id,
-                    nickname=nickname,
-                    is_active=True,
-                )
-                is_new_user = True
-
-            # 2. 본인(SELF) 프로필 자동 생성 체크
-            from app.models.profiles import Profile, RelationType
-
-            self_profile = await Profile.filter(
-                account_id=account.id, relation_type=RelationType.SELF, deleted_at__isnull=True
-            ).using_db(conn).first()
-
-            if not self_profile:
-                from uuid import uuid4
-
-                await Profile.create(
-                    using_db=conn,
-                    id=uuid4(),
-                    account_id=account.id,
-                    name=f"{nickname}(본인)",
-                    relation_type=RelationType.SELF,
-                    health_survey={"age": 25, "gender": "MALE", "conditions": ["테스트"], "allergies": ["없음"]},
-                )
-
-            return account, is_new_user
+        return account, is_new_user
 
     async def kakao_callback(self, code: str, client_ip: str) -> tuple[Account, bool]:
         """
