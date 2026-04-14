@@ -45,7 +45,7 @@ _ENV_URLS = {
 
 # 로컬/개발 환경용 기본값 (운영 환경에서는 사용 불가)
 _DEFAULT_SECRET_KEY = f"dev-only-secret-key-{secrets.token_hex(16)}"
-_DEFAULT_DB_PASSWORD = "pw1234"
+_DEFAULT_DB_PASSWORD = "downforce_admin"
 _DEFAULT_KAKAO_CLIENT_ID = "mock_kakao_client_id"
 _DEFAULT_KAKAO_CLIENT_SECRET = "mock_kakao_client_secret"
 
@@ -59,15 +59,13 @@ class Config(BaseSettings):
 
     ENV: Env = Env.LOCAL
     SECRET_KEY: str = _DEFAULT_SECRET_KEY
-
     TIMEZONE: zoneinfo.ZoneInfo = Field(default_factory=lambda: zoneinfo.ZoneInfo("Asia/Seoul"))
-
     TEMPLATE_DIR: str = os.path.join(Path(__file__).resolve().parent.parent, "templates")
 
     # DB 설정 (ENV에 따라 자동 설정되지 않음 - 민감 정보)
-    DB_HOST: str = "localhost"
+    DB_HOST: str = "postgres"
     DB_PORT: int = 5432
-    DB_USER: str = "root"
+    DB_USER: str = "downforce_admin"
     DB_PASSWORD: str = _DEFAULT_DB_PASSWORD
     DB_NAME: str = "downforce_db"
     DB_CONNECT_TIMEOUT: int = 5
