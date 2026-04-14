@@ -247,3 +247,185 @@ if (parsed.code === 'token_compromised') {
 | 입력값 검증 실패 | **400 Bad Request** |
 | 입력값 검증 방식 | **Middleware(1차) + Pydantic+Bleach(2차)** |
 
+---
+
+# Survey Popup 자동 표시 기능
+
+## 목표
+- **Dev 사용자**: main 페이지 진입 시 항상 설문 팝업 표시
+- **Kakao 로그인 사용자**: 신규 가입자(최초 생성)만 설문 팝업 표시
+
+---
+
+## 현재 상태 분석
+
+### 1. 기존 흐름
+```
+[로그인] --> {is_new_user?}
+           |
+           |--(Yes)--> /survey 페이지로 리다이렉트
+           |
+           |--(No)--> /main 페이지로 이동
+                        |
+                        --> SurveyModal 있지만 수동 트리거만 가능
+```
+
+### 2. 관련 파일
+| 파일 | 현재 역할 |
+|------|----------|
+| `auth/kakao/callback/page.jsx` | `is_new_user` 확인 후 `/survey` 리다이렉트 |
+| `main/page.jsx` | SurveyModal 컴포넌트 존재, 수동 트리거만 |
+| `login/page.jsx` | Dev 로그인 시 `code=dev_test_login` 사용 |
+
+### 3. 문제점
+- 신규 유저가 `/survey`로 리다이렉트되면 main 페이지 경험 없음
+- Dev 사용자 구분 로직 없음
+- main 페이지에서 자동 팝업 트리거 없음
+
+---
+
+## 수정 계획
+
+### Phase 1: 백엔드 수정 (is_dev_user 플래그 추가)
+
+**파일**: `app/apis/v1/oauth_routers.py`
+
+- Dev 로그인 응답에 `is_dev_user: true` 플래그 추가
+- 기존 `is_new_user` 플래그 유지
+
+```python
+# 예시: callback 응답
+{
+    "access_token": "...",
+    "is_new_user": true,
+    "is_dev_user": true  # Dev 로그인인 경우만
+}
+```
+
+### Phase 2: 프론트엔드 콜백 수정
+
+**파일**: `medication-frontend/src/app/auth/kakao/callback/page.jsx`
+
+- 기존: `is_new_user`면 `/survey`로 리다이렉트
+- 변경: `/main`으로 이동하면서 쿼리 파라미터로 상태 전달
+
+```javascript
+// Before
+if (is_new_user) {
+  router.replace('/survey')
+} else {
+  router.replace('/main')
+}
+
+// After
+if (is_new_user || is_dev_user) {
+  router.replace('/main?showSurvey=true')
+} else {
+  router.replace('/main')
+}
+```
+
+### Phase 3: main 페이지 수정
+
+**파일**: `medication-frontend/src/app/main/page.jsx`
+
+- URL 쿼리 파라미터 `showSurvey=true` 감지
+- 감지 시 자동으로 SurveyModal 표시
+- 표시 후 URL에서 파라미터 제거 (clean URL)
+
+```javascript
+'use client'
+import { useSearchParams, useRouter } from 'next/navigation'
+
+// 컴포넌트 내부
+const searchParams = useSearchParams()
+const router = useRouter()
+
+useEffect(() => {
+  if (searchParams.get('showSurvey') === 'true') {
+    setShowSurvey(true)
+    // Clean URL
+    router.replace('/main', { scroll: false })
+  }
+}, [searchParams])
+```
+
+---
+
+## 데이터 플로우 (수정 후)
+
+```
+[로그인 시도] --> {로그인 타입?}
+                    |
+                    |--(Dev 로그인)--> Backend: is_dev_user=true 반환
+                    |                      |
+                    |                      v
+                    |--(Kakao 로그인)--> {신규 유저?}
+                                           |
+                                           |--(Yes)--> Backend: is_new_user=true 반환
+                                           |                 |
+                                           |                 v
+                                           |            Callback: /main?showSurvey=true로 이동
+                                           |                 |
+                                           |                 v
+                                           |            Main: showSurvey 파라미터 감지
+                                           |                 |
+                                           |                 v
+                                           |            SurveyModal 자동 표시
+                                           |                 |
+                                           |                 v
+                                           |            URL 파라미터 제거
+                                           |
+                                           |--(No)--> Backend: is_new_user=false 반환
+                                                          |
+                                                          v
+                                                     Callback: /main으로 이동
+                                                          |
+                                                          v
+                                                     Main: 일반 화면 표시
+```
+
+---
+
+## 체크리스트
+
+### Phase 1: Backend
+- [x] `oauth_routers.py`에서 dev 로그인 또는 신규 유저일 때 `?showSurvey=true` 쿼리 파라미터 추가
+- [ ] 기존 테스트 통과 확인
+
+### Phase 2: Frontend Callback
+- [x] 백엔드에서 직접 리다이렉트하므로 프론트엔드 콜백 수정 불필요
+
+### Phase 3: Frontend Main
+- [x] `main/page.jsx`에 useSearchParams 훅 추가
+- [x] showSurvey 파라미터 감지 로직 추가
+- [x] URL 클린업 로직 추가
+- [x] Suspense boundary 추가 (useSearchParams 필수 요구사항)
+
+### Phase 4: 테스트
+- [ ] Dev 로그인 -> 설문 팝업 표시 확인
+- [ ] 신규 Kakao 유저 -> 설문 팝업 표시 확인
+- [ ] 기존 Kakao 유저 -> 설문 팝업 미표시 확인
+
+---
+
+## 대안 검토
+
+### 대안 A: localStorage 사용 (선택하지 않음)
+- 장점: URL이 깔끔함
+- 단점: 브라우저 간 동기화 불가, 개발자 도구로 조작 가능
+
+### 대안 B: 쿼리 파라미터 사용 (선택)
+- 장점: 상태 명확, SSR 호환, 디버깅 용이
+- 단점: URL에 잠시 파라미터 노출 (바로 제거됨)
+
+---
+
+## 예상 변경 파일
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `app/apis/v1/oauth_routers.py` | is_dev_user 플래그 추가 |
+| `medication-frontend/src/app/auth/kakao/callback/page.jsx` | 리다이렉트 로직 수정 |
+| `medication-frontend/src/app/main/page.jsx` | useSearchParams로 자동 팝업 |
+

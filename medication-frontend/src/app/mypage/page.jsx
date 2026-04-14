@@ -46,141 +46,38 @@ function BasicInfoModal({ info, onClose, onSave }) {
 
 function HealthInfoModal({ info, onClose, onSave }) {
   const [formData, setFormData] = useState({
-    age: info?.age?.toString() || '',
+    age: info?.age || '',
     gender: info?.gender || 'MALE',
-    height: info?.height?.toString() || '',
-    weight: info?.weight?.toString() || '',
-    is_smoking: info?.is_smoking ?? null,
-    is_drinking: info?.is_drinking ?? null,
-    conditions: info?.conditions || [],
-    allergies: info?.allergies || [],
+    conditions: info?.conditions?.join(',') || '',
+    allergies: info?.allergies?.join(',') || ''
   })
-
-  const btnSelected = 'bg-gray-900 text-white border-gray-900'
-  const btnUnselected = 'bg-white text-gray-400 border-gray-100 hover:border-gray-300'
-  const chipSelected = 'bg-gray-900 text-white border-gray-900'
-  const chipUnselected = 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
-
   return (
     <Modal title="건강 프로필 수정" onClose={onClose} onSave={() => onSave(formData)}>
       <div className="space-y-6">
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">나이</label>
-            <input 
-              type="number" 
-              value={formData.age} 
-              onChange={(e) => {
-                const val = parseInt(e.target.value)
-                if (!isNaN(val) && val >= 1 && val <= 120) 
-                  setFormData({ ...formData, age: val })
-            }}
-            onKeyDown={(e) => {
-              if (e.key === '-' || e.key === 'e' || e.key === '+') e.preventDefault()
-            }}
-            min="1"
-            max="120"
-            placeholder="나이를 입력하세요"
-            className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
-
+            <input type="number" value={formData.age} onChange={(e) => setFormData({ ...formData, age: e.target.value })}
+              className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
           </div>
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">성별</label>
-            <div className="flex gap-2">
-              {['MALE', 'FEMALE'].map(g => (
-                <button key={g} type="button" onClick={() => setFormData({...formData, gender: g})}
-                  className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${formData.gender === g ? btnSelected : btnUnselected}`}>
-                  {g === 'MALE' ? '남성' : '여성'}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="text-xs font-black text-gray-400 mb-2 block ml-1">키 (cm)</label>
-            <input type="number" value={formData.height} min={50} max={250}
-              onChange={(e) => {
-                const val = e.target.value
-                if (val === '' || (parseInt(val) >= 50 && parseInt(val) <= 250)) setFormData({...formData, height: val})
-              }}
-              className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
-          </div>
-          <div>
-            <label className="text-xs font-black text-gray-400 mb-2 block ml-1">몸무게 (kg)</label>
-            <input type="number" value={formData.weight} min={1} max={300} step={0.1}
-              onChange={(e) => {
-                const val = e.target.value
-                if (val === '' || (parseFloat(val) >= 1 && parseFloat(val) <= 300)) setFormData({...formData, weight: val})
-              }}
-              className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="text-xs font-black text-gray-400 mb-2 block ml-1">흡연 여부</label>
-            <div className="flex gap-2">
-              {[true, false].map(v => (
-                <button key={String(v)} type="button" onClick={() => setFormData({...formData, is_smoking: v})}
-                  className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${formData.is_smoking === v ? btnSelected : btnUnselected}`}>
-                  {v ? '예' : '아니오'}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-black text-gray-400 mb-2 block ml-1">음주 여부</label>
-            <div className="flex gap-2">
-              {[true, false].map(v => (
-                <button key={String(v)} type="button" onClick={() => setFormData({...formData, is_drinking: v})}
-                  className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${formData.is_drinking === v ? btnSelected : btnUnselected}`}>
-                  {v ? '예' : '아니오'}
-                </button>
-              ))}
-            </div>
+            <select value={formData.gender} onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+              className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 appearance-none">
+              <option value="MALE">남성</option>
+              <option value="FEMALE">여성</option>
+            </select>
           </div>
         </div>
         <div>
-          <label className="text-xs font-black text-gray-400 mb-3 block ml-1">기저질환</label>
-          <div className="flex flex-wrap gap-2">
-            {['고혈압', '당뇨', '고지혈증', '심장질환', '뇌졸중', '천식', '신장질환', '갑상선질환', '없음'].map(item => (
-              <button key={item} type="button"
-                onClick={() => {
-                  let updated
-                  if (item === '없음') {
-                    updated = formData.conditions.includes(item) ? [] : ['없음']
-                  } else {
-                    const withoutNone = formData.conditions.filter(c => c !== '없음')
-                    updated = withoutNone.includes(item) ? withoutNone.filter(c => c !== item) : [...withoutNone, item]
-                  }
-                  setFormData({...formData, conditions: updated})
-                }}
-                className={`px-4 py-2 rounded-full text-xs font-bold transition-all border cursor-pointer ${formData.conditions.includes(item) ? chipSelected : chipUnselected}`}>
-                {item}
-              </button>
-            ))}
-          </div>
+          <label className="text-xs font-black text-gray-400 mb-2 block ml-1">보유 질환 (쉼표 구분)</label>
+          <input type="text" value={formData.conditions} onChange={(e) => setFormData({ ...formData, conditions: e.target.value })}
+            className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" placeholder="고혈압,당뇨" />
         </div>
         <div>
-          <label className="text-xs font-black text-gray-400 mb-3 block ml-1">알레르기</label>
-          <div className="flex flex-wrap gap-2">
-            {['페니실린', '아스피린', '항생제', '소염제', '없음'].map(item => (
-              <button key={item} type="button"
-                onClick={() => {
-                  let updated
-                  if (item === '없음') {
-                    updated = formData.allergies.includes(item) ? [] : ['없음']
-                  } else {
-                    const withoutNone = formData.allergies.filter(a => a !== '없음')
-                    updated = withoutNone.includes(item) ? withoutNone.filter(a => a !== item) : [...withoutNone, item]
-                  }
-                  setFormData({...formData, allergies: updated})
-                }}
-                className={`px-4 py-2 rounded-full text-xs font-bold transition-all border cursor-pointer ${formData.allergies.includes(item) ? chipSelected : chipUnselected}`}>
-                {item}
-              </button>
-            ))}
-          </div>
+          <label className="text-xs font-black text-gray-400 mb-2 block ml-1">알레르기 (쉼표 구분)</label>
+          <input type="text" value={formData.allergies} onChange={(e) => setFormData({ ...formData, allergies: e.target.value })}
+            className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" placeholder="페니실린" />
         </div>
       </div>
     </Modal>
@@ -261,17 +158,14 @@ export default function MyPage() {
 
   const handleSaveHealth = async (newData) => {
     try {
-      const healthSurvey = {
-        age: parseInt(newData.age) || null,
-        gender: newData.gender || null,
-        height: parseInt(newData.height) || null,
-        weight: parseFloat(newData.weight) || null,
-        is_smoking: newData.is_smoking,
-        is_drinking: newData.is_drinking,
-        conditions: newData.conditions.length > 0 ? newData.conditions : null,
-        allergies: newData.allergies.length > 0 ? newData.allergies : null,
+      const cleanRegex = /[^a-zA-Z0-9가-힣ㄱ-ㅎㅏ-ㅣ,]/g
+      const cleanedForm = {
+        age: newData.age,
+        gender: newData.gender,
+        conditions: newData.conditions.replace(cleanRegex, '').split(',').filter(Boolean),
+        allergies: newData.allergies.replace(cleanRegex, '').split(',').filter(Boolean)
       }
-      await api.patch(`/api/v1/profiles/${userProfile.id}`, { health_survey: healthSurvey })
+      await api.patch(`/api/v1/profiles/${userProfile.id}`, { health_survey: cleanedForm })
       toast.success('건강 정보가 업데이트되었습니다.')
       setModalType(null)
       fetchData()
@@ -392,12 +286,8 @@ export default function MyPage() {
                   <button onClick={() => setModalType('health')} className="text-xs font-black text-gray-600 hover:bg-gray-100 px-4 py-2 rounded-xl transition-all border border-gray-200 cursor-pointer">수정하기</button>
                 </div>
                 <div className="grid sm:grid-cols-2 gap-6">
-
-                  <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">나이</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.age ? `${userProfile.health_survey.age}세` : '-'}</p></div>
-                  <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">성별</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.gender === 'MALE' ? '남성' : userProfile?.health_survey?.gender === 'FEMALE' ? '여성' : '-'}</p></div>
-                  <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">키 / 몸무게</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.height ? `${userProfile.health_survey.height}cm` : '-'} / {userProfile?.health_survey?.weight ? `${userProfile.health_survey.weight}kg` : '-'}</p></div>
-                  <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">흡연 / 음주</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.is_smoking === true ? '흡연' : userProfile?.health_survey?.is_smoking === false ? '비흡연' : '-'} / {userProfile?.health_survey?.is_drinking === true ? '음주' : userProfile?.health_survey?.is_drinking === false ? '비음주' : '-'}</p></div>
-
+                  <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">나이</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.age || '-'}세</p></div>
+                  <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">성별</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.gender === 'MALE' ? '남성' : '여성'}</p></div>
                   <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">보유 질환</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.conditions?.join(', ') || '없음'}</p></div>
                   <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">특이 알레르기</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.allergies?.join(', ') || '없음'}</p></div>
                 </div>

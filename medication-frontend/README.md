@@ -1,69 +1,36 @@
-# Downforce - Frontend
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
 
-AI 기반 지능형 복약 관리 시스템의 프론트엔드입니다.
-Next.js 15 (App Router) 기반으로 구성되어 있습니다.
+## Getting Started
 
-## 기술 스택
-
-- **Framework**: Next.js 15 (App Router)
-- **Language**: JavaScript (`.jsx` 전용, TypeScript 사용 안 함)
-- **Styling**: Tailwind CSS v4
-- **HTTP**: Axios (RTR 인터셉터 포함)
-- **Icons**: lucide-react
-- **Notifications**: react-hot-toast
-
-## 디렉터리 구조
-
-```
-src/
-├── app/                  # App Router 페이지
-│   ├── layout.jsx        # 루트 레이아웃
-│   ├── page.jsx          # 랜딩 페이지
-│   ├── login/            # 카카오 OAuth 로그인
-│   ├── main/             # 대시보드
-│   ├── mypage/           # 마이페이지 (계정/건강/가족 관리)
-│   ├── ocr/              # 처방전 OCR 등록
-│   ├── medication/       # 복약 가이드
-│   ├── challenge/        # 건강 챌린지
-│   └── survey/           # 건강 설문
-├── components/           # 공유 컴포넌트
-│   ├── Navigation.jsx    # 상단 네비게이션
-│   ├── BottomNav.jsx     # 하단 모바일 네비게이션
-│   ├── LogoutModal.jsx   # 로그아웃/회원탈퇴 모달
-│   └── EmptyState.jsx    # 빈 상태 UI
-└── lib/
-    ├── api.js            # Axios 인스턴스 + 에러 핸들러
-    └── tokenManager.js   # RTR 토큰 갱신 관리
-```
-
-## 로컬 실행
+First, run the development server:
 
 ```bash
-cd medication-frontend
-npm install
 npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
 ```
 
-브라우저에서 [http://localhost:3000](http://localhost:3000) 접속
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-## Docker 실행
+You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
 
-```bash
-# 프로젝트 루트에서
-docker compose up -d
-```
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-## 코드 규칙
+## Learn More
 
-- 파일 확장자는 `.jsx`만 사용 (`.ts`, `.tsx` 금지)
-- TypeScript 문법 사용 금지 (`interface`, `type`, `: string` 등)
-- 컴포넌트 파일명: `PascalCase.jsx`
-- API 호출은 `src/lib/api.js`의 인스턴스만 사용
-- 인라인 스타일 금지 (Tailwind CSS 사용)
-- 이모지 사용 금지
+To learn more about Next.js, take a look at the following resources:
 
-## 인증 방식
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
 
-- 카카오 OAuth 로그인 후 JWT를 HttpOnly Cookie로 관리
-- API 호출 시 쿠키가 자동 전송됨 (`withCredentials: true`)
-- 토큰 만료 시 `lib/tokenManager.js`가 자동으로 갱신 (RTR)
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+
+## Deploy on Vercel
+
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.

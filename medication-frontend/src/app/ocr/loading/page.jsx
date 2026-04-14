@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Pill } from 'lucide-react'
-
+import api from '@/lib/api'
 
 export default function OcrLoadingPage() {
   const router = useRouter()
@@ -39,18 +39,22 @@ export default function OcrLoadingPage() {
         const formData = new FormData()
         formData.append('file', file)
 
-        const response = await api.post('/api/v1/ocr/upload', formData, {
+        const response = await api.post('/api/v1/ocr/extract', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
           timeout: 60000,
         })
 
-        sessionStorage.setItem('ocrGuide', response.data.guide)
+        // 원본 이미지는 브라우저에서 즉시 파기
         sessionStorage.removeItem('ocrFileData')
-        router.push('/ocr/result')
+        sessionStorage.removeItem('ocrFileName')
+        sessionStorage.removeItem('ocrFileType')
+
+        // Redis에 임시 저장된 draft_id를 들고 결과 페이지로 이동
+        const draftId = response.data.draft_id
+        router.push(`/ocr/result?draft_id=${draftId}`)
+
       } catch (err) {
-        const msg = err.response?.data?.detail?.error_description
-          || err.response?.data?.detail
-          || '분석 중 오류가 발생했습니다.'
+        const msg = err.parsed?.message || err.response?.data?.detail || '분석 중 오류가 발생했습니다.'
         setError(typeof msg === 'string' ? msg : JSON.stringify(msg))
         clearInterval(ticker)
       }
@@ -58,7 +62,7 @@ export default function OcrLoadingPage() {
 
     run()
     return () => clearInterval(ticker)
-  }, [])
+  }, [router])
 
   if (error) {
     return (
@@ -69,7 +73,7 @@ export default function OcrLoadingPage() {
           <p className="text-gray-400 text-sm mb-8">{error}</p>
           <button
             onClick={() => router.push('/ocr')}
-            className="bg-blue-500 text-white px-8 py-3 rounded-xl font-semibold">
+            className="bg-blue-900 text-white px-8 py-3 rounded-xl font-semibold">
             다시 시도
           </button>
         </div>
@@ -86,7 +90,6 @@ export default function OcrLoadingPage() {
           <div className="absolute inset-0 flex items-center justify-center">
             <Pill size={28} className="text-blue-500" />
           </div>
-
         </div>
         <h2 className="text-xl font-bold mb-3">처방전 분석 중</h2>
         <p className="text-gray-400 text-sm mb-8">{steps[step]}</p>

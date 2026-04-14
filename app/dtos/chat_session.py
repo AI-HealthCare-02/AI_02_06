@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChatSessionCreate(BaseModel):
-    account_id: UUID | None = Field(None, description="연결된 계정 ID")
+    account_id: UUID = Field(..., description="연결된 계정 ID")
     profile_id: UUID = Field(..., description="연결된 프로필 ID")
     medication_id: UUID | None = Field(None, description="특정 약품 관련 상담 시 약품 ID")
     title: str | None = Field(None, max_length=64, description="세션 제목")
