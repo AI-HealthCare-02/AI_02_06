@@ -78,7 +78,7 @@ if config.ENV == Env.PROD:
     cors_headers = ["Content-Type", "Authorization"]
 else:
     # 로컬/개발 환경: 느슨한 설정
-    cors_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    cors_origins = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost", "http://localhost:80"]
     cors_methods = ["*"]
     cors_headers = ["*"]
 

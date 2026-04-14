@@ -14,7 +14,7 @@ const IS_DEV_MODE = ENV !== 'prod'
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
 
-  const handleKakaoLogin = async () => {
+  const handleKakaoLogin = async (scenario = null) => {
     setIsLoading(true)
 
     try {
@@ -34,6 +34,8 @@ export default function LoginPage() {
         response_type: 'code',
         state,
       })
+
+      if (scenario) params.append('scenario', scenario)
 
       window.location.href = `${authorize_url}?${params.toString()}`
     } catch (err) {
@@ -94,6 +96,17 @@ export default function LoginPage() {
             className="w-full bg-slate-800 text-white py-3 rounded-xl font-semibold text-sm mb-3 cursor-pointer hover:bg-black transition-all disabled:opacity-50"
           >
             개발자로 로그인 ({ENV})
+          </button>
+        )}
+
+        {/* [TEST ONLY] 신규 유저 테스트 버튼 - 확인 후 삭제 */}
+        {IS_DEV_MODE && (
+          <button
+            onClick={() => handleKakaoLogin('new_user')}
+            disabled={isLoading}
+            className="w-full bg-blue-500 text-white py-3 rounded-xl font-semibold text-sm mb-3 cursor-pointer hover:bg-blue-600 transition-all disabled:opacity-50"
+          >
+            [TEST] 신규 유저로 로그인
           </button>
         )}
 
