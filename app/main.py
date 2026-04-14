@@ -76,8 +76,13 @@ if config.ENV == Env.PROD:
     cors_origins = [config.FRONTEND_URL]
     cors_methods = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
     cors_headers = ["Content-Type", "Authorization"]
+elif config.ENV == Env.DEV:
+    # 개발/테스트 환경: Vercel Preview + localhost 허용
+    cors_origins = [config.FRONTEND_URL, "http://localhost:3000", "http://127.0.0.1:3000"]
+    cors_methods = ["*"]
+    cors_headers = ["*"]
 else:
-    # 로컬/개발 환경: 느슨한 설정
+    # 로컬 환경: localhost만 허용
     cors_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
     cors_methods = ["*"]
     cors_headers = ["*"]

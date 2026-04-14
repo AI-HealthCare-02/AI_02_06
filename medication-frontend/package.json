@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "dotenv -e ../.env -- next dev",
-    "build": "dotenv -e ../.env -- next build",
+    "build": "next build",
+    "build:local": "dotenv -e ../.env -- next build",
     "start": "next start",
     "lint": "eslint"
   },
