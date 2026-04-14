@@ -18,23 +18,26 @@ class Env(StrEnum):
 # ============================================================
 # 환경별 URL 설정 (ENV 값에 따라 자동 적용)
 # ============================================================
+# local/dev: 로컬 Docker 환경 (동일한 설정, 로그인 버튼만 다름)
+# prod: EC2 + Vercel 배포 환경
 _ENV_URLS = {
     Env.LOCAL: {
+        # Local 환경: 로컬 Docker (dev 로그인 버튼 표시)
         "COOKIE_DOMAIN": "localhost",
         "API_BASE_URL": "http://localhost:8000",
         "FRONTEND_URL": "http://localhost:3000",
         "KAKAO_REDIRECT_URI": "http://localhost:3000/auth/kakao/callback",
     },
     Env.DEV: {
-        # Dev 환경: EC2 백엔드 + Vercel Preview (PR별 자동 배포)
-        "COOKIE_DOMAIN": "52.78.62.12",
-        "API_BASE_URL": "http://52.78.62.12",
-        "FRONTEND_URL": "https://ai-02-06.vercel.app",
-        "KAKAO_REDIRECT_URI": "https://ai-02-06.vercel.app/auth/kakao/callback",
+        # Dev 환경: 로컬 Docker (dev 로그인 버튼 숨김, 카카오 테스트용)
+        "COOKIE_DOMAIN": "localhost",
+        "API_BASE_URL": "http://localhost:8000",
+        "FRONTEND_URL": "http://localhost:3000",
+        "KAKAO_REDIRECT_URI": "http://localhost:3000/auth/kakao/callback",
     },
     Env.PROD: {
-        # Prod 환경: EC2 백엔드 + Vercel Production
-        "COOKIE_DOMAIN": "52.78.62.12",
+        # Prod 환경: EC2 백엔드 + Vercel 프론트엔드
+        "COOKIE_DOMAIN": None,  # Vercel 도메인용 (크로스 도메인 쿠키)
         "API_BASE_URL": "http://52.78.62.12",
         "FRONTEND_URL": "https://ai-02-06.vercel.app",
         "KAKAO_REDIRECT_URI": "https://ai-02-06.vercel.app/auth/kakao/callback",

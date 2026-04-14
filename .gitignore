@@ -9,14 +9,14 @@ desktop.ini
 *.swp
 *.swo
 
-# 환경 변수 (공통 기반)
+# 환경 변수
 .env
 .env.*
 !.env.example
 
-# 환경변수 파일 (secrets 포함)
-envs/*.env
-!envs/example.*.env
+# envs 폴더 - 민감 파일만 무시
+envs/.local.env
+envs/.prod.env
 
 # 프로젝트 설정 (공통)
 .claude/

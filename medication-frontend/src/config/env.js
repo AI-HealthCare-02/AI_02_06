@@ -2,26 +2,29 @@
  * 환경별 설정
  *
  * NEXT_PUBLIC_ENV 값에 따라 자동으로 URL이 설정됩니다.
- * - local: 로컬 개발 환경 (localhost)
- * - prod: 프로덕션 환경 (EC2 + Vercel)
+ *
+ * - local: 로컬 Docker 환경 (dev 로그인 버튼 표시)
+ * - dev: 로컬 Docker 환경 (dev 로그인 버튼 숨김, 카카오 테스트용)
+ * - prod: EC2 + Vercel 배포 환경
  */
 
 const ENV = process.env.NEXT_PUBLIC_ENV || 'local'
 
 // 환경별 URL 설정
+// local/dev: 동일한 로컬 Docker 환경
+// prod: EC2 백엔드 + Vercel 프론트엔드
 const ENV_CONFIG = {
   local: {
-    API_BASE_URL: 'http://localhost:8000',
+    API_BASE_URL: '',  // 로컬에서는 Nginx 프록시 사용 (/api/* -> fastapi:8000)
     KAKAO_REDIRECT_URI: 'http://localhost:3000/auth/kakao/callback',
   },
   dev: {
-    // Dev 환경: EC2 백엔드 + Vercel Preview
-    API_BASE_URL: 'http://52.78.62.12',
-    KAKAO_REDIRECT_URI: 'https://ai-02-06.vercel.app/auth/kakao/callback',
+    API_BASE_URL: '',  // 로컬에서는 Nginx 프록시 사용
+    KAKAO_REDIRECT_URI: 'http://localhost:3000/auth/kakao/callback',
   },
   prod: {
-    // Prod 환경: EC2 백엔드 + Vercel Production
-    API_BASE_URL: 'http://52.78.62.12',
+    // Prod: Vercel API Route 프록시 사용 (Mixed Content 해결)
+    API_BASE_URL: '',  // 빈 문자열 = /api/v1/* -> Vercel API Route -> EC2
     KAKAO_REDIRECT_URI: 'https://ai-02-06.vercel.app/auth/kakao/callback',
   },
 }
@@ -32,7 +35,7 @@ const currentConfig = ENV_CONFIG[ENV] || ENV_CONFIG.local
 // .env에서 개별 지정하면 우선, 아니면 환경별 기본값 사용
 export const config = {
   ENV,
-  API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL || currentConfig.API_BASE_URL,
+  API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL ?? currentConfig.API_BASE_URL,
   KAKAO_CLIENT_ID: process.env.NEXT_PUBLIC_KAKAO_CLIENT_ID || '',
   KAKAO_REDIRECT_URI: process.env.NEXT_PUBLIC_KAKAO_REDIRECT_URI || currentConfig.KAKAO_REDIRECT_URI,
 }

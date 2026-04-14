@@ -2,7 +2,40 @@
 # Next.js는 Vercel에서 별도 배포, EC2에는 API 서버만 배포
 
 services:
-  # 1. Redis (메시지 브로커 및 캐싱) - 내부 전용
+  # 1. PostgreSQL (Database) - 내부 전용
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-downforce_admin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-downforce_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    # 프로덕션에서는 포트 노출하지 않음 (내부 통신만)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-downforce_admin}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # 2. Redis (메시지 브로커 및 캐싱) - 내부 전용
   redis:
     image: redis:alpine
     container_name: redis
@@ -29,7 +62,7 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # 2. API Server (FastAPI) - 외부 AWS DB 연결
+  # 3. API Server (FastAPI)
   fastapi:
     container_name: fastapi
     build:
@@ -51,6 +84,8 @@ services:
       retries: 3
       start_period: 40s
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     deploy:
@@ -66,7 +101,7 @@ services:
         max-size: "50m"
         max-file: "5"
 
-  # 3. AI Worker (OCR + LLM API 호출)
+  # 4. AI Worker (OCR + LLM API 호출)
   ai-worker:
     container_name: ai-worker
     build:
@@ -100,7 +135,7 @@ services:
         max-size: "50m"
         max-file: "5"
 
-  # 4. Nginx (Reverse Proxy) - HTTP Only
+  # 5. Nginx (Reverse Proxy) - HTTP Only
   nginx:
     container_name: nginx
     image: nginx:alpine
@@ -136,6 +171,8 @@ services:
         max-file: "5"
 
 volumes:
+  postgres_data:
+    name: postgres_data
   static_volume:
     name: static_volume
   media_volume:

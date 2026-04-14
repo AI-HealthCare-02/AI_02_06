@@ -6,10 +6,11 @@ import api, { parseApiError, showError } from '../../lib/api'
 import { Pill } from 'lucide-react'
 
 // 환경 변수: local, dev, prod
-// - local/dev: 개발자 로그인 버튼 표시
+// - local: 개발자 로그인 버튼 표시 (빠른 개발용)
+// - dev: 개발자 로그인 버튼 숨김 (카카오 로그인 테스트용)
 // - prod: 개발자 로그인 버튼 숨김
 const ENV = process.env.NEXT_PUBLIC_ENV || 'local'
-const IS_DEV_MODE = ENV !== 'prod'
+const SHOW_DEV_LOGIN = ENV === 'local'
 
 // API Base URL (브라우저에서 직접 호출용)
 // - local: http://localhost:8000
@@ -81,8 +82,8 @@ export default function LoginPage() {
           {isLoading ? '연결 중...' : '카카오로 로그인'}
         </button>
 
-        {/* 개발자 로그인 버튼 (local/dev 환경에서만 표시) */}
-        {IS_DEV_MODE && (
+        {/* 개발자 로그인 버튼 (local 환경에서만 표시) */}
+        {SHOW_DEV_LOGIN && (
           <button
             onClick={handleTestLogin}
             disabled={isLoading}
