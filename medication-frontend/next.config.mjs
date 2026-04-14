@@ -1,14 +1,19 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Static Export - 정적 파일만 생성
-  output: "export",
+  // Vercel 배포 시 SSR 사용 (output: "export" 제거)
+  // 로컬에서 Static Export가 필요하면: npm run build:static
 
-  // 정적 파일 경로에 trailing slash 추가 (Nginx 호환성)
-  trailingSlash: true,
-
-  // Static Export에서는 Next.js Image Optimization 사용 불가
+  // 이미지 최적화 설정
   images: {
-    unoptimized: true,
+    // 외부 이미지 도메인 허용 (필요시 추가)
+    remotePatterns: [],
+    // Vercel에서는 Image Optimization 사용 가능
+    unoptimized: false,
+  },
+
+  // 환경 변수 (클라이언트 노출용은 NEXT_PUBLIC_ 접두사 필요)
+  env: {
+    NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL,
   },
 };
 

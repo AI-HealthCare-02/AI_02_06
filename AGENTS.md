@@ -1,223 +1,178 @@
-# Project Downforce - AI Assistant Guide (Root)
+# AGENTS.md
+This document defines the mandatory **logical guidelines and coding rules** for all AI agents (e.g., Claude Code) operating in this project. Agents MUST verify these rules before executing any user commands. **All final text outputs to the user MUST be in Korean.**
 
-> AI 기반 지능형 복약 관리 시스템
+---
 
-## Project Overview
+## 1. Agentic Workflow
 
-이 프로젝트는 Docker Compose 기반 마이크로서비스 아키텍처로 구성됩니다.
+### 1.1. Design First (PLAN.md)
+* **NEVER write code immediately.**
+* Always create/update `PLAN.md` at the project root first to document architecture, data flow, and edge cases.
+* Use **Mermaid Flow Charts** to visualize Backend (BE) data flow and business logic.
+* Once `PLAN.md` is drafted, PAUSE, ask the user for feedback, and wait.
+* Execute code implementation ONLY when the user explicitly commands `go`.
+
+### 1.2. TDD (Test-Driven Development)
+* Prioritize tests. When implementing core business logic, write tests first or design a Dependency Injection (DI) structure tailored for testing (Pytest).
+
+---
+
+## 2. Tech Stack
+See `CLAUDE.md` for full architecture details. Summary:
+* **Backend:** FastAPI, Tortoise ORM, PostgreSQL 15, JWT (RS256) + RTR
+* **Frontend:** Next.js 15 (JS Only), Tailwind CSS v4, CSR Static Export
+* **Infra:** Docker, AWS EC2, Nginx
+* **QA:** Pytest, Bandit, Ruff, pre-commit
+
+---
+
+## 3. Tidy Data & Coding
+
+### 3.1. Tidy Data Principles
+Strictly follow these to prevent Messy Data:
+* Every variable forms a column.
+* Every observation forms a row.
+* Every type of observational unit forms a table.
+
+### 3.2. Tidy Coding
+* **Consistent Naming:** Keep it intuitive and uniform.
+* **SRP (Single Responsibility Principle):** One purpose per function/class.
+* **Scannability:** Code must be easily readable top-to-bottom.
+* **Standard Libs First:** Minimize 3rd-party packages.
+* **Enums:** Mandatory for state values, flags, and fixed strings.
+
+### 3.3. Quality Standards
+* Strictly follow **PEP8** and **Google Python Style Guide**.
+* All code MUST pass `Ruff` formatting and linting.
+
+---
+
+## 4. Strict Import Rules
+
+### 4.1. General Rules
+* All imports at the top of the file.
+* **Absolute paths ONLY.** No relative imports (`.`, `..`).
+* One module per line (multiple items from the same module on one line are allowed).
+* Use parentheses `()` for multi-line imports, NOT backslashes `\`.
+* **NO wildcard imports** (`import *`).
+* Maintain layered architecture to prevent circular dependencies; minimize internal imports.
+
+### 4.2. Ban on `typing` Module (Python 3.12+)
+**STRICTLY FORBIDDEN:** Do NOT use `typing.TYPE_CHECKING` to bypass circular imports (fix the architecture instead). Do NOT import the following from `typing`:
+
+| Forbidden | Use Instead |
+|---|---|
+| `List`, `Dict`, `Set` | `list[str]`, `dict[str, int]`, `set[int]` |
+| `Tuple`, `FrozenSet` | `tuple[int, str]`, `frozenset[str]` |
+| `Type`, `Optional` | `type[MyClass]`, `str \| None` |
+| `Union`, `Any` | `str \| int`, Omit hint or use `object` |
+| `Callable` | Omit hint or use `Protocol` |
+| `Sequence`, `Mapping`, `Iterable` | `collections.abc.*` equivalents |
+
+### 4.3. Exception: `typing.Annotated`
+* `from typing import Annotated` is HIGHLY RECOMMENDED for modern FastAPI DI patterns.
+
+---
+
+## 5. Refactoring Rules
+
+1. **Tidy First (Strict Separation):** NEVER mix refactoring and new feature additions in a single commit/prompt. Refactor structure/readability first while maintaining 100% test pass rate, THEN add features.
+2. **Architectural Fix for Circular Refs:** Do not use `typing.TYPE_CHECKING` as a workaround. Redesign dependencies unidirectionally by extracting interfaces or elevating logic to higher layers.
+3. **Edge Validation & Domain Isolation:** Keep `Pydantic` validations at the outermost edge (Routers/Controllers). Isolate Service/Domain layers from framework dependencies (FastAPI) to ensure pure Python testability.
+4. **Modern DI over Hardcoding:** Eliminate hardcoded external client/DB instantiations inside Services/Repos. Use modern **`typing.Annotated`** for FastAPI dependencies.
+   * GOOD: `service: Annotated[OCRService, Depends(get_ocr_service)]`
+   * BAD: `service: OCRService = Depends(get_ocr_service)`
+5. **Minimize Depth (Early Return):** Avoid deep nested `if-else` blocks (Arrow Code). Validate exceptions at the top of the function and return early.
+
+---
+
+## 6. Commit Rules
+* Use consistent semantic prefixes: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`.
+* ALWAYS verify backward compatibility before committing.
+
+---
+
+## 7. Development Flow (Tidy First -> TDD)
+
+This project follows a development flow combining **Tidy First** principles with **TDD**.
+
+### 7.1. Core Principle
 
 ```
-/
-├── app/                    # FastAPI Backend (Port 8000)
-├── medication-frontend/    # Next.js Frontend (Static Export)
-├── ai_worker/              # AI Processing Worker
-├── nginx/                  # Reverse Proxy + Static File Server
-├── docs/                   # Documentation
-└── docker-compose.yml      # Service Orchestration
+"Tidy the structure first, write tests first, then implement."
+
+Tidy (Refactor) -> Test (Red) -> Implement (Green)
 ```
 
-## Architecture Principles
+### 7.2. Three-Step Development Cycle
 
-### Service Communication
-```
-Client -> Nginx:80 -> Static Files (UI)
-                   -> FastAPI:8000 (API)
-FastAPI <-> Redis:6379 <-> AI Worker (Async Tasks)
-FastAPI <-> PostgreSQL:5432 (Data)
-```
+**Step 1: Tidy First**
+- Before implementing, clean up the related code structure.
+- NO behavioral changes - only improve readability and structure.
+- All existing tests MUST pass after tidying.
 
-### Technology Stack
-- **Frontend**: Next.js 16 (Static Export), React 19, Tailwind CSS v4 (**JavaScript Only**)
-- **Backend**: FastAPI, Tortoise ORM, PostgreSQL 15
-- **AI Worker**: Python, RQ (Redis Queue), CPU-only PyTorch
-- **Infra**: Docker, Nginx, Redis, Let's Encrypt
+**Step 2: Test First**
+- Write test code for the feature BEFORE implementation.
+- Tests should be in a failing state (Red).
+- Tests serve as the specification.
 
-## Environment Configuration (local / dev / prod)
+**Step 3: Implement**
+- Write minimal code to pass the tests.
+- After passing (Green), perform additional tidying if needed.
 
-### 환경별 동작 차이
+### 7.3. Commit Separation
 
-| 환경 | `ENV` | OAuth | Dev 로그인 | 용도 |
-|------|-------|-------|-----------|------|
-| **local** | `local` | Mock 서버 | 표시 | 로컬 개발 (Docker 없이) |
-| **dev** | `dev` | 실제 Kakao | 표시 | Docker 개발 환경 |
-| **prod** | `prod` | 실제 Kakao | 숨김 | 프로덕션 배포 |
+Each step MUST be a **separate commit**.
 
-### 핵심 환경변수
+| Step | Prefix | Example |
+|------|--------|---------|
+| Tidy First | `refactor:` | `refactor: restructure DUR service` |
+| Test First | `test:` | `test: add drug interaction tests` |
+| Implement | `feat:`/`fix:` | `feat: implement drug interaction check` |
 
-```bash
-# 공통
-ENV=local|dev|prod           # 환경 구분
+**FORBIDDEN:**
+- Mixing `refactor` and `feat` in a single commit.
+- Implementing features without tests.
 
-# Backend (FastAPI)
-API_BASE_URL=http://fastapi:8000   # Docker 내부 통신용
-FRONTEND_URL=http://localhost:3000      # 브라우저 리다이렉트용
+### 7.4. Agent Behavior Guidelines
 
-# Frontend (Next.js)
-NEXT_PUBLIC_ENV=local|dev|prod     # 클라이언트 환경 구분
-NEXT_PUBLIC_API_BASE_URL=          # 비워두면 Nginx 프록시 사용 (프로덕션)
-                                   # http://localhost:8000 (로컬 개발)
-```
+When user requests a feature implementation:
 
-### OAuth 흐름 분기
+1. **Ask first:**
+   - "Should I tidy the related code first? (Tidy First)"
+   - "Should I write tests first? (TDD)"
 
-```python
-# FastAPI: oauth_routers.py
-if config.ENV == Env.LOCAL:
-    # Mock 서버로 리다이렉트 (카카오 앱 없이 테스트)
-    authorize_url = f"{config.FRONTEND_URL}/api/v1/mock/kakao/authorize"
-else:
-    # 실제 카카오 OAuth
-    authorize_url = "https://kauth.kakao.com/oauth/authorize"
-```
+2. **Document in PLAN.md:**
+   ```markdown
+   ## Implementation Plan
 
-### Dev 로그인 버튼 (Frontend)
+   ### Phase 1: Tidy First
+   - [ ] Analyze existing code structure
+   - [ ] Clean up imports
+   - [ ] Extract functions if needed
 
-```javascript
-// login/page.jsx
-const IS_DEV_MODE = process.env.NEXT_PUBLIC_ENV !== 'prod'
-// prod 환경에서만 Dev 로그인 버튼 숨김
-```
+   ### Phase 2: Test First
+   - [ ] Design test cases
+   - [ ] Write test code
+   - [ ] Verify Red state
 
-## Security Architecture (RS256)
+   ### Phase 3: Implement
+   - [ ] Minimal implementation
+   - [ ] Verify Green state
+   - [ ] Additional tidying if needed
+   ```
 
-### 인증 방식
+3. **Get user confirmation at each step:**
+   - After Tidy: "Structure cleanup complete. Proceed to write tests?"
+   - After Test: "Tests written. Proceed to implementation?"
 
-1. **RS256 비대칭 키 인증**
-   - FastAPI: Private Key로 JWT 서명 및 발행
-   - 클라이언트: 토큰을 HttpOnly Cookie로 저장
+### 7.5. Tidy First Checklist
 
-2. **Algorithm Pinning**
-   - `algorithms=['RS256']` 명시
-   - HS256 교체 공격 (Algorithm Confusion Attack) 차단
-
-3. **Cookie 기반 JWT**
-   - localStorage 대신 HttpOnly Cookie 사용
-   - XSS 공격으로부터 토큰 보호
-
-### 보안 검증 흐름
-
-```
-Client Request
-    -> Nginx (Static Files / API Proxy)
-    -> FastAPI (토큰 검증 + 소유권 확인)
-    -> Response
-```
-
-FastAPI가 모든 인증/인가를 담당합니다:
-- **토큰 검증**: RS256 서명 확인, 만료 시간 확인
-- **소유권 확인**: 요청 리소스에 대한 접근 권한 검증
-
-## Docker Deployment
-
-### 컨테이너 구성 (3개)
-- **Nginx**: Static File Server + Reverse Proxy
-- **FastAPI**: Uvicorn ASGI 서버
-- **AI Worker**: CPU-only 환경 (CUDA 의존성 제거)
-
-### Frontend 배포 (Static Export)
-```bash
-# 1. 빌드 (로컬에서 실행)
-cd medication-frontend
-npm run build
-# -> out/ 폴더에 정적 파일 생성
-
-# 2. Docker 실행 (Nginx가 out/ 폴더 서빙)
-docker compose up nginx fastapi
-```
-
-### AI Worker 최적화
-```toml
-# pyproject.toml - CPU 전용 PyTorch
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[tool.uv.sources]
-torch = { index = "pytorch-cpu" }
-torchvision = { index = "pytorch-cpu" }
-```
-
-## Development Workflow
-
-### 로컬 개발 (권장)
-```bash
-# 1. 루트 .env 설정 (환경변수 통합 관리)
-cp .env.example .env
-# 필수 값 입력: SECRET_KEY, DB_PASSWORD, KAKAO_CLIENT_ID 등
-
-# 2. 백엔드 서비스 실행
-docker compose up fastapi redis
-
-# 3. 프론트엔드 개발 서버 실행 (별도 터미널)
-cd medication-frontend
-npm run dev
-# -> http://localhost:3000 (루트 .env 자동 로드)
-```
-
-### Docker 통합 테스트
-```bash
-# 1. 프론트엔드 빌드
-cd medication-frontend && npm run build
-
-# 2. 전체 스택 실행
-docker compose up
-# -> http://localhost (Nginx)
-```
-
-## Coding Conventions
-
-### Language
-- 코드: 영어
-- 주석: 한국어 허용
-- 커밋 메시지: 한글 (예: `feat: 복약 알림 기능 추가`)
-
-### File Naming
-- Python: `snake_case.py`
-- Frontend: `camelCase.js` 또는 `PascalCase.jsx` (컴포넌트) - **JavaScript Only**
-- Config: `kebab-case.yml`
-
-### Import Order
-1. Standard library
-2. Third-party packages
-3. Local imports (absolute path)
-
-### FastAPI 의존성 주입 (Annotated 패턴)
-```python
-# Ruff UP 규칙 준수 - Depends() 직접 사용 금지
-from typing import Annotated
-from fastapi import Depends
-
-CurrentAccount = Annotated[Account, Depends(get_current_account)]
-
-@router.get("/")
-async def get_items(account: CurrentAccount):
-    ...
-```
-
-## Do NOTs
-
-- 이모지 사용 금지 (코드, 커밋 메시지, 문서 모두)
-- `.env` 파일 수정 또는 커밋 금지
-- `docker-compose.prod.yml`에 포트 노출 금지 (Nginx 제외)
-- `git push --force` 금지
-- 하드코딩된 시크릿 금지
-- `= Depends()` 직접 사용 금지 -> `Annotated[T, Depends()]` 사용
-- Frontend에 `.ts`, `.tsx` 파일 생성 금지 (JavaScript Only)
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `docker-compose.yml` | 개발 환경 서비스 정의 |
-| `docker-compose.prod.yml` | 프로덕션 환경 정의 |
-| `pyproject.toml` | Python 의존성 관리 (uv) |
-| `.env.example` | 환경변수 템플릿 |
-
-## Reference Documents
-
-- `docs/project_structure_analysis.md` - 전체 구조 분석
-- `docs/improvement_roadmap.md` - 개선 로드맵
-- `docs/db_schema.dbml` - ERD 스키마
-- `csv/요구사항 정의서 2차 - 시트1.csv` - 요구사항
-- `csv/[최종본] API 명세서 - 시트1.csv` - API 명세
+- [ ] Remove unnecessary imports
+- [ ] Sort imports (stdlib -> third-party -> local)
+- [ ] Single responsibility per function/class?
+- [ ] Any functions too long? (>20 lines)
+- [ ] Any duplicate code?
+- [ ] Clear naming?
+- [ ] Modern type hints? (See Section 4.2)
+- [ ] Early return pattern applicable?

@@ -25,5 +25,4 @@ class IntakeLog(models.Model):
         indexes = (
             ("profile_id", "scheduled_date"),
             ("scheduled_date", "intake_status"),
-            ("profile_id", "medication_id", "created_at"),
         )
