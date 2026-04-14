@@ -128,8 +128,6 @@ function SurveyModal({ onClose, userName }) {
 
   const selectedClass = 'bg-gray-900 text-white border-gray-900'
   const unselectedClass = 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
-  const chipSelected = 'bg-gray-900 text-white border-gray-900'
-  const chipUnselected = 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
