@@ -23,6 +23,9 @@ envs/*.env
 .ruff_cache/
 .pytest_cache/
 
+# Amazon Q 개인 설정 (팀 공유 제외)
+.amazonq/
+
 # 로그 및 임시 파일
 *.log
 nul
