@@ -4,11 +4,27 @@ import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { Home, FileText, Trophy, Pill, User, MessageCircle, X, Menu, LogOut, Send } from 'lucide-react'
 import LogoutModal, { useLogout } from '@/components/LogoutModal'
+import api from '@/lib/api'
+
+function TypingDots() {
+  return (
+    <div className="flex justify-start">
+      <div className="bg-white border border-gray-200 shadow-sm px-4 py-3 rounded-2xl rounded-bl-none">
+        <div className="flex gap-1.5 items-center">
+          <span className="w-2 h-2 bg-gray-400 rounded-full inline-block" style={{ animation: 'chatDotBounce 1.2s infinite', animationDelay: '0ms' }} />
+          <span className="w-2 h-2 bg-gray-400 rounded-full inline-block" style={{ animation: 'chatDotBounce 1.2s infinite', animationDelay: '200ms' }} />
+          <span className="w-2 h-2 bg-gray-400 rounded-full inline-block" style={{ animation: 'chatDotBounce 1.2s infinite', animationDelay: '400ms' }} />
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function ChatModal({ onClose }) {
-  const [messages, setMessages] = useState([
-    { role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }
-  ])
+  const [sessionId, setSessionId] = useState(null)
+  const [isInitializing, setIsInitializing] = useState(true)
+  const [initError, setInitError] = useState(false)
+  const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const scrollRef = useRef(null)
@@ -17,22 +33,54 @@ function ChatModal({ onClose }) {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [messages, isLoading])
+  }, [messages, isLoading, isInitializing])
 
-  const handleSend = () => {
+  useEffect(() => {
+    const initSession = async () => {
+      setIsInitializing(true)
+      setInitError(false)
+      try {
+        const profileRes = await api.get('/api/v1/profiles/')
+        const self = profileRes.data?.find(p => p.relation_type === 'SELF') || profileRes.data?.[0]
+        if (!self) throw new Error('프로필 없음')
+        const res = await api.post('/api/v1/chat-sessions/', {
+          account_id: '00000000-0000-0000-0000-000000000000',
+          profile_id: self.id,
+          title: 'AI 상담',
+        })
+        setSessionId(res.data.id)
+        setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
+      } catch (err) {
+        console.error('세션 생성 실패:', err)
+        setInitError(true)
+      } finally {
+        setIsInitializing(false)
+      }
+    }
+    initSession()
+  }, [])
+
+  const handleSend = async () => {
     const message = input.trim()
-    if (!message || isLoading) return
+    if (!message || isLoading || isInitializing || !sessionId) return
     setInput('')
     setMessages(prev => [...prev, { role: 'user', content: message }])
     setIsLoading(true)
-    setTimeout(() => {
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: '지금은 테스트 중이에요. 곧 실제 AI와 연결될 거예요!'
-      }])
+    try {
+      const res = await api.post('/api/v1/messages/ask', {
+        session_id: sessionId,
+        content: message,
+      })
+      setMessages(prev => [...prev, { role: 'assistant', content: res.data.assistant_message.content }])
+    } catch (err) {
+      console.error(err)
+      setMessages(prev => [...prev, { role: 'assistant', content: '오류가 발생했습니다. 잠시 후 다시 시도해주세요.' }])
+    } finally {
       setIsLoading(false)
-    }, 1500)
+    }
   }
+
+  const isBlocked = isLoading || isInitializing || !sessionId
 
   return (
     <div className="fixed inset-0 bg-black/50 z-[100] flex items-end justify-end p-6 backdrop-blur-sm">
@@ -40,7 +88,9 @@ function ChatModal({ onClose }) {
         <div className="flex justify-between items-center p-5 border-b border-gray-100">
           <div>
             <h2 className="font-bold text-lg text-gray-900">복약 AI 상담</h2>
-            <p className="text-xs text-gray-400">약 복용 방법 등 무엇이든 물어보세요</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {isInitializing ? 'AI 상담사 연결 중...' : initError ? '연결 실패' : '약 복용 방법 등 무엇이든 물어보세요'}
+            </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-black cursor-pointer p-2 transition-colors">
             <X size={20} />
@@ -48,6 +98,13 @@ function ChatModal({ onClose }) {
         </div>
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+          {initError && (
+            <div className="flex justify-start">
+              <div className="max-w-[80%] px-4 py-3 rounded-2xl text-sm bg-red-50 text-red-500 border border-red-100 rounded-bl-none">
+                서버 연결에 실패했습니다. 잠시 후 다시 시도해주세요.
+              </div>
+            </div>
+          )}
           {messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm shadow-sm
@@ -59,25 +116,18 @@ function ChatModal({ onClose }) {
               </div>
             </div>
           ))}
-          {isLoading && (
-            <div className="flex justify-start">
-              <div className="bg-white border border-gray-200 px-4 py-3 rounded-2xl rounded-bl-none shadow-sm flex gap-1.5">
-                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
-                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
-                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
-              </div>
-            </div>
-          )}
+          {(isInitializing || isLoading) && <TypingDots />}
         </div>
 
         <div className="p-4 bg-white border-t border-gray-100 flex gap-2 items-center">
           <input type="text" value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyUp={(e) => { if (e.key === 'Enter') handleSend() }}
-            placeholder="메시지를 입력하세요"
-            className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-gray-400 transition-all" />
+            placeholder={isInitializing ? '연결 중...' : '메시지를 입력하세요'}
+            disabled={isBlocked}
+            className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-gray-400 transition-all disabled:opacity-50" />
           <button onClick={handleSend}
-            disabled={isLoading || !input.trim()}
+            disabled={isBlocked || !input.trim()}
             className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-900 text-white hover:bg-gray-700 disabled:bg-gray-100 disabled:text-gray-300 active:scale-95 transition-all cursor-pointer">
             <Send size={16} />
           </button>

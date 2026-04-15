@@ -81,7 +81,7 @@ export default function LoginPage() {
 
         {/* 카카오 버튼 */}
         <button
-          onClick={handleKakaoLogin}
+          onClick={() => handleKakaoLogin()}
           disabled={isLoading}
           className="w-full bg-yellow-400 py-3 rounded-xl font-semibold text-sm mb-3 cursor-pointer hover:bg-yellow-500 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
