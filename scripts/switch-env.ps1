@@ -11,10 +11,11 @@ param(
 
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $EnvFile = Join-Path $ProjectRoot ".env"
-$SourceFile = Join-Path $ProjectRoot "envs\.$Environment.env"
 
-# dev 환경은 local과 동일한 파일 사용 (ENV 값만 다름)
-if ($Environment -eq "dev") {
+# 소스 파일 결정 (local/dev는 같은 파일 사용)
+if ($Environment -eq "prod") {
+    $SourceFile = Join-Path $ProjectRoot "envs\.prod.env"
+} else {
     $SourceFile = Join-Path $ProjectRoot "envs\.local.env"
 }
 
@@ -29,19 +30,17 @@ if (Test-Path $EnvFile) {
     Remove-Item $EnvFile -Force
 }
 
-# 심볼릭 링크 생성 (관리자 권한 필요할 수 있음)
-try {
-    New-Item -ItemType SymbolicLink -Path $EnvFile -Target $SourceFile -ErrorAction Stop | Out-Null
-    Write-Host "[OK] Switched to '$Environment' environment" -ForegroundColor Green
-    Write-Host "     .env -> envs\.$Environment.env" -ForegroundColor Cyan
-} catch {
-    # 심볼릭 링크 실패 시 복사로 대체
-    Write-Host "[WARN] Symlink failed, copying file instead..." -ForegroundColor Yellow
-    Copy-Item $SourceFile $EnvFile
-    Write-Host "[OK] Copied '$Environment' environment to .env" -ForegroundColor Green
-}
+# 파일 복사 (심볼릭 링크 대신 복사 - ENV 값 수정 필요)
+Copy-Item $SourceFile $EnvFile
 
-# 현재 환경 표시
-$CurrentEnv = Get-Content $EnvFile | Select-String "^ENV=" | ForEach-Object { $_.ToString().Split("=")[1] }
+# ENV 값 수정 (local/dev 구분) - 멀티라인 모드로 정규식 적용
+$content = Get-Content $EnvFile -Raw
+$content = $content -replace "(?m)^ENV=.*$", "ENV=$Environment"
+$content = $content -replace "(?m)^NEXT_PUBLIC_ENV=.*$", "NEXT_PUBLIC_ENV=$Environment"
+Set-Content $EnvFile $content -NoNewline
+
+Write-Host "[OK] Switched to '$Environment' environment" -ForegroundColor Green
+Write-Host "     Source: envs\.$(if ($Environment -eq 'prod') {'prod'} else {'local'}).env" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Current ENV: $CurrentEnv" -ForegroundColor Magenta
+Write-Host "Current ENV: $Environment" -ForegroundColor Magenta
+Write-Host "NEXT_PUBLIC_ENV: $Environment" -ForegroundColor Magenta

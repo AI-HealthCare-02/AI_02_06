@@ -21,11 +21,11 @@ if [[ ! "$ENV" =~ ^(local|dev|prod)$ ]]; then
     exit 1
 fi
 
-# 소스 파일 결정
-if [ "$ENV" = "dev" ]; then
-    SOURCE_FILE="$PROJECT_ROOT/envs/.local.env"
+# 소스 파일 결정 (local/dev는 같은 파일 사용)
+if [ "$ENV" = "prod" ]; then
+    SOURCE_FILE="$PROJECT_ROOT/envs/.prod.env"
 else
-    SOURCE_FILE="$PROJECT_ROOT/envs/.$ENV.env"
+    SOURCE_FILE="$PROJECT_ROOT/envs/.local.env"
 fi
 
 # 소스 파일 확인
@@ -39,10 +39,26 @@ if [ -e "$ENV_FILE" ] || [ -L "$ENV_FILE" ]; then
     rm -f "$ENV_FILE"
 fi
 
-# 심볼릭 링크 생성
-ln -s "$SOURCE_FILE" "$ENV_FILE"
+# 파일 복사 (심볼릭 링크 대신 복사 - ENV 값 수정 필요)
+cp "$SOURCE_FILE" "$ENV_FILE"
+
+# ENV 값 수정 (local/dev 구분)
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS
+    sed -i '' "s/^ENV=.*/ENV=$ENV/" "$ENV_FILE"
+    sed -i '' "s/^NEXT_PUBLIC_ENV=.*/NEXT_PUBLIC_ENV=$ENV/" "$ENV_FILE"
+else
+    # Linux
+    sed -i "s/^ENV=.*/ENV=$ENV/" "$ENV_FILE"
+    sed -i "s/^NEXT_PUBLIC_ENV=.*/NEXT_PUBLIC_ENV=$ENV/" "$ENV_FILE"
+fi
 
 echo "[OK] Switched to '$ENV' environment"
-echo "     .env -> envs/.$ENV.env"
+if [ "$ENV" = "prod" ]; then
+    echo "     Source: envs/.prod.env"
+else
+    echo "     Source: envs/.local.env"
+fi
 echo ""
-echo "Current ENV: $(grep '^ENV=' "$ENV_FILE" | cut -d'=' -f2)"
+echo "Current ENV: $ENV"
+echo "NEXT_PUBLIC_ENV: $ENV"

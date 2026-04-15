@@ -10,6 +10,8 @@ services:
       POSTGRES_USER: ${DB_USER:-downforce_admin}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME:-downforce_db}
+    ports:
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -190,4 +192,3 @@ networks:
   backend:
     name: backend
     driver: bridge
-    internal: true
