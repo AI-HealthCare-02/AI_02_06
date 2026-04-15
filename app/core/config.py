@@ -44,7 +44,7 @@ _ENV_URLS = {
 }
 
 _DEFAULT_SECRET_KEY = f"dev-only-secret-key-{secrets.token_hex(16)}"
-_DEFAULT_DB_PASSWORD = "downforce_admin"
+_DEFAULT_DB_PASSWORD = "change_me_in_production"
 _DEFAULT_KAKAO_CLIENT_ID = "mock_kakao_client_id"
 _DEFAULT_KAKAO_CLIENT_SECRET = "mock_kakao_client_secret"
 
