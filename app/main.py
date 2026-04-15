@@ -63,6 +63,10 @@ async def orm_exception_handler(request: Request, exc: BaseORMException):
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """예기치 못한 모든 에러 처리 (500 Internal Server Error)"""
+    import traceback
+
+    print(f"[ERROR] {request.method} {request.url.path}: {type(exc).__name__}: {exc}")
+    traceback.print_exc()
     return ORJSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
