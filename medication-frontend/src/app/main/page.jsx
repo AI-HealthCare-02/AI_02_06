@@ -1,8 +1,9 @@
 'use client'
-import { useState, useEffect, useRef, Suspense } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import api, { showError } from '@/lib/api'
-import { Pill, FileText, Flame, Ban, X, Check, Plus, MessageCircle } from 'lucide-react'
+import { Pill, Flame, X, Check, Plus, MessageCircle } from 'lucide-react'
+import ChatModal from '@/components/ChatModal'
 
 // 스켈레톤은 main의 레이아웃을 따름
 function MainSkeleton() {
@@ -261,51 +262,6 @@ function SurveyModal({ onClose, userName }) {
   )
 }
 
-// 챗봇 모달 (donghoon 로직 유지)
-function ChatModal({ onClose }) {
-  const [messages, setMessages] = useState([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요 💊' }])
-  const [input, setInput] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const bottomRef = useRef(null)
-
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
-
-  const handleSend = async () => {
-    if (!input.trim() || isLoading) return
-    const msg = input.trim()
-    setInput('')
-    setMessages(prev => [...prev, { role: 'user', content: msg }])
-    setIsLoading(true)
-    setTimeout(() => {
-      setMessages(prev => [...prev, { role: 'assistant', content: '곧 실제 AI와 연결될 예정입니다!' }])
-      setIsLoading(false)
-    }, 1000)
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/40 z-[100] flex items-center justify-center p-6 backdrop-blur-sm">
-      <div className="bg-white rounded-[32px] w-full max-w-md h-[600px] flex flex-col shadow-2xl overflow-hidden">
-        <div className="p-6 border-b border-gray-50 flex justify-between items-center">
-          <h2 className="font-bold text-gray-900">AI 상담사</h2>
-          <button onClick={onClose} className="text-gray-400"><X size={20}/></button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50">
-          {messages.map((m, i) => (
-            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[80%] p-4 rounded-2xl text-sm ${m.role === 'user' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-100 text-gray-800'}`}>{m.content}</div>
-            </div>
-          ))}
-          <div ref={bottomRef} />
-        </div>
-        <div className="p-4 bg-white border-t border-gray-50 flex gap-2">
-          <input value={input} onChange={e => setInput(e.target.value)} onKeyUp={e => e.key === 'Enter' && handleSend()} className="flex-1 bg-gray-50 px-4 py-3 rounded-xl outline-none text-sm" placeholder="메시지 입력..." />
-          <button onClick={handleSend} className="bg-gray-900 text-white p-3 rounded-xl"><Check size={20}/></button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function MainPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -313,6 +269,7 @@ function MainPageContent() {
   const [showSurvey, setShowSurvey] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [userName, setUserName] = useState('사용자')
+  const [profileId, setProfileId] = useState(null)
   const [greeting, setGreeting] = useState({ msg: '반가워요', sub: '오늘 하루도 건강하게 시작해봐요' })
 
   // 설문 팝업 쿼리 파라미터 감지
@@ -332,6 +289,7 @@ function MainPageContent() {
         if (profileRes.data?.length > 0) {
           const self = profileRes.data.find(p => p.relation_type === 'SELF') || profileRes.data[0]
           setUserName(self.name.split('(')[0])
+          setProfileId(self.id)
         }
         const hour = new Date().getHours()
         if (hour < 12) setGreeting({ msg: '좋은 아침이에요', sub: '오늘 하루도 건강하게 시작해봐요' })
@@ -347,7 +305,7 @@ function MainPageContent() {
   return (
     <>
       {showSurvey && <SurveyModal onClose={() => setShowSurvey(false)} userName={userName} />}
-      {showChat && <ChatModal onClose={() => setShowChat(false)} />}
+      {showChat && <ChatModal onClose={() => setShowChat(false)} profileId={profileId} />}
 
       {/* ── 히어로 섹션 (main의 다크 테마 + donghoon의 이름 데이터) ── */}
       <section className="relative w-full min-h-[540px] flex items-center justify-center overflow-hidden bg-black">

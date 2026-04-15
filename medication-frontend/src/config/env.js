@@ -23,8 +23,8 @@ const ENV_CONFIG = {
     KAKAO_REDIRECT_URI: 'http://localhost:3000/auth/kakao/callback',
   },
   prod: {
-    // Prod: Vercel API Route 프록시 사용 (Mixed Content 해결)
-    API_BASE_URL: '',  // 빈 문자열 = /api/v1/* -> Vercel API Route -> EC2
+    // Prod: DuckDNS HTTPS 직접 호출 (Mixed Content 해결됨)
+    API_BASE_URL: 'https://ai-02-06.duckdns.org',
     KAKAO_REDIRECT_URI: 'https://ai-02-06.vercel.app/auth/kakao/callback',
   },
 }

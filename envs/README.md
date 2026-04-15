@@ -44,18 +44,39 @@ cd medication-frontend && npm run dev
 
 ---
 
-## local ↔ dev 전환
+## 환경 전환 (자동)
 
-`.env` 파일에서 두 줄만 변경:
+### Windows
+
+```powershell
+.\env local    # 로컬 개발 (Dev 로그인 버튼 O)
+.\env dev      # 카카오 테스트 (Dev 로그인 버튼 X)
+.\env prod     # prod 환경 테스트
+```
+
+### Mac / Linux
 
 ```bash
-# local → dev (카카오 로그인 테스트)
-ENV=dev
-NEXT_PUBLIC_ENV=dev
+./env.sh local    # 로컬 개발 (Dev 로그인 버튼 O)
+./env.sh dev      # 카카오 테스트 (Dev 로그인 버튼 X)
+./env.sh prod     # prod 환경 테스트
+```
 
-# dev → local (빠른 개발, dev 버튼 사용)
-ENV=local
-NEXT_PUBLIC_ENV=local
+### 환경별 차이
+
+| 환경 | ENV | Dev 로그인 버튼 | 용도 |
+|------|-----|----------------|------|
+| local | local | O | 빠른 개발 (카카오 로그인 없이) |
+| dev | dev | X | 카카오 로그인 테스트 |
+| prod | prod | X | 프로덕션 설정 테스트 |
+
+### 동작 원리
+
+스크립트가 `.env` 파일을 `envs/.{환경}.env`로 심볼릭 링크합니다.
+
+```
+.env -> envs/.local.env   (local/dev 환경)
+.env -> envs/.prod.env    (prod 환경)
 ```
 
 ---
@@ -101,8 +122,9 @@ Vercel Dashboard에서 환경변수 설정:
 ```
 Settings > Environment Variables
 
-NEXT_PUBLIC_ENV = prod
-API_BASE_URL = http://52.78.62.12
+NEXT_PUBLIC_ENV = prod                              (Production)
+NEXT_PUBLIC_API_BASE_URL = https://ai-02-06.duckdns.org  (Production & Preview)
+NEXT_PUBLIC_KAKAO_CLIENT_ID = <카카오 REST API 키>    (All)
 ```
 
 ---
@@ -143,8 +165,9 @@ EC2:/home/ubuntu/AH_02_06/
 |------|-------------------|------------------------|
 | 용도 | 로컬 개발 | EC2 배포 |
 | 리소스 | 넉넉함 | t3.micro 최적화 |
-| 포트 노출 | 5432, 6379, 8000, 80 | 80만 |
-| Nginx 설정 | default.conf | prod_http.conf |
+| 포트 노출 | 5432, 6379, 8000, 80 | 80, 443 |
+| Nginx 설정 | default.conf | prod_https.conf |
+| SSL | X | Let's Encrypt (DuckDNS) |
 | 재시작 정책 | 없음 | unless-stopped |
 
 ---

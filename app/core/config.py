@@ -35,16 +35,16 @@ _ENV_URLS = {
         "KAKAO_REDIRECT_URI": "http://localhost:3000/auth/kakao/callback",
     },
     Env.PROD: {
-        # Prod 환경: EC2 백엔드 + Vercel 프론트엔드
-        "COOKIE_DOMAIN": None,  # Vercel 도메인용 (크로스 도메인 쿠키)
-        "API_BASE_URL": "http://52.78.62.12",
+        # Prod 환경: EC2 백엔드 (DuckDNS HTTPS) + Vercel 프론트엔드
+        "COOKIE_DOMAIN": None,  # 크로스 도메인 쿠키 (Vercel <-> EC2)
+        "API_BASE_URL": "https://ai-02-06.duckdns.org",
         "FRONTEND_URL": "https://ai-02-06.vercel.app",
         "KAKAO_REDIRECT_URI": "https://ai-02-06.vercel.app/auth/kakao/callback",
     },
 }
 
 _DEFAULT_SECRET_KEY = f"dev-only-secret-key-{secrets.token_hex(16)}"
-_DEFAULT_DB_PASSWORD = "downforce_admin"
+_DEFAULT_DB_PASSWORD = "change_me_in_production"
 _DEFAULT_KAKAO_CLIENT_ID = "mock_kakao_client_id"
 _DEFAULT_KAKAO_CLIENT_SECRET = "mock_kakao_client_secret"
 

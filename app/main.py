@@ -71,19 +71,22 @@ async def general_exception_handler(request: Request, exc: Exception):
 # --- 미들웨어 설정 ---
 
 # CORS 설정 (환경별 분기)
+# localhost는 로컬 머신에서만 접근 가능하므로 모든 환경에서 허용해도 보안상 안전
+_localhost_origins = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost", "http://localhost:80"]
+
 if config.ENV == Env.PROD:
-    # 운영 환경: 엄격한 설정
-    cors_origins = [config.FRONTEND_URL]
+    # 운영 환경: Vercel + localhost (로컬 prod 테스트용)
+    cors_origins = [config.FRONTEND_URL] + _localhost_origins
     cors_methods = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
     cors_headers = ["Content-Type", "Authorization"]
 elif config.ENV == Env.DEV:
     # 개발/테스트 환경: Vercel Preview + localhost 허용
-    cors_origins = [config.FRONTEND_URL, "http://localhost:3000", "http://127.0.0.1:3000"]
+    cors_origins = [config.FRONTEND_URL] + _localhost_origins
     cors_methods = ["*"]
     cors_headers = ["*"]
 else:
-    # 로컬/개발 환경: 느슨한 설정
-    cors_origins = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost", "http://localhost:80"]
+    # 로컬 환경: localhost만
+    cors_origins = _localhost_origins
     cors_methods = ["*"]
     cors_headers = ["*"]
 
