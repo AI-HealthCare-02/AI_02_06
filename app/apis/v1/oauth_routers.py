@@ -220,12 +220,13 @@ async def kakao_callback(
     )
 
     # Access Token을 HttpOnly 쿠키로 설정 (XSS 방지)
+    # Cross-domain (Vercel -> EC2) 요청을 위해 prod에서는 samesite="none" 필요
     response.set_cookie(
         key="access_token",
         value=str(tokens["access_token"]),
         httponly=True,
         secure=config.ENV == Env.PROD,
-        samesite="lax",
+        samesite="none" if config.ENV == Env.PROD else "lax",
         domain=config.COOKIE_DOMAIN or None,
         max_age=config.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
@@ -236,7 +237,7 @@ async def kakao_callback(
         value=str(tokens["refresh_token"]),
         httponly=True,
         secure=config.ENV == Env.PROD,
-        samesite="lax",
+        samesite="none" if config.ENV == Env.PROD else "lax",
         domain=config.COOKIE_DOMAIN or None,
         max_age=config.REFRESH_TOKEN_EXPIRE_MINUTES * 60,
     )
@@ -299,7 +300,7 @@ async def refresh_token(
         value=tokens["access_token"],
         httponly=True,
         secure=config.ENV == Env.PROD,
-        samesite="lax",
+        samesite="none" if config.ENV == Env.PROD else "lax",
         domain=config.COOKIE_DOMAIN or None,
         max_age=config.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
@@ -310,7 +311,7 @@ async def refresh_token(
         value=tokens["refresh_token"],
         httponly=True,
         secure=config.ENV == Env.PROD,
-        samesite="lax",
+        samesite="none" if config.ENV == Env.PROD else "lax",
         domain=config.COOKIE_DOMAIN or None,
         max_age=config.REFRESH_TOKEN_EXPIRE_MINUTES * 60,
     )
@@ -340,13 +341,13 @@ async def delete_account(
         key="access_token",
         httponly=True,
         secure=config.ENV == Env.PROD,
-        samesite="lax",
+        samesite="none" if config.ENV == Env.PROD else "lax",
     )
     response.delete_cookie(
         key="refresh_token",
         httponly=True,
         secure=config.ENV == Env.PROD,
-        samesite="lax",
+        samesite="none" if config.ENV == Env.PROD else "lax",
     )
     return response
 
@@ -377,12 +378,12 @@ async def logout(
         key="access_token",
         httponly=True,
         secure=config.ENV == Env.PROD,
-        samesite="lax",
+        samesite="none" if config.ENV == Env.PROD else "lax",
     )
     response.delete_cookie(
         key="refresh_token",
         httponly=True,
         secure=config.ENV == Env.PROD,
-        samesite="lax",
+        samesite="none" if config.ENV == Env.PROD else "lax",
     )
     return response
