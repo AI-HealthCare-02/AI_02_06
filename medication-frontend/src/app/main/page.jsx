@@ -37,7 +37,7 @@ function SurveyModal({ onClose, userName }) {
   useEffect(() => {
     const fetchProfile = async () => {
       try {
-        const res = await api.get('/api/v1/profiles/')
+        const res = await api.get('/api/v1/profiles')
         const selfProfile = res.data?.find(p => p.relation_type === 'SELF')
         if (selfProfile) {
           setExistingProfile(selfProfile)
@@ -64,7 +64,7 @@ function SurveyModal({ onClose, userName }) {
     if (!existingProfile) {
       setIsSubmitting(true)
       try {
-        await api.post('/api/v1/profiles/', { relation_type: 'SELF', name: userName || '나', health_survey: null })
+        await api.post('/api/v1/profiles', { relation_type: 'SELF', name: userName || '나', health_survey: null })
       } catch (err) { console.error(err) }
       setIsSubmitting(false)
     }
@@ -91,7 +91,7 @@ function SurveyModal({ onClose, userName }) {
       if (existingProfile) {
         await api.patch(`/api/v1/profiles/${existingProfile.id}`, { health_survey: healthSurvey })
       } else {
-        await api.post('/api/v1/profiles/', { relation_type: 'SELF', name: userName || '나', health_survey: healthSurvey })
+        await api.post('/api/v1/profiles', { relation_type: 'SELF', name: userName || '나', health_survey: healthSurvey })
       }
       onClose()
     } catch (err) {
@@ -297,7 +297,7 @@ function MainPageContent() {
     const initPage = async () => {
       try {
         setIsLoading(true)
-        const profileRes = await api.get('/api/v1/profiles/')
+        const profileRes = await api.get('/api/v1/profiles')
         if (profileRes.data?.length > 0) {
           const self = profileRes.data.find(p => p.relation_type === 'SELF') || profileRes.data[0]
           setUserName(self.name.split('(')[0])

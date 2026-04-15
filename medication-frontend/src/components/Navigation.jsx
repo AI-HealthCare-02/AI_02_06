@@ -23,7 +23,7 @@ export default function Navigation() {
     if (isLanding || isAuthPage) return
     const fetchProfile = async () => {
       try {
-        const res = await api.get('/api/v1/profiles/')
+        const res = await api.get('/api/v1/profiles')
         if (res.data?.length > 0) {
           const self = res.data.find(p => p.relation_type === 'SELF') || res.data[0]
           setProfileId(self.id)
@@ -104,13 +104,13 @@ export default function Navigation() {
                   시작하기
                 </button>
               </>
-            ) : (
+            ) : (isAuthPage ? (<></>) : (
               <button onClick={() => setShowLogoutModal(true)}
               className="text-sm text-gray-500 hover:text-gray-900 transition-colors cursor-pointer px-3.5 py-1.5 hover:bg-gray-100 rounded-md flex items-center gap-1.5">
                 <LogOut size={15} />
                 로그아웃
               </button>
-            )}
+            ))}
           </div>
 
           {/* 모바일: 랜딩은 로그인 버튼, 앱 페이지는 표시 없음 (하단 네비게이션 사용) */}

@@ -29,7 +29,7 @@ export default function ChatModal({ onClose, profileId }) {
 
       try {
         // 1. 기존 세션 조회
-        const sessionsRes = await api.get('/api/v1/chat-sessions/', {
+        const sessionsRes = await api.get('/api/v1/chat-sessions', {
           params: { profile_id: profileId }
         })
 
@@ -53,7 +53,7 @@ export default function ChatModal({ onClose, profileId }) {
           }
         } else {
           // 3. 세션이 없으면 새로 생성
-          const newSessionRes = await api.post('/api/v1/chat-sessions/', {
+          const newSessionRes = await api.post('/api/v1/chat-sessions', {
             profile_id: profileId,
             title: '복약 상담'
           })

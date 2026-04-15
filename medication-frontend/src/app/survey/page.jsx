@@ -27,7 +27,7 @@ export default function SurveyPage() {
     const fetchData = async () => {
       try {
         // 프로필 목록 조회
-        const profileRes = await api.get('/api/v1/profiles/')
+        const profileRes = await api.get('/api/v1/profiles')
         const profiles = profileRes.data
 
         // SELF 프로필 찾기
@@ -81,7 +81,7 @@ export default function SurveyPage() {
   const createEmptyProfile = async () => {
     setIsSubmitting(true)
     try {
-      await api.post('/api/v1/profiles/', {
+      await api.post('/api/v1/profiles', {
         relation_type: 'SELF',
         name: '나',
         health_survey: null,
@@ -124,7 +124,7 @@ export default function SurveyPage() {
         })
       } else {
         // 새 프로필 생성
-        await api.post('/api/v1/profiles/', {
+        await api.post('/api/v1/profiles', {
           relation_type: 'SELF',
           name: accountNickname || '나',
           health_survey: healthSurvey,

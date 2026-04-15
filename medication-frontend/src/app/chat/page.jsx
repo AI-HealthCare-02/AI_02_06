@@ -15,7 +15,7 @@ export default function Navigation() {
   useEffect(() => {
     const fetchProfile = async () => {
       try {
-        const res = await api.get('/api/v1/profiles/')
+        const res = await api.get('/api/v1/profiles')
         if (res.data?.length > 0) {
           const self = res.data.find(p => p.relation_type === 'SELF') || res.data[0]
           setProfileId(self.id)
