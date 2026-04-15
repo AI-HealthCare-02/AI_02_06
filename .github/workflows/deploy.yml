@@ -69,21 +69,44 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
           script: |
-            cd ~/AI_02_06
+            set -e  # 에러 발생 시 즉시 중단
 
-            echo "=== Pulling latest code ==="
+            cd ~/AI_02_06
+            echo "=== Current directory: $(pwd) ==="
+
+            echo ""
+            echo "=== [1/5] Pulling latest code ==="
             git fetch origin main
             git reset --hard origin/main
+            echo "Current commit: $(git log -1 --oneline)"
 
-            echo "=== Building and restarting containers ==="
-            docker compose -f docker-compose.prod.yml down
-            docker compose -f docker-compose.prod.yml up -d --build
+            echo ""
+            echo "=== [2/5] Stopping existing containers ==="
+            docker compose -f docker-compose.prod.yml down || true
 
-            echo "=== Waiting for services to start ==="
-            sleep 30
+            echo ""
+            echo "=== [3/5] Building and starting containers ==="
+            docker compose -f docker-compose.prod.yml up -d --build 2>&1
 
-            echo "=== Checking container status ==="
+            echo ""
+            echo "=== [4/5] Waiting for services to start (45s) ==="
+            sleep 45
+
+            echo ""
+            echo "=== [5/5] Container Status ==="
             docker compose -f docker-compose.prod.yml ps
+
+            echo ""
+            echo "=== FastAPI Logs (last 20 lines) ==="
+            docker compose -f docker-compose.prod.yml logs fastapi --tail=20 || true
+
+            echo ""
+            echo "=== Nginx Logs (last 10 lines) ==="
+            docker compose -f docker-compose.prod.yml logs nginx --tail=10 || true
+
+            echo ""
+            echo "=== Internal Health Check ==="
+            docker exec nginx curl -sf http://fastapi:8000/api/v1/health && echo "FastAPI OK" || echo "FastAPI FAILED"
 
   # 3단계: Health Check
   health-check:
@@ -96,22 +119,34 @@ jobs:
         run: sleep 10
 
       - name: Check API Health
+        env:
+          DOMAIN: ai-02-06.duckdns.org
         run: |
-          echo "Checking API health..."
+          echo "Checking API health at https://${DOMAIN}/api/v1/health"
+          echo ""
           for i in 1 2 3 4 5; do
-            if curl -sf https://${{ secrets.EC2_HOST }}/api/v1/health; then
+            echo "--- Attempt $i/5 ---"
+            HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" https://${DOMAIN}/api/v1/health || echo "000")
+            echo "HTTP Status: $HTTP_CODE"
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "Response: $(cat /tmp/response.txt)"
               echo "Health check passed!"
               exit 0
+            else
+              echo "Response: $(cat /tmp/response.txt 2>/dev/null || echo 'No response')"
+              echo "Retrying in 10s..."
+              sleep 10
             fi
-            echo "Attempt $i failed, retrying in 10s..."
-            sleep 10
           done
+          echo ""
           echo "Health check failed after 5 attempts"
+          echo "Debug: Testing basic connectivity..."
+          curl -v https://${DOMAIN}/health 2>&1 | head -30 || true
           exit 1
 
       - name: Check Nginx Health
         run: |
-          curl -sf https://${{ secrets.EC2_HOST }}/health || exit 1
+          curl -sf https://ai-02-06.duckdns.org/health || exit 1
           echo "Nginx health check passed!"
 
   # 4단계: 배포 실패 시 알림 (선택사항)
