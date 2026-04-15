@@ -8,10 +8,10 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-import redis.asyncio as redis  # 비동기 레디스 클라이언트 추가
-import requests
+import httpx
+import redis.asyncio as redis
 from fastapi import UploadFile
-from openai import OpenAI, OpenAIError
+from openai import AsyncOpenAI, OpenAIError
 from pydantic import BaseModel
 
 from app.dtos.ocr import ConfirmMedicationRequest, ExtractedMedicine, OcrExtractResponse
@@ -29,7 +29,7 @@ class LlmExtractionResult(BaseModel):
     medicines: list[ExtractedMedicine]
 
 
-def _call_clova_ocr(image_path: Path) -> str:
+async def _call_clova_ocr(image_path: Path) -> str:
     invoke_url = os.environ.get("CLOVA_OCR_INVOKE_URL")
     secret_key = os.environ.get("CLOVA_OCR_SECRET_KEY")
     if not invoke_url or not secret_key:
@@ -43,12 +43,14 @@ def _call_clova_ocr(image_path: Path) -> str:
         "timestamp": int(round(time.time() * 1000)),
     }
     with open(image_path, "rb") as f:
-        response = requests.post(
+        image_data = f.read()
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(
             invoke_url,
             headers={"X-OCR-SECRET": secret_key},
             data={"message": json.dumps(request_json).encode("UTF-8")},
-            files=[("file", f)],
-            timeout=30,
+            files=[("file", (image_path.name, image_data))],
         )
     response.raise_for_status()
     fields = response.json()["images"][0]["fields"]
@@ -64,7 +66,7 @@ class OCRService:
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다.")
-        self.client = OpenAI(api_key=api_key)
+        self.client = AsyncOpenAI(api_key=api_key)
 
     async def extract_and_parse_image(self, file: UploadFile) -> OcrExtractResponse:
         # 1. 파일 임시 저장
@@ -73,13 +75,13 @@ class OCRService:
             shutil.copyfileobj(file.file, f)
 
         try:
-            # 2. Clova OCR 호출 (기존 _call_clova_ocr 함수 사용)
-            raw_ocr_text = _call_clova_ocr(image_path)
+            # 2. Clova OCR 호출
+            raw_ocr_text = await _call_clova_ocr(image_path)
             if not raw_ocr_text.strip():
                 raise ValueError("이미지에서 텍스트를 추출할 수 없습니다.")
 
             # 3. LLM을 사용한 구조화 데이터 파싱 (Structured Outputs 적용)
-            parsed_data = self._parse_text_with_llm(raw_ocr_text)
+            parsed_data = await self._parse_text_with_llm(raw_ocr_text)
 
             if not parsed_data.medicines:
                 raise ValueError("처방전에서 인식된 약 정보가 없습니다. 사진을 다시 찍어주세요.")
@@ -100,7 +102,7 @@ class OCRService:
         finally:
             image_path.unlink(missing_ok=True)
 
-    def _parse_text_with_llm(self, text: str) -> LlmExtractionResult:
+    async def _parse_text_with_llm(self, text: str) -> LlmExtractionResult:
         """OCR 원문 텍스트를 LLM에 전달하여 정형화된 JSON 데이터로 파싱합니다."""
         prompt = f"""
         당신은 의료 데이터 파싱 전문가입니다. 다음 처방전(또는 약봉투) OCR 텍스트에서
@@ -115,11 +117,10 @@ class OCRService:
         3. 알 수 없는 필드는 null로 비워두세요.
         """
         try:
-            # beta.chat.completions.parse를 사용하면 지정한 Pydantic 모델을 100% 보장하여 반환합니다.
-            response = self.client.beta.chat.completions.parse(
+            response = await self.client.beta.chat.completions.parse(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,  # 일관성을 위해 낮게 설정
+                temperature=0.1,
                 response_format=LlmExtractionResult,
             )
             return response.choices[0].message.parsed
@@ -165,7 +166,7 @@ class OCRService:
 
         # 3. LLM 기반 최종 복약 가이드 생성
         # DB JSON이 아니라 "사용자가 수정한 정확한 데이터"를 기반으로 작성합니다.
-        guide = self._generate_final_guide(request.confirmed_medicines)
+        guide = await self._generate_final_guide(request.confirmed_medicines)
 
         return {
             "status": "success",
@@ -173,7 +174,7 @@ class OCRService:
             "guide": guide,
         }
 
-    def _generate_final_guide(self, medicines: list[ExtractedMedicine]) -> str:
+    async def _generate_final_guide(self, medicines: list[ExtractedMedicine]) -> str:
         """확정된 약품 리스트를 바탕으로 LLM을 호출하여 복약 가이드를 문자열로 만듭니다."""
 
         medicines_text = "\n".join(
@@ -195,8 +196,8 @@ class OCRService:
            "⚠️ 이 안내는 참고용이며, 정확한 진단과 처방은 반드시 전문 의료인과 상의하십시오."
         """
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",  # 가이드 생성은 mini로도 충분히 훌륭합니다.
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
             )
