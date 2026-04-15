@@ -47,7 +47,7 @@ async def ask_message(
 
 
 @router.post(
-    "/",
+    "",
     response_model=MessageResponse,
     status_code=status.HTTP_201_CREATED,
     summary="메시지 전송",

@@ -26,7 +26,7 @@ CurrentAccount = Annotated[Account, Depends(get_current_account)]
 
 
 @router.post(
-    "/",
+    "",
     response_model=ProfileResponse,
     status_code=status.HTTP_201_CREATED,
     summary="프로필 생성",
@@ -58,7 +58,7 @@ async def get_profile(
 
 
 @router.get(
-    "/",
+    "",
     response_model=list[ProfileResponse],
     summary="프로필 목록 조회",
 )

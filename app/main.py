@@ -2,7 +2,6 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 from tortoise.exceptions import BaseORMException, DBConnectionError
 
 from app.apis.v1 import v1_routers
@@ -11,23 +10,12 @@ from app.db.databases import initialize_tortoise
 from app.middlewares.rate_limit import RateLimitMiddleware
 from app.middlewares.security import SecurityMiddleware
 
-
-class TrailingSlashMiddleware(BaseHTTPMiddleware):
-    """API 경로에 trailing slash 추가 (Next.js rewrites 호환)"""
-
-    async def dispatch(self, request: Request, call_next):
-        path = request.scope["path"]
-        # /api/v1/* 경로이고 trailing slash가 없으면 추가
-        if path.startswith("/api/v1/") and not path.endswith("/"):
-            request.scope["path"] = path + "/"
-        return await call_next(request)
-
-
 app = FastAPI(
     default_response_class=ORJSONResponse,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
+    redirect_slashes=False,  # Nginx에서 trailing slash 제거
 )
 
 
@@ -119,9 +107,6 @@ app.add_middleware(SecurityMiddleware)
 
 # Rate Limiting 미들웨어 (IP 기반)
 app.add_middleware(RateLimitMiddleware)
-
-# Trailing Slash 정규화 (Next.js rewrites 호환)
-app.add_middleware(TrailingSlashMiddleware)
 
 initialize_tortoise(app)
 

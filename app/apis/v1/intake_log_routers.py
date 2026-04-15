@@ -27,7 +27,7 @@ CurrentAccount = Annotated[Account, Depends(get_current_account)]
 
 
 @router.post(
-    "/",
+    "",
     response_model=IntakeLogResponse,
     status_code=status.HTTP_201_CREATED,
     summary="복용 기록 생성",
@@ -49,7 +49,7 @@ async def create_intake_log(
 
 
 @router.get(
-    "/",
+    "",
     response_model=list[IntakeLogResponse],
     summary="복용 기록 목록 조회",
 )

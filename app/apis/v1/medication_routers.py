@@ -26,7 +26,7 @@ CurrentAccount = Annotated[Account, Depends(get_current_account)]
 
 
 @router.post(
-    "/",
+    "",
     response_model=MedicationResponse,
     status_code=status.HTTP_201_CREATED,
     summary="약품 등록",
@@ -42,7 +42,7 @@ async def create_medication(
 
 
 @router.get(
-    "/",
+    "",
     response_model=list[MedicationResponse],
     summary="약품 목록 조회",
 )
