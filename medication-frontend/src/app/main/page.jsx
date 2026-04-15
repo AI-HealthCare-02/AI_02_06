@@ -81,7 +81,7 @@ function SurveyModal({ onClose, userName }) {
       age: parseInt(form.age) || null,
       gender: form.gender || null,
       height: parseInt(form.height) || null,
-      weight: parseInt(form.weight) || null,
+      weight: parseFloat(form.weight) || null,
       is_smoking: form.is_smoking,
       is_drinking: form.is_drinking,
       conditions: form.conditions.length > 0 ? form.conditions : null,
@@ -131,8 +131,12 @@ function SurveyModal({ onClose, userName }) {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-gray-400 text-xs font-bold mb-1.5 block">나이 *</label>
-                <input type="number" placeholder="세" value={form.age}
-                  onChange={(e) => setForm({...form, age: e.target.value})}
+                <input type="number" placeholder="세" min={1} max={120}
+                  value={form.age}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val === '' || (parseInt(val) >= 1 && parseInt(val) <= 120)) setForm({...form, age: val})
+                  }}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none bg-white" />
               </div>
               <div>
@@ -148,14 +152,22 @@ function SurveyModal({ onClose, userName }) {
               </div>
               <div>
                 <label className="text-gray-400 text-xs font-bold mb-1.5 block">키 (cm)</label>
-                <input type="number" placeholder="cm" value={form.height}
-                  onChange={(e) => setForm({...form, height: e.target.value})}
+                <input type="number" placeholder="cm" min={50} max={250}
+                  value={form.height}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val === '' || (parseInt(val) >= 50 && parseInt(val) <= 250)) setForm({...form, height: val})
+                  }}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none bg-white" />
               </div>
               <div>
                 <label className="text-gray-400 text-xs font-bold mb-1.5 block">몸무게 (kg)</label>
-                <input type="number" placeholder="kg" value={form.weight}
-                  onChange={(e) => setForm({...form, weight: e.target.value})}
+                <input type="number" placeholder="kg" min={1} max={300} step={0.1}
+                  value={form.weight}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val === '' || (parseFloat(val) >= 1 && parseFloat(val) <= 300)) setForm({...form, weight: val})
+                  }}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none bg-white" />
               </div>
             </div>
