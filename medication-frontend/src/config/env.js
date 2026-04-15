@@ -23,8 +23,9 @@ const ENV_CONFIG = {
     KAKAO_REDIRECT_URI: 'http://localhost:3000/auth/kakao/callback',
   },
   prod: {
-    // Prod: DuckDNS HTTPS 직접 호출 (Mixed Content 해결됨)
-    API_BASE_URL: 'https://ai-02-06.duckdns.org',
+    // Prod: Next.js rewrites 프록시 사용 (서드파티 쿠키 문제 해결)
+    // 실제 프록시 대상은 next.config.mjs의 API_BASE_URL 환경변수로 설정
+    API_BASE_URL: '',
     KAKAO_REDIRECT_URI: 'https://ai-02-06.vercel.app/auth/kakao/callback',
   },
 }
