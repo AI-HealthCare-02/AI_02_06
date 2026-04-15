@@ -1,23 +1,24 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // 이미지 최적화 설정
   images: {
     remotePatterns: [],
     unoptimized: false,
   },
 
-  // 🚀 API 프록시 설정 추가
+  // trailing slash 자동 리다이렉트 비활성화 (API 프록시 호환)
+  skipTrailingSlashRedirect: true,
+
+  // API 프록시: /api/* -> 백엔드 서버
+  // - local/dev: http://localhost:8000
+  // - prod: Vercel 환경변수 API_BASE_URL
   async rewrites() {
+    const apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:8000'
     return [
       {
-        // 프론트엔드(localhost:3000)에서 /api/v1/... 으로 요청을 보내면
-        source: '/api/v1/:path*',
-
-        // package.json의 dotenv가 읽어온 ../.env 의 주소로 몰래 전달해 줍니다!
-        // (만약 env에 값이 없다면 기본값인 로컬 8000번 포트로 보냅니다)
-        destination: `${process.env.API_BASE_URL || 'http://localhost:8000'}/api/v1/:path*`,
+        source: '/api/:path*',
+        destination: `${apiBaseUrl}/api/:path*`,
       },
-    ];
+    ]
   },
 }
 

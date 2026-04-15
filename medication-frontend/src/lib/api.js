@@ -1,25 +1,21 @@
 /**
- * API 클라이언트 설정
+ * API 클라이언트
  *
- * axios 인스턴스 생성 및 인터셉터 설정
- * RTR (Refresh Token Rotation) + Request Deduplication 지원
+ * - Next.js rewrites 프록시 사용 (baseURL='')
+ * - HttpOnly 쿠키 기반 인증
+ * - RTR (Refresh Token Rotation) 지원
  */
 
 import axios from 'axios'
 import { config } from '@/config/env'
 import { parseApiError, ERROR_CODE_MESSAGES, HTTP_STATUS_MESSAGES } from './errors'
 
-// 모든 API 요청의 기본 설정
-// - 모든 환경에서 Next.js rewrites 프록시 사용 (baseURL='')
-// - next.config.mjs가 /api/v1/* 요청을 백엔드로 프록시
 const api = axios.create({
   baseURL: config.API_BASE_URL,
-  withCredentials: true,  // 쿠키 자동 포함 (access_token, refresh_token)
-  timeout: 10000,         // 10초 타임아웃
+  withCredentials: true,
+  timeout: 10000,
 })
 
-// 요청 인터셉터: 기본 헤더 설정
-// access_token은 HttpOnly 쿠키로 자동 전송됨 (XSS 방지)
 api.interceptors.request.use(
   (config) => config,
   (error) => Promise.reject(error)

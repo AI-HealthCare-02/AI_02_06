@@ -219,8 +219,7 @@ async def kakao_callback(
         status_code=status.HTTP_200_OK,
     )
 
-    # Access Token을 HttpOnly 쿠키로 설정 (XSS 방지)
-    # Next.js rewrites 프록시를 사용하므로 동일 도메인 (SameSite=Lax 가능)
+    # Access Token (HttpOnly 쿠키)
     response.set_cookie(
         key="access_token",
         value=str(tokens["access_token"]),
@@ -231,7 +230,7 @@ async def kakao_callback(
         max_age=config.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
-    # Refresh token을 HttpOnly 쿠키로 설정
+    # Refresh Token (HttpOnly 쿠키)
     response.set_cookie(
         key="refresh_token",
         value=str(tokens["refresh_token"]),
