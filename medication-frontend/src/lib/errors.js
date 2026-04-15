@@ -1,10 +1,10 @@
 /**
- * API 에러 처리 모듈 (TypeScript 버전)
+ * API 에러 처리 모듈 (JavaScript 복구 버전)
  */
 
 import toast from 'react-hot-toast';
 
-export const HTTP_STATUS_MESSAGES: Record<number, string> = {
+export const HTTP_STATUS_MESSAGES = {
   400: '잘못된 요청입니다.',
   401: '인증이 필요합니다.',
   403: '접근 권한이 없습니다.',
@@ -15,7 +15,7 @@ export const HTTP_STATUS_MESSAGES: Record<number, string> = {
 
 const SERVER_ERROR_MESSAGE = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
 
-export const ERROR_CODE_MESSAGES: Record<string, string> = {
+export const ERROR_CODE_MESSAGES = {
   invalid_request: '잘못된 요청입니다.',
   account_disabled: '비활성화된 계정입니다. 고객센터에 문의해주세요.',
   rate_limit_exceeded: '요청 횟수를 초과했습니다. 잠시 후 다시 시도해주세요.',
@@ -36,21 +36,12 @@ export const ERROR_ACTIONS = {
   RETRYABLE: ['network_error', 'rate_limit_exceeded'],
 };
 
-export interface ParsedApiError {
-  status: number;
-  code: string | null;
-  message: string;
-  shouldRedirectToLogin: boolean;
-  isRetryable: boolean;
-  raw: any;
-}
-
-export function parseApiError(error: any): ParsedApiError {
+export function parseApiError(error) {
   const response = error.response;
   const status = response?.status;
   const data = response?.data;
 
-  const result: ParsedApiError = {
+  const result = {
     status: status || 0,
     code: null,
     message: '알 수 없는 오류가 발생했습니다.',
@@ -78,7 +69,7 @@ export function parseApiError(error: any): ParsedApiError {
     if (typeof detail === 'object') {
       result.code = detail.error || detail.error_code;
       result.message = detail.error_description
-        || ERROR_CODE_MESSAGES[result.code as string]
+        || ERROR_CODE_MESSAGES[result.code]
         || detail.msg
         || HTTP_STATUS_MESSAGES[status]
         || result.message;
@@ -101,11 +92,11 @@ export function parseApiError(error: any): ParsedApiError {
   return result;
 }
 
-export function showError(message: string) {
+export function showError(message) {
   toast.error(message);
 }
 
-export function handleApiError(error: any, options: { showMessage?: boolean; redirectOnAuth?: boolean } = {}) {
+export function handleApiError(error, options = {}) {
   const {
     showMessage = true,
     redirectOnAuth = true,
