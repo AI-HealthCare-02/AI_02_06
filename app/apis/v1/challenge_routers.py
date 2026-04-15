@@ -26,7 +26,7 @@ CurrentAccount = Annotated[Account, Depends(get_current_account)]
 
 
 @router.post(
-    "/",
+    "",
     response_model=ChallengeResponse,
     status_code=status.HTTP_201_CREATED,
     summary="챌린지 생성",
@@ -42,7 +42,7 @@ async def create_challenge(
 
 
 @router.get(
-    "/",
+    "",
     response_model=list[ChallengeResponse],
     summary="챌린지 목록 조회",
 )

@@ -26,7 +26,7 @@ CurrentAccount = Annotated[Account, Depends(get_current_account)]
 
 
 @router.post(
-    "/",
+    "",
     response_model=ChatSessionResponse,
     status_code=status.HTTP_201_CREATED,
     summary="채팅 세션 생성",
@@ -63,7 +63,7 @@ async def get_chat_session(
 
 
 @router.get(
-    "/",
+    "",
     response_model=list[ChatSessionResponse],
     summary="채팅 세션 목록 조회",
 )
