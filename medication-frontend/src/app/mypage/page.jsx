@@ -231,11 +231,11 @@ export default function MyPage() {
   const fetchData = async () => {
     try {
       setIsLoading(true)
-      const res = await api.get('/api/v1/profiles/')
+      const res = await api.get('/api/v1/profiles')
       const self = res.data.find(p => p.relation_type === 'SELF') || res.data[0]
       setUserProfile(self)
       setFamily(res.data.filter(p => p.relation_type !== 'SELF'))
-      const challengeRes = await api.get('/api/v1/challenges/')
+      const challengeRes = await api.get('/api/v1/challenges')
       setOngoingCount(challengeRes.data.length)
     } catch (err) { handleApiError(err) } finally { setIsLoading(false) }
   }
@@ -274,7 +274,7 @@ export default function MyPage() {
         await api.patch(`/api/v1/profiles/${selectedFamilyMember.id}`, newData)
         toast.success('가족 정보가 수정되었습니다.')
       } else {
-        await api.post('/api/v1/profiles/', { ...newData, account_id: userProfile.account_id, health_survey: {} })
+        await api.post('/api/v1/profiles', { ...newData, account_id: userProfile.account_id, health_survey: {} })
         toast.success('가족이 추가되었습니다.')
       }
       setModalType(null)

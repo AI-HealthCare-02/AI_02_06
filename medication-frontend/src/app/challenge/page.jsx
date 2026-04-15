@@ -83,7 +83,7 @@ export default function ChallengePage() {
     const fetchData = async () => {
       try {
         setIsLoading(true)
-        const profileRes = await api.get('/api/v1/profiles/')
+        const profileRes = await api.get('/api/v1/profiles')
         const profiles = profileRes.data
 
         if (!profiles || profiles.length === 0) {
@@ -94,7 +94,7 @@ export default function ChallengePage() {
         const selfProfile = profiles.find((p) => p.relation_type === 'SELF') || profiles[0]
         setProfileId(selfProfile.id)
 
-        const challengeRes = await api.get('/api/v1/challenges/')
+        const challengeRes = await api.get('/api/v1/challenges')
         const activeChallenges = challengeRes.data
           .filter((c) => c.challenge_status === 'IN_PROGRESS')
           .map((c) => ({
@@ -120,7 +120,7 @@ export default function ChallengePage() {
     setProcessingIds(prev => [...prev, template.id])
 
     try {
-      const response = await api.post('/api/v1/challenges/', {
+      const response = await api.post('/api/v1/challenges', {
         profile_id: profileId,
         title: template.title,
         description: template.desc,
