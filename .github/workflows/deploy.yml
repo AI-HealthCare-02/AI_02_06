@@ -99,7 +99,7 @@ jobs:
         run: |
           echo "Checking API health..."
           for i in 1 2 3 4 5; do
-            if curl -sf http://${{ secrets.EC2_HOST }}/api/v1/health; then
+            if curl -sf https://${{ secrets.EC2_HOST }}/api/v1/health; then
               echo "Health check passed!"
               exit 0
             fi
@@ -111,7 +111,7 @@ jobs:
 
       - name: Check Nginx Health
         run: |
-          curl -sf http://${{ secrets.EC2_HOST }}/health || exit 1
+          curl -sf https://${{ secrets.EC2_HOST }}/health || exit 1
           echo "Nginx health check passed!"
 
   # 4단계: 배포 실패 시 알림 (선택사항)
