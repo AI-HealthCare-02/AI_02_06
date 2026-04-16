@@ -1,8 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import Header from '../../components/Header'
-import api, { showError } from '../../lib/api'
+import Header from '@/components/layout/Header'
+import api, { showError } from '@/lib/api'
 
 export default function SurveyPage() {
   const router = useRouter()
