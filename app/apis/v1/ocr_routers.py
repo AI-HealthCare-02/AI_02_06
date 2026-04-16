@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 
 from app.dependencies.security import get_current_account
 from app.dtos.ocr import ConfirmMedicationRequest, OcrExtractResponse
@@ -71,6 +71,7 @@ async def get_draft_medication(draft_id: str, ocr_service: Annotated[OCRService,
 )
 async def confirm_and_save_medication(
     request: ConfirmMedicationRequest,
+    background_tasks: BackgroundTasks,
     ocr_service: Annotated[OCRService, Depends(get_ocr_service)],
     current_account: Annotated[Account, Depends(get_current_account)],
 ):
@@ -88,7 +89,7 @@ async def confirm_and_save_medication(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="연결된 본인 프로필 정보를 찾을 수 없습니다.")
 
     try:
-        result = await ocr_service.confirm_and_save(request, str(profile.id))
+        result = await ocr_service.confirm_and_save(request, str(profile.id), background_tasks)
         return result
     # except Exception as e:
     #     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 import redis.asyncio as redis
-from fastapi import UploadFile
+from fastapi import BackgroundTasks, UploadFile
 from openai import AsyncOpenAI, OpenAIError
 from pydantic import BaseModel
 
@@ -139,7 +139,7 @@ class OCRService:
             return OcrExtractResponse.model_validate_json(data_json)
         return None
 
-    async def confirm_and_save(self, request: ConfirmMedicationRequest, profile_id: str) -> dict[str, Any]:
+    async def confirm_and_save(self, request: ConfirmMedicationRequest, profile_id: str, background_tasks: BackgroundTasks) -> dict[str, Any]:
         """최종 데이터를 DB에 저장하고, 가이드를 생성한 뒤 Redis를 정리합니다."""
         saved_meds = []
 
@@ -173,14 +173,12 @@ class OCRService:
             )
             saved_meds.append(new_med)
 
-        # 3. LLM 기반 최종 복약 가이드 생성
-        # DB JSON이 아니라 "사용자가 수정한 정확한 데이터"를 기반으로 작성합니다.
-        guide = await self._generate_final_guide(request.confirmed_medicines)
+        # 3. LLM 복약 가이드 생성은 백그라운드에서 비동기 처리 (응답 블로킹 방지)
+        background_tasks.add_task(self._generate_final_guide, request.confirmed_medicines)
 
         return {
             "status": "success",
             "message": f"{len(saved_meds)}개의 약품이 성공적으로 저장되었습니다.",
-            "guide": guide,
         }
 
     async def _generate_final_guide(self, medicines: list[ExtractedMedicine]) -> str:
