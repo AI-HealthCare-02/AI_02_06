@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Trash2 } from 'lucide-react'
-import BottomNav from '@/components/BottomNav'
+import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
 
 // 로딩 스켈레톤 UI

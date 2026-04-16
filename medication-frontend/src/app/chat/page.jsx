@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Home, User, Camera, Trophy, ClipboardList, MessageCircle, X, Send } from 'lucide-react'
 import api from '@/lib/api'
-import ChatModal from '@/components/ChatModal'
+import ChatModal from '@/components/chat/ChatModal'
 
 export default function Navigation() {
   const router = useRouter()

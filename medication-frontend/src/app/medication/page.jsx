@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Pill, ChevronRight, Plus, Building2 } from 'lucide-react'
-import BottomNav from '@/components/BottomNav'
+import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
 
 function MedicationListSkeleton() {

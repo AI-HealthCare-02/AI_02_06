@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import api, { parseApiError, showError } from '../../lib/api'
+import api, { parseApiError, showError } from '@/lib/api'
 import { Pill } from 'lucide-react'
 
 // 환경 변수: local, dev, prod

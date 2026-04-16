@@ -1,9 +1,9 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import Header from '../../components/Header'
-import BottomNav from '../../components/BottomNav'
-import EmptyState from '../../components/EmptyState'
+import Header from '@/components/layout/Header'
+import BottomNav from '@/components/layout/BottomNav'
+import EmptyState from '@/components/common/EmptyState'
 import api, { showError } from '../../lib/api'
 import toast from 'react-hot-toast'
 
