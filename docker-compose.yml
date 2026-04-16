@@ -1,7 +1,7 @@
 services:
-  # 1. PostgreSQL (Database)
+  # 1. PostgreSQL (Database with pgvector)
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     container_name: postgres
     environment:
       POSTGRES_USER: ${DB_USER:-downforce_admin}
