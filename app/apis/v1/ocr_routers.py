@@ -1,3 +1,9 @@
+"""OCR API router module.
+
+This module contains HTTP endpoints for OCR (Optical Character Recognition)
+operations including image processing, medication extraction, and data confirmation.
+"""
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -10,14 +16,18 @@ from app.services.ocr_service import OCRService
 
 router = APIRouter(prefix="/ocr", tags=["AI Integration"])
 
-# 허용되는 이미지 MIME 타입
+# Allowed image MIME types
 ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"]
-# 최대 파일 크기 (5MB)
+# Maximum file size (5MB)
 MAX_FILE_SIZE = 5 * 1024 * 1024
 
 
 def get_ocr_service() -> OCRService:
-    """OCRService 의존성 주입을 위한 팩토리 함수"""
+    """Get OCR service instance for dependency injection.
+
+    Returns:
+        OCRService: OCR service instance.
+    """
     return OCRService()
 
 
@@ -25,85 +35,127 @@ def get_ocr_service() -> OCRService:
     "/extract",
     response_model=OcrExtractResponse,
     status_code=status.HTTP_200_OK,
-    summary="[PHASE 1] 처방전 이미지 추출 및 임시 저장",
+    summary="[PHASE 1] Extract prescription image and temporary storage",
 )
 async def extract_medication_from_image(
-    file: Annotated[UploadFile, File(description="인식할 처방전/약봉투 이미지")],
+    file: Annotated[UploadFile, File(description="Prescription/medicine bag image to recognize")],
     ocr_service: Annotated[OCRService, Depends(get_ocr_service)],
-):
-    """
-    이미지를 받아 OCR과 LLM을 거쳐 구조화된 데이터를 추출하고,
-    보안을 위해 결과를 Redis에 임시 저장한 뒤 draft_id를 반환합니다.
-    """
-    # 1. 파일 형식 검증 (기존 코드 유지)
-    if file.content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(status_code=400, detail="지원하지 않는 파일 형식입니다.")
+) -> OcrExtractResponse:
+    """Extract structured data from prescription image using OCR and LLM.
 
-    # 2. 파일 크기 검증 (에러 유발하는 seek(0, 2)와 tell() 삭제)
-    # FastAPI의 UploadFile은 .size 속성을 통해 크기를 직접 제공합니다.
+    Processes the image through OCR and LLM pipeline to extract structured data,
+    then temporarily stores the result in Redis for security and returns a draft_id.
+
+    Args:
+        file: Uploaded prescription or medicine bag image file.
+        ocr_service: OCR service instance.
+
+    Returns:
+        OcrExtractResponse: Extracted medication data with draft_id.
+
+    Raises:
+        HTTPException: If file format unsupported, file too large, or processing fails.
+    """
+    # Validate file format
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported file format.")
+
+    # Validate file size
+    # FastAPI's UploadFile provides size directly via .size attribute
     if file.size > MAX_FILE_SIZE:
         raise HTTPException(
-            status_code=413, detail=f"파일 크기가 너무 큽니다. (최대: {MAX_FILE_SIZE // (1024 * 1024)}MB)"
+            status_code=413,
+            detail=f"File size too large. (Max: {MAX_FILE_SIZE // (1024 * 1024)}MB)",
         )
 
-    # 💡 중요: 분석 전 파일 포인터를 맨 앞으로 초기화 (인자 하나만 전달)
+    # Reset file pointer to beginning before analysis
     await file.seek(0)
 
     try:
-        # 서비스 호출
+        # Call service
         result = await ocr_service.extract_and_parse_image(file)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.get("/draft/{draft_id}", response_model=OcrExtractResponse, summary="임시 저장된 처방전 데이터 조회")
-async def get_draft_medication(draft_id: str, ocr_service: Annotated[OCRService, Depends(get_ocr_service)]):
-    """프론트엔드 결과 페이지에서 draft_id를 통해 데이터를 안전하게 불러옵니다."""
+@router.get(
+    "/draft/{draft_id}",
+    response_model=OcrExtractResponse,
+    summary="Get temporarily stored prescription data",
+)
+async def get_draft_medication(
+    draft_id: str,
+    ocr_service: Annotated[OCRService, Depends(get_ocr_service)],
+) -> OcrExtractResponse:
+    """Safely retrieve data from frontend result page using draft_id.
+
+    Args:
+        draft_id: Draft ID for temporarily stored data.
+        ocr_service: OCR service instance.
+
+    Returns:
+        OcrExtractResponse: Retrieved prescription data.
+
+    Raises:
+        HTTPException: If draft data expired or not found.
+    """
     draft_data = await ocr_service.get_draft_data(draft_id)
     if not draft_data:
-        raise HTTPException(status_code=404, detail="만료되었거나 존재하지 않는 데이터입니다.")
+        raise HTTPException(status_code=404, detail="Expired or non-existent data.")
     return draft_data
 
 
 @router.post(
-    "/confirm", status_code=status.HTTP_201_CREATED, summary="[PHASE 3] 수정된 처방전 데이터 DB 저장 및 가이드 생성"
+    "/confirm",
+    status_code=status.HTTP_201_CREATED,
+    summary="[PHASE 3] Save modified prescription data to DB and generate guide",
 )
 async def confirm_and_save_medication(
     request: ConfirmMedicationRequest,
     ocr_service: Annotated[OCRService, Depends(get_ocr_service)],
     current_account: Annotated[Account, Depends(get_current_account)],
-):
-    """
-    프론트엔드에서 최종 확정한 약품 리스트를 받아 DB에 저장하고,
-    완성된 복약 가이드를 반환합니다.
-    """
+) -> dict:
+    """Save finalized medication list from frontend to DB and return medication guide.
 
-    # 💡 로그인한 계정의 '본인(SELF)' 프로필 조회
+    Args:
+        request: Confirmation request with finalized medication data.
+        ocr_service: OCR service instance.
+        current_account: Current authenticated account.
+
+    Returns:
+        dict: Response with saved medications and generated guide.
+
+    Raises:
+        HTTPException: If user profile not found or processing fails.
+    """
+    # Find logged-in account's 'SELF' profile
     profile = await Profile.filter(
-        account_id=current_account.id, relation_type=RelationType.SELF, deleted_at__isnull=True
+        account_id=current_account.id,
+        relation_type=RelationType.SELF,
+        deleted_at__isnull=True,
     ).first()
 
     if not profile:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="연결된 본인 프로필 정보를 찾을 수 없습니다.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Connected user profile information not found.",
+        )
 
     try:
         result = await ocr_service.confirm_and_save(request, str(profile.id))
         return result
-    # except Exception as e:
-    #     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
     except Exception as e:
-        # ✅ 터미널에 에러 전체 내용을 빨간 글씨로 다 찍어버립니다.
+        # Print full error details to terminal in red
         import traceback
 
         print("\n" + "=" * 50)
-        print("🚨 백엔드 500 에러 발생! 상세 로그:")
+        print("🚨 Backend 500 error occurred! Detailed log:")
         traceback.print_exc()
         print("=" * 50 + "\n")
 
-        # ✅ 프론트엔드 응답(Network 탭)에도 상세 내용을 실어 보냅니다.
+        # Send detailed content to frontend response (Network tab)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Backend Error: {str(e)} | Trace: {traceback.format_exc()}",
+            detail=f"Backend Error: {e!s} | Trace: {traceback.format_exc()}",
         ) from e

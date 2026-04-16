@@ -1,10 +1,19 @@
+"""Database configuration module.
+
+This module contains Tortoise ORM configuration and initialization
+for the FastAPI application with modern Python patterns.
+"""
+
+from typing import Any
+
 from fastapi import FastAPI
 from tortoise import Tortoise
 from tortoise.contrib.fastapi import register_tortoise
 
 from app.core import config
 
-TORTOISE_APP_MODELS = [
+# Tortoise ORM model modules
+TORTOISE_APP_MODELS: list[str] = [
     "aerich.models",
     "app.models.accounts",
     "app.models.refresh_tokens",
@@ -19,7 +28,8 @@ TORTOISE_APP_MODELS = [
     "app.models.llm_response_cache",
 ]
 
-TORTOISE_ORM = {
+# Tortoise ORM configuration
+TORTOISE_ORM: dict[str, Any] = {
     "connections": {
         "default": {
             "engine": "tortoise.backends.asyncpg",
@@ -44,5 +54,13 @@ TORTOISE_ORM = {
 
 
 def initialize_tortoise(app: FastAPI) -> None:
+    """Initialize Tortoise ORM with FastAPI application.
+
+    Sets up database models and registers Tortoise ORM with the FastAPI app
+    for automatic connection management and lifecycle handling.
+
+    Args:
+        app: FastAPI application instance to register with.
+    """
     Tortoise.init_models(TORTOISE_APP_MODELS, "models")
     register_tortoise(app, config=TORTOISE_ORM)

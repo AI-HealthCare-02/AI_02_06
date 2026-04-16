@@ -1,3 +1,9 @@
+"""Chat session DTO models module.
+
+This module contains data transfer objects for chat session operations
+including creation and response serialization.
+"""
+
 from datetime import datetime
 from uuid import UUID
 
@@ -5,19 +11,31 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChatSessionCreate(BaseModel):
-    profile_id: UUID = Field(..., description="연결된 프로필 ID")
-    medication_id: UUID | None = Field(None, description="특정 약품 관련 상담 시 약품 ID")
-    title: str | None = Field(None, max_length=64, description="세션 제목")
+    """Chat session creation request model.
+
+    Used for creating new chat sessions with optional
+    medication-specific consultation context.
+    """
+
+    profile_id: UUID = Field(..., description="Connected profile ID")
+    medication_id: UUID | None = Field(None, description="Specific medication ID for medication-related consultation")
+    title: str | None = Field(None, max_length=64, description="Session title")
 
 
 class ChatSessionResponse(BaseModel):
+    """Chat session response model.
+
+    Used for serializing chat session data in API responses.
+    Includes all session fields and metadata.
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID = Field(..., description="세션 고유 ID")
-    account_id: UUID = Field(..., description="연결된 계정 ID")
-    profile_id: UUID = Field(..., description="연결된 프로필 ID")
-    medication_id: UUID | None = Field(None, description="연결된 약품 ID")
-    title: str | None = Field(None, description="세션 제목")
-    created_at: datetime = Field(..., description="생성 일시")
-    updated_at: datetime = Field(..., description="수정 일시")
-    deleted_at: datetime | None = Field(None, description="삭제 일시")
+    id: UUID = Field(..., description="Session unique ID")
+    account_id: UUID = Field(..., description="Connected account ID")
+    profile_id: UUID = Field(..., description="Connected profile ID")
+    medication_id: UUID | None = Field(None, description="Connected medication ID")
+    title: str | None = Field(None, description="Session title")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
+    deleted_at: datetime | None = Field(None, description="Deletion timestamp")

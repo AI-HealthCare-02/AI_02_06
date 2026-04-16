@@ -1,3 +1,9 @@
+"""FastAPI application main module.
+
+This module contains the FastAPI application setup, middleware configuration,
+and global exception handlers.
+"""
+
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,16 +21,26 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
-    redirect_slashes=False,  # Nginx에서 trailing slash 제거
+    redirect_slashes=False,  # Nginx handles trailing slash removal
 )
 
 
-# --- 전역 예외 처리기 (Global Exception Handlers) ---
+# Global exception handlers
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Pydantic 유효성 검사 에러 처리 (422 -> 400으로 통일하거나 상세 에러 반환)"""
+async def validation_exception_handler(_request: Request, exc: RequestValidationError) -> ORJSONResponse:
+    """Handle Pydantic validation errors.
+
+    Converts 422 validation errors to 400 bad request with detailed error info.
+
+    Args:
+        request: The incoming request.
+        exc: The validation exception.
+
+    Returns:
+        ORJSONResponse: Error response with validation details.
+    """
     return ORJSONResponse(
         status_code=status.HTTP_400_BAD_REQUEST,
         content={
@@ -36,8 +52,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 @app.exception_handler(DBConnectionError)
-async def db_connection_exception_handler(request: Request, exc: DBConnectionError):
-    """DB 연결 실패 에러 처리 (503 Service Unavailable)"""
+async def db_connection_exception_handler(_request: Request, _exc: DBConnectionError) -> ORJSONResponse:
+    """Handle database connection errors.
+
+    Args:
+        request: The incoming request.
+        exc: The database connection exception.
+
+    Returns:
+        ORJSONResponse: 503 Service Unavailable response.
+    """
     return ORJSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={
@@ -48,8 +72,16 @@ async def db_connection_exception_handler(request: Request, exc: DBConnectionErr
 
 
 @app.exception_handler(BaseORMException)
-async def orm_exception_handler(request: Request, exc: BaseORMException):
-    """기타 Tortoise ORM 에러 처리 (500 Internal Server Error)"""
+async def orm_exception_handler(_request: Request, exc: BaseORMException) -> ORJSONResponse:
+    """Handle other Tortoise ORM errors.
+
+    Args:
+        request: The incoming request.
+        exc: The ORM exception.
+
+    Returns:
+        ORJSONResponse: 500 Internal Server Error response.
+    """
     return ORJSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
@@ -61,12 +93,21 @@ async def orm_exception_handler(request: Request, exc: BaseORMException):
 
 
 @app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    """예기치 못한 모든 에러 처리 (500 Internal Server Error)"""
+async def general_exception_handler(request: Request, exc: Exception) -> ORJSONResponse:
+    """Handle all unexpected errors.
+
+    Args:
+        request: The incoming request.
+        exc: The general exception.
+
+    Returns:
+        ORJSONResponse: 500 Internal Server Error response.
+    """
     import traceback
 
     print(f"[ERROR] {request.method} {request.url.path}: {type(exc).__name__}: {exc}")
     traceback.print_exc()
+
     return ORJSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
@@ -76,42 +117,44 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 
-# --- 미들웨어 설정 ---
+# Middleware configuration
 
-# CORS 설정 (환경별 분기)
-# localhost는 로컬 머신에서만 접근 가능하므로 모든 환경에서 허용해도 보안상 안전
-_localhost_origins = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost", "http://localhost:80"]
+# CORS settings (environment-specific)
+# localhost is only accessible from local machine, so it's safe to allow in all environments
+_LOCALHOST_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost", "http://localhost:80"]
 
 if config.ENV == Env.PROD:
-    # 운영 환경: Vercel + localhost (로컬 prod 테스트용)
-    cors_origins = [config.FRONTEND_URL] + _localhost_origins
+    # Production environment: Vercel + localhost (for local prod testing)
+    cors_origins = [config.FRONTEND_URL, *_LOCALHOST_ORIGINS]
     cors_methods = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
     cors_headers = ["Content-Type", "Authorization"]
 elif config.ENV == Env.DEV:
-    # 개발/테스트 환경: Vercel Preview + localhost 허용
-    cors_origins = [config.FRONTEND_URL] + _localhost_origins
+    # Development/test environment: Vercel Preview + localhost allowed
+    cors_origins = [config.FRONTEND_URL, *_LOCALHOST_ORIGINS]
     cors_methods = ["*"]
     cors_headers = ["*"]
 else:
-    # 로컬 환경: localhost만
-    cors_origins = _localhost_origins
+    # Local environment: localhost only
+    cors_origins = _LOCALHOST_ORIGINS
     cors_methods = ["*"]
     cors_headers = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_credentials=True,  # 쿠키(refresh_token) 전송 허용
+    allow_credentials=True,  # Allow cookies (refresh_token) transmission
     allow_methods=cors_methods,
     allow_headers=cors_headers,
 )
 
-# 보안 미들웨어 (입력값 검증 + 보안 헤더)
+# Security middleware (input validation + security headers)
 app.add_middleware(SecurityMiddleware)
 
-# Rate Limiting 미들웨어 (IP 기반)
+# Rate limiting middleware (IP-based)
 app.add_middleware(RateLimitMiddleware)
 
+# Initialize database
 initialize_tortoise(app)
 
+# Include API routers
 app.include_router(v1_routers)

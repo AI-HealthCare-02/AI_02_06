@@ -1,7 +1,29 @@
+"""Chat session model module.
+
+This module defines the ChatSession model for storing chat conversation sessions
+between users and the AI assistant.
+"""
+
 from tortoise import fields, models
 
 
 class ChatSession(models.Model):
+    """Chat session model for storing conversation sessions.
+
+    This model stores chat session information linking accounts, profiles,
+    and optional medications to conversation threads.
+
+    Attributes:
+        id: Primary key UUID.
+        account: Foreign key to Account model.
+        profile: Foreign key to Profile model.
+        medication: Optional foreign key to Medication model.
+        title: Optional session title.
+        created_at: Session creation timestamp.
+        updated_at: Last update timestamp.
+        deleted_at: Soft deletion timestamp.
+    """
+
     id = fields.UUIDField(pk=True)
     account = fields.ForeignKeyField("models.Account", related_name="chat_sessions")
     profile = fields.ForeignKeyField("models.Profile", related_name="chat_sessions")

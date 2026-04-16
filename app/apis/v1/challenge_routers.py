@@ -1,7 +1,7 @@
-"""
-Challenge Router
+"""Challenge API router module.
 
-챌린지 관련 HTTP 엔드포인트
+This module contains HTTP endpoints for challenge-related operations
+including creating, reading, updating, and deleting challenges.
 """
 
 from typing import Annotated
@@ -18,9 +18,15 @@ router = APIRouter(prefix="/challenges", tags=["Challenges"])
 
 
 def get_challenge_service() -> ChallengeService:
+    """Get challenge service instance.
+
+    Returns:
+        ChallengeService: Challenge service instance.
+    """
     return ChallengeService()
 
 
+# Type aliases for dependency injection
 ChallengeServiceDep = Annotated[ChallengeService, Depends(get_challenge_service)]
 CurrentAccount = Annotated[Account, Depends(get_current_account)]
 
@@ -29,14 +35,23 @@ CurrentAccount = Annotated[Account, Depends(get_current_account)]
     "",
     response_model=ChallengeResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="챌린지 생성",
+    summary="Create challenge",
 )
 async def create_challenge(
     data: ChallengeCreate,
     current_account: CurrentAccount,
     service: ChallengeServiceDep,
-):
-    """새로운 챌린지를 생성합니다."""
+) -> ChallengeResponse:
+    """Create a new challenge.
+
+    Args:
+        data: Challenge creation data.
+        current_account: Current authenticated account.
+        service: Challenge service instance.
+
+    Returns:
+        ChallengeResponse: Created challenge information.
+    """
     challenge = await service.create_challenge_with_owner_check(data.profile_id, current_account.id, data)
     return ChallengeResponse.model_validate(challenge)
 
@@ -44,15 +59,25 @@ async def create_challenge(
 @router.get(
     "",
     response_model=list[ChallengeResponse],
-    summary="챌린지 목록 조회",
+    summary="List challenges",
 )
 async def list_challenges(
     current_account: CurrentAccount,
     service: ChallengeServiceDep,
     profile_id: UUID | None = None,
     active_only: bool = False,
-):
-    """챌린지 목록을 조회합니다. 프로필 ID로 필터링이 가능합니다."""
+) -> list[ChallengeResponse]:
+    """List challenges with optional filtering.
+
+    Args:
+        current_account: Current authenticated account.
+        service: Challenge service instance.
+        profile_id: Optional profile ID to filter by.
+        active_only: Whether to return only active challenges.
+
+    Returns:
+        List[ChallengeResponse]: List of challenges.
+    """
     if profile_id:
         if active_only:
             challenges = await service.get_active_challenges_with_owner_check(profile_id, current_account.id)
@@ -60,20 +85,30 @@ async def list_challenges(
             challenges = await service.get_challenges_by_profile_with_owner_check(profile_id, current_account.id)
     else:
         challenges = await service.get_challenges_by_account(current_account.id)
+
     return [ChallengeResponse.model_validate(c) for c in challenges]
 
 
 @router.get(
     "/{challenge_id}",
     response_model=ChallengeResponse,
-    summary="챌린지 상세 조회",
+    summary="Get challenge details",
 )
 async def get_challenge(
     challenge_id: UUID,
     current_account: CurrentAccount,
     service: ChallengeServiceDep,
-):
-    """특정 챌린지의 상세 정보를 조회합니다."""
+) -> ChallengeResponse:
+    """Get detailed information about a specific challenge.
+
+    Args:
+        challenge_id: Challenge ID to retrieve.
+        current_account: Current authenticated account.
+        service: Challenge service instance.
+
+    Returns:
+        ChallengeResponse: Challenge details.
+    """
     challenge = await service.get_challenge_with_owner_check(challenge_id, current_account.id)
     return ChallengeResponse.model_validate(challenge)
 
@@ -81,15 +116,25 @@ async def get_challenge(
 @router.patch(
     "/{challenge_id}",
     response_model=ChallengeResponse,
-    summary="챌린지 수정",
+    summary="Update challenge",
 )
 async def update_challenge(
     challenge_id: UUID,
     data: ChallengeUpdate,
     current_account: CurrentAccount,
     service: ChallengeServiceDep,
-):
-    """챌린지 정보를 수정합니다."""
+) -> ChallengeResponse:
+    """Update challenge information.
+
+    Args:
+        challenge_id: Challenge ID to update.
+        data: Challenge update data.
+        current_account: Current authenticated account.
+        service: Challenge service instance.
+
+    Returns:
+        ChallengeResponse: Updated challenge information.
+    """
     challenge = await service.update_challenge_with_owner_check(challenge_id, current_account.id, data)
     return ChallengeResponse.model_validate(challenge)
 
@@ -97,13 +142,18 @@ async def update_challenge(
 @router.delete(
     "/{challenge_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="챌린지 삭제",
+    summary="Delete challenge",
 )
 async def delete_challenge(
     challenge_id: UUID,
     current_account: CurrentAccount,
     service: ChallengeServiceDep,
-):
-    """챌린지를 삭제합니다."""
+) -> None:
+    """Delete a challenge.
+
+    Args:
+        challenge_id: Challenge ID to delete.
+        current_account: Current authenticated account.
+        service: Challenge service instance.
+    """
     await service.delete_challenge_with_owner_check(challenge_id, current_account.id)
-    return None

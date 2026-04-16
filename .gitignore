@@ -22,6 +22,7 @@ envs/.prod.env
 .claude/
 .ruff_cache/
 .pytest_cache/
+.amazonq/
 
 # 로그 및 임시 파일
 *.log

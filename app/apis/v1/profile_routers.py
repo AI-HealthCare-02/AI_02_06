@@ -1,7 +1,7 @@
-"""
-Profile Router
+"""Profile API router module.
 
-프로필 관련 HTTP 엔드포인트
+This module contains HTTP endpoints for user profile operations
+including creating, reading, updating, and deleting profiles.
 """
 
 from typing import Annotated
@@ -18,9 +18,15 @@ router = APIRouter(prefix="/profiles", tags=["Profiles"])
 
 
 def get_profile_service() -> ProfileService:
+    """Get profile service instance.
+
+    Returns:
+        ProfileService: Profile service instance.
+    """
     return ProfileService()
 
 
+# Type aliases for dependency injection
 ProfileServiceDep = Annotated[ProfileService, Depends(get_profile_service)]
 CurrentAccount = Annotated[Account, Depends(get_current_account)]
 
@@ -29,15 +35,24 @@ CurrentAccount = Annotated[Account, Depends(get_current_account)]
     "",
     response_model=ProfileResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="프로필 생성",
+    summary="Create profile",
 )
 async def create_profile(
     data: ProfileCreate,
     current_account: CurrentAccount,
     service: ProfileServiceDep,
-):
-    """새로운 사용자 프로필을 생성합니다."""
-    # 인증된 계정 ID를 사용 (요청 body의 account_id 무시)
+) -> ProfileResponse:
+    """Create a new user profile.
+
+    Args:
+        data: Profile creation data.
+        current_account: Current authenticated account.
+        service: Profile service instance.
+
+    Returns:
+        ProfileResponse: Created profile information.
+    """
+    # Use authenticated account ID (ignore account_id from request body)
     profile = await service.create_profile(current_account.id, data)
     return ProfileResponse.model_validate(profile)
 
@@ -45,14 +60,23 @@ async def create_profile(
 @router.get(
     "/{profile_id}",
     response_model=ProfileResponse,
-    summary="프로필 상세 조회",
+    summary="Get profile details",
 )
 async def get_profile(
     profile_id: UUID,
     current_account: CurrentAccount,
     service: ProfileServiceDep,
-):
-    """특정 프로필의 상세 정보를 조회합니다."""
+) -> ProfileResponse:
+    """Get detailed information about a specific profile.
+
+    Args:
+        profile_id: Profile ID to retrieve.
+        current_account: Current authenticated account.
+        service: Profile service instance.
+
+    Returns:
+        ProfileResponse: Profile details.
+    """
     profile = await service.get_profile_with_owner_check(profile_id, current_account.id)
     return ProfileResponse.model_validate(profile)
 
@@ -60,13 +84,21 @@ async def get_profile(
 @router.get(
     "",
     response_model=list[ProfileResponse],
-    summary="프로필 목록 조회",
+    summary="List profiles",
 )
 async def list_profiles(
     current_account: CurrentAccount,
     service: ProfileServiceDep,
-):
-    """현재 계정의 모든 프로필 목록을 조회합니다."""
+) -> list[ProfileResponse]:
+    """Get all profile list for the current account.
+
+    Args:
+        current_account: Current authenticated account.
+        service: Profile service instance.
+
+    Returns:
+        List[ProfileResponse]: List of profiles for the account.
+    """
     profiles = await service.get_profiles_by_account(current_account.id)
     return [ProfileResponse.model_validate(p) for p in profiles]
 
@@ -74,15 +106,25 @@ async def list_profiles(
 @router.patch(
     "/{profile_id}",
     response_model=ProfileResponse,
-    summary="프로필 수정",
+    summary="Update profile",
 )
 async def update_profile(
     profile_id: UUID,
     data: ProfileUpdate,
     current_account: CurrentAccount,
     service: ProfileServiceDep,
-):
-    """프로필 정보를 수정합니다."""
+) -> ProfileResponse:
+    """Update profile information.
+
+    Args:
+        profile_id: Profile ID to update.
+        data: Profile update data.
+        current_account: Current authenticated account.
+        service: Profile service instance.
+
+    Returns:
+        ProfileResponse: Updated profile information.
+    """
     profile = await service.update_profile_with_owner_check(profile_id, current_account.id, data)
     return ProfileResponse.model_validate(profile)
 
@@ -90,13 +132,18 @@ async def update_profile(
 @router.delete(
     "/{profile_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="프로필 삭제",
+    summary="Delete profile",
 )
 async def delete_profile(
     profile_id: UUID,
     current_account: CurrentAccount,
     service: ProfileServiceDep,
-):
-    """프로필을 삭제합니다."""
+) -> None:
+    """Delete a profile.
+
+    Args:
+        profile_id: Profile ID to delete.
+        current_account: Current authenticated account.
+        service: Profile service instance.
+    """
     await service.delete_profile_with_owner_check(profile_id, current_account.id)
-    return None

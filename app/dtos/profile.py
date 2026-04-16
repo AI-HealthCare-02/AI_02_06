@@ -1,3 +1,9 @@
+"""Profile DTO models module.
+
+This module contains data transfer objects for user profile operations
+including creation, updates, and response serialization.
+"""
+
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -8,26 +14,50 @@ from app.models.profiles import RelationType
 
 
 class BaseProfile(BaseModel):
-    relation_type: RelationType = Field(..., description="관계 유형 (SELF, PARENT, CHILD, SPOUSE, OTHER)")
-    name: str = Field(..., max_length=32, description="프로필 이름")
-    health_survey: dict[str, Any] | None = Field(default=None, description="건강 설문 결과 (JSON)")
+    """Base profile model with common fields.
+
+    Provides shared fields for profile operations
+    including relationship type and health survey data.
+    """
+
+    relation_type: RelationType = Field(..., description="Relationship type (SELF, PARENT, CHILD, SPOUSE, OTHER)")
+    name: str = Field(..., max_length=32, description="Profile name")
+    health_survey: dict[str, Any] | None = Field(default=None, description="Health survey results (JSON)")
 
 
 class ProfileCreate(BaseProfile):
-    account_id: UUID | None = Field(None, description="연결된 계정 ID (BE에서 자동 설정됨)")
+    """Profile creation request model.
+
+    Used for creating new user profiles.
+    Account ID is automatically set by backend.
+    """
+
+    account_id: UUID | None = Field(None, description="Connected account ID (automatically set by backend)")
 
 
 class ProfileUpdate(BaseModel):
-    relation_type: RelationType | None = Field(None, description="관계 유형")
-    name: str | None = Field(None, max_length=32, description="프로필 이름")
-    health_survey: dict[str, Any] | None = Field(None, description="건강 설문 결과")
+    """Profile update request model.
+
+    Used for partial updates to existing profiles.
+    All fields are optional for flexible updates.
+    """
+
+    relation_type: RelationType | None = Field(None, description="Relationship type")
+    name: str | None = Field(None, max_length=32, description="Profile name")
+    health_survey: dict[str, Any] | None = Field(None, description="Health survey results")
 
 
 class ProfileResponse(BaseProfile):
+    """Profile response model.
+
+    Used for serializing profile data in API responses.
+    Includes all profile fields and metadata.
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID = Field(..., description="프로필 고유 ID")
-    account_id: UUID = Field(..., description="연결된 계정 ID")
-    created_at: datetime = Field(..., description="생성 일시")
-    updated_at: datetime = Field(..., description="수정 일시")
-    deleted_at: datetime | None = Field(None, description="삭제 일시")
+    id: UUID = Field(..., description="Profile unique ID")
+    account_id: UUID = Field(..., description="Connected account ID")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
+    deleted_at: datetime | None = Field(None, description="Deletion timestamp")

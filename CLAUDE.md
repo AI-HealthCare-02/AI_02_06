@@ -5,7 +5,7 @@
 ## 1. 프로젝트 정체성 및 목적
 - **서비스 명칭**: Downforce
 - **핵심 가치**: 복잡한 복약 데이터를 체계적으로 관리하여 환자의 안전한 약물 복용을 돕는 전용 백엔드 시스템
-- **서비스 목적성**: 
+- **서비스 목적성**:
     - 처방전 데이터의 디지털 전환 및 복약 일정 자동화
     - 약물 간 상호작용(DUR 등) 분석을 통한 안전성 확보
     - 보호자가 피보호자의 건강 상태를 실시간으로 모니터링할 수 있는 환경 제공
@@ -63,10 +63,80 @@ ERD 마스터 문서: `docs/db_schema.dbml` 참조
 - **에러 핸들링**: 401(미인증), 403(권한 부족/PIN 미인증 포함) 등 표준 HTTP 상태 코드를 준수함
 - **Aerich 운영**: 모델 수정 후 반드시 `aerich migrate`를 통해 마이그레이션 파일을 생성하고 DB를 동기화함
 
+### Python 코딩 스타일 가이드 (PEP 8 + Google Style Guide)
+이 프로젝트는 **PEP 8**과 **Google Python Style Guide**를 엄격히 준수합니다.
+
+#### 필수 규칙:
+1. **모듈 독스트링**: 모든 Python 파일 상단에 Google 스타일 독스트링 필수
+2. **함수/클래스 독스트링**: Args, Returns, Raises 섹션 포함
+3. **타입 힌트**: 모든 함수 매개변수와 반환값에 타입 힌트 필수
+   - `Optional[T]` 사용 (Python 3.9 호환성)
+   - `List[T]`, `Dict[K, V]` 사용 (`list[T]`, `dict[K, V]` 금지)
+4. **임포트 순서**: 표준 라이브러리 → 서드파티 → 로컬 (각 그룹 사이 빈 줄)
+5. **라인 길이**: 최대 120자
+6. **변수명**: snake_case (함수, 변수), PascalCase (클래스), UPPER_CASE (상수)
+7. **주석**: 영어로 작성, WHY를 설명 (WHAT이 아닌)
+
+#### 예시:
+```python
+"""User authentication module.
+
+This module provides authentication and authorization functionality
+for the application, including login, logout, and session management.
+"""
+
+import hashlib
+from typing import Dict, List, Optional
+
+from fastapi import HTTPException
+
+from app.core.config import config
+
+
+class AuthManager:
+    """Handles user authentication operations.
+
+    This class provides methods for user registration, authentication,
+    and profile management.
+    """
+
+    def __init__(self, database_url: str) -> None:
+        """Initialize auth manager with database connection.
+
+        Args:
+            database_url: Database connection URL.
+        """
+        self._db_url = database_url
+
+    def validate_email(self, email: str) -> bool:
+        """Validate email address format.
+
+        Args:
+            email: Email address to validate.
+
+        Returns:
+            True if email format is valid, False otherwise.
+
+        Raises:
+            ValueError: If email is empty or None.
+        """
+        if not email:
+            raise ValueError("Email cannot be empty")
+        # Implementation here
+        return True
+```
+
+#### 도구 설정:
+- **Ruff**: 린팅 및 포맷팅 (`pyproject.toml` 설정 참조)
+- **MyPy**: 타입 체킹
+- **Pre-commit**: 자동 검사 훅
+
+상세한 가이드는 `.amazonq/rules/python_style_guide.md` 참조.
+
 ## 8. 시각화 및 설계 문서 (Visualization)
 - **도구**: [dbdiagram.io](https://dbdiagram.io)를 사용하여 ERD를 관리함.
 - **스키마 정의 파일**: `docs/db_schema.dbml` 파일을 DB 설계 마스터 문서로 활용함.
-- **업데이트 규칙**: 
+- **업데이트 규칙**:
     - `app/models/` 내의 Tortoise ORM 모델이 수정될 때마다 `docs/db_schema.dbml` 파일의 DBML 코드를 반드시 최신 상태로 갱신해야 함.
     - 테이블 간의 관계(FK), 인덱스(Index), 제약 조건(Check/Unique)을 DBML 규격에 맞춰 정확히 반영함.
 

@@ -1,7 +1,7 @@
-"""
-Message Repository
+"""Message repository module.
 
-messages 테이블 데이터 접근 계층
+This module provides data access layer for the messages table,
+handling chat message storage and retrieval operations.
 """
 
 from uuid import UUID, uuid4
@@ -10,17 +10,32 @@ from app.models.messages import ChatMessage, SenderType
 
 
 class MessageRepository:
-    """ChatMessage DB 저장소"""
+    """Chat message database repository for conversation management."""
 
     async def get_by_id(self, message_id: UUID) -> ChatMessage | None:
-        """메시지 ID로 조회 (soft delete 제외)"""
+        """Get message by ID (excluding soft deleted).
+
+        Args:
+            message_id: Message UUID.
+
+        Returns:
+            ChatMessage | None: Message if found, None otherwise.
+        """
         return await ChatMessage.filter(
             id=message_id,
             deleted_at__isnull=True,
         ).first()
 
     async def get_by_session(self, session_id: UUID, limit: int | None = None) -> list[ChatMessage]:
-        """세션의 모든 메시지 조회 (시간순)"""
+        """Get all messages in a session (chronological order).
+
+        Args:
+            session_id: Session UUID.
+            limit: Optional limit on number of messages.
+
+        Returns:
+            list[ChatMessage]: List of messages in chronological order.
+        """
         query = ChatMessage.filter(
             session_id=session_id,
             deleted_at__isnull=True,
@@ -32,9 +47,18 @@ class MessageRepository:
         return await query.all()
 
     async def get_recent_by_session(self, session_id: UUID, limit: int = 10) -> list[ChatMessage]:
-        """세션의 최근 메시지 조회"""
+        """Get recent messages in a session.
+
+        Args:
+            session_id: Session UUID.
+            limit: Maximum number of messages to retrieve.
+
+        Returns:
+            list[ChatMessage]: List of recent messages.
+        """
         return (
-            await ChatMessage.filter(
+            await ChatMessage
+            .filter(
                 session_id=session_id,
                 deleted_at__isnull=True,
             )
@@ -49,7 +73,16 @@ class MessageRepository:
         sender_type: SenderType,
         content: str,
     ) -> ChatMessage:
-        """새 메시지 생성"""
+        """Create new message.
+
+        Args:
+            session_id: Session UUID.
+            sender_type: Type of sender (USER or ASSISTANT).
+            content: Message content.
+
+        Returns:
+            ChatMessage: Created message.
+        """
         return await ChatMessage.create(
             id=uuid4(),
             session_id=session_id,
@@ -58,15 +91,38 @@ class MessageRepository:
         )
 
     async def create_user_message(self, session_id: UUID, content: str) -> ChatMessage:
-        """사용자 메시지 생성"""
+        """Create user message.
+
+        Args:
+            session_id: Session UUID.
+            content: Message content.
+
+        Returns:
+            ChatMessage: Created user message.
+        """
         return await self.create(session_id, SenderType.USER, content)
 
     async def create_assistant_message(self, session_id: UUID, content: str) -> ChatMessage:
-        """어시스턴트 메시지 생성"""
+        """Create assistant message.
+
+        Args:
+            session_id: Session UUID.
+            content: Message content.
+
+        Returns:
+            ChatMessage: Created assistant message.
+        """
         return await self.create(session_id, SenderType.ASSISTANT, content)
 
     async def soft_delete(self, message: ChatMessage) -> ChatMessage:
-        """메시지 소프트 삭제"""
+        """Soft delete message.
+
+        Args:
+            message: Message to delete.
+
+        Returns:
+            ChatMessage: Soft deleted message.
+        """
         from datetime import datetime
 
         from app.core import config

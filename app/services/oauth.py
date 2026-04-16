@@ -1,12 +1,14 @@
-"""
-OAuth 인증 서비스
+"""OAuth authentication service module.
 
-개발/테스트: 자체 Mock 서버(mock_oauth_routers.py)와 HTTP 통신
-운영: 실제 카카오 서버와 HTTP 통신
+This module provides OAuth authentication services for social login providers.
+Supports both development/test environments with mock servers and production
+environments with actual provider servers. Follows modern async patterns.
 """
 
-import httpx
+from typing import Any
+
 from fastapi import HTTPException, status
+import httpx
 
 from app.core import config
 from app.core.config import Env
@@ -18,7 +20,12 @@ from app.utils.jwt.tokens import AccessToken, RefreshToken
 
 
 class OAuthService:
-    """OAuth 인증 서비스"""
+    """OAuth authentication service.
+
+    Handles OAuth authentication flow for social login providers.
+    Supports both mock servers for development and actual provider servers
+    for production environments with modern async patterns.
+    """
 
     def __init__(
         self,
@@ -26,29 +33,50 @@ class OAuthService:
         refresh_token_repo: RefreshTokenRepository | None = None,
         rate_limiter: RateLimiter | None = None,
     ) -> None:
+        """Initialize OAuth service with repositories and rate limiter.
+
+        Args:
+            account_repo: Account repository instance.
+            refresh_token_repo: Refresh token repository instance.
+            rate_limiter: Rate limiter instance.
+        """
         self.account_repo = account_repo or AccountRepository()
         self.refresh_token_repo = refresh_token_repo or RefreshTokenRepository()
         self.rate_limiter = rate_limiter
 
         if config.ENV == Env.LOCAL:
-            # local: Mock 서버 사용 (개발 편의)
-            # Docker 환경에서 백엔드가 자기 자신(Mock 서버)을 호출할 때
-            # API_BASE_URL을 사용하여 내부 네트워크로 직접 통신합니다.
+            # Local: Use mock server (for development convenience)
+            # When backend calls itself (mock server) in Docker environment,
+            # use API_BASE_URL for direct internal network communication
             base_url = config.API_BASE_URL
             self.kakao_token_url = f"{base_url}/api/v1/mock/kakao/oauth/token"
             self.kakao_userinfo_url = f"{base_url}/api/v1/mock/kakao/v2/user/me"
         else:
-            # dev/prod: 실제 카카오 서버 사용
+            # Dev/prod: Use actual Kakao server
             self.kakao_token_url = "https://kauth.kakao.com/oauth/token"
             self.kakao_userinfo_url = "https://kapi.kakao.com/v2/user/me"
 
     def _check_rate_limit(self, client_ip: str) -> None:
-        """Rate limit 체크 (rate_limiter가 주입된 경우에만 동작)"""
+        """Check rate limit if rate limiter is injected.
+
+        Args:
+            client_ip: Client IP address for rate limiting.
+        """
         if self.rate_limiter:
             self.rate_limiter.check(client_ip)
 
-    async def _exchange_code_for_token(self, code: str) -> dict:
-        """인가 코드로 카카오(또는 Mock) 서버와 통신하여 액세스 토큰 획득"""
+    async def _exchange_code_for_token(self, code: str) -> dict[str, str]:
+        """Exchange authorization code for access token from Kakao (or mock) server.
+
+        Args:
+            code: Authorization code from OAuth provider.
+
+        Returns:
+            dict[str, str]: Token response from provider.
+
+        Raises:
+            HTTPException: If token exchange fails.
+        """
         data = {
             "grant_type": "authorization_code",
             "client_id": config.KAKAO_CLIENT_ID,
@@ -73,12 +101,22 @@ class OAuthService:
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail={
                         "error": "network_error",
-                        "error_description": "인증 서버와 통신할 수 없습니다. 잠시 후 다시 시도해주세요.",
+                        "error_description": "Cannot communicate with authentication server. Please try again later.",
                     },
                 ) from e
 
-    async def _get_user_info(self, access_token: str) -> dict:
-        """액세스 토큰으로 카카오(또는 Mock) 서버와 통신하여 사용자 정보 획득"""
+    async def _get_user_info(self, access_token: str) -> dict[str, Any]:
+        """Get user information from Kakao (or mock) server using access token.
+
+        Args:
+            access_token: Access token from OAuth provider.
+
+        Returns:
+            dict[str, Any]: User information from provider.
+
+        Raises:
+            HTTPException: If user info retrieval fails.
+        """
         headers = {
             "Authorization": f"Bearer {access_token.strip()}",
             "Content-type": "application/x-www-form-urlencoded;charset=utf-8",
@@ -100,13 +138,20 @@ class OAuthService:
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail={
                         "error": "network_error",
-                        "error_description": "사용자 정보 서버와 통신할 수 없습니다.",
+                        "error_description": "Cannot communicate with user info server.",
                     },
                 ) from e
 
     async def dev_test_login(self) -> tuple[Account, bool]:
-        """개발용 즉시 로그인 (테스트유저 계정 + 본인 프로필 자동 생성)"""
-        nickname = "테스트유저"
+        """Development test login (auto-creates test user account + self profile).
+
+        Creates a test user account for development purposes with automatic
+        self profile creation.
+
+        Returns:
+            tuple[Account, bool]: (account, is_new_user)
+        """
+        nickname = "TestUser"
         provider_account_id = "test_dev_id_12345"
 
         account = await self.account_repo.get_by_provider(
@@ -137,23 +182,29 @@ class OAuthService:
             await Profile.create(
                 id=uuid4(),
                 account_id=account.id,
-                name=f"{nickname}(본인)",
+                name=f"{nickname}(Self)",
                 relation_type=RelationType.SELF,
-                health_survey={"age": 25, "gender": "MALE", "conditions": ["테스트"], "allergies": ["없음"]},
+                health_survey={"age": 25, "gender": "MALE", "conditions": ["Test"], "allergies": ["None"]},
             )
 
         return account, is_new_user
 
     async def kakao_callback(self, code: str, client_ip: str) -> tuple[Account, bool]:
-        """
-        카카오 콜백 처리 로직
+        """Process Kakao OAuth callback.
 
-        1. 인가 코드로 액세스 토큰 교환
-        2. 액세스 토큰으로 사용자 정보 조회
-        3. 계정 생성 또는 로그인 처리
+        1. Exchange authorization code for access token
+        2. Get user information with access token
+        3. Create account or handle login
+
+        Args:
+            code: Authorization code from Kakao.
+            client_ip: Client IP address for rate limiting.
 
         Returns:
-            tuple[Account, bool]: (계정, 신규가입 여부)
+            tuple[Account, bool]: (account, is_new_user)
+
+        Raises:
+            HTTPException: If authentication process fails.
         """
         self._check_rate_limit(client_ip)
 
@@ -164,14 +215,14 @@ class OAuthService:
         # 2. 액세스 토큰으로 사용자 정보 조회
         user_info = await self._get_user_info(kakao_access_token)
 
-        # 사용자 정보 파싱
+        # Parse user information
         provider_account_id = str(user_info["id"])
         kakao_account = user_info.get("kakao_account", {})
         profile = kakao_account.get("profile", {})
-        nickname = profile.get("nickname", f"카카오유저_{provider_account_id[:4]}")
+        nickname = profile.get("nickname", f"KakaoUser_{provider_account_id[:4]}")
         profile_image_url = profile.get("profile_image_url")
 
-        # 3. DB 계정 조회
+        # 3. Query database account
         account = await self.account_repo.get_by_provider(
             provider=AuthProvider.KAKAO,
             provider_account_id=provider_account_id,
@@ -180,24 +231,24 @@ class OAuthService:
         is_new_user = False
 
         if account:
-            # 기존 계정 - 활성 상태 체크
+            # Existing account - check active status
             if not account.is_active:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail={
                         "error": "account_disabled",
-                        "error_description": "비활성화된 계정입니다. 고객센터에 문의해주세요.",
+                        "error_description": "Account is disabled. Please contact customer service.",
                     },
                 )
 
-            # 최신 정보로 업데이트
+            # Update with latest information
             await self.account_repo.update_login_info(
                 account=account,
                 nickname=nickname,
                 profile_image_url=profile_image_url,
             )
         else:
-            # 신규 계정 생성
+            # Create new account
             account = await self.account_repo.create(
                 provider=AuthProvider.KAKAO,
                 provider_account_id=provider_account_id,
@@ -209,24 +260,26 @@ class OAuthService:
         return account, is_new_user
 
     async def issue_tokens(self, account: Account) -> dict[str, str]:
-        """
-        JWT 토큰 발급 및 refresh token DB 저장
+        """Issue JWT tokens and store refresh token in database.
+
+        Args:
+            account: User account for token issuance.
 
         Returns:
-            {"access_token": "...", "refresh_token": "..."}
+            dict[str, str]: Dictionary containing access_token and refresh_token.
         """
-        # Access Token 생성
+        # Create Access Token
         access_token = AccessToken()
         access_token["sub"] = str(account.id)
         access_token["provider"] = account.auth_provider
 
-        # Refresh Token 생성
+        # Create Refresh Token
         refresh_token = RefreshToken()
         refresh_token["sub"] = str(account.id)
 
         refresh_token_str = str(refresh_token)
 
-        # Refresh Token DB 저장
+        # Store Refresh Token in database
         await self.refresh_token_repo.create(
             account_id=account.id,
             token=refresh_token_str,
@@ -238,8 +291,7 @@ class OAuthService:
         }
 
     async def refresh_access_token(self, refresh_token_str: str) -> dict[str, str]:
-        """
-        RTR (Refresh Token Rotation)을 적용한 토큰 갱신
+        """RTR (Refresh Token Rotation)을 적용한 토큰 갱신
 
         1. Refresh Token 검증 (Grace Period 고려)
         2. 새 Access Token + Refresh Token 발급
@@ -295,7 +347,7 @@ class OAuthService:
         new_refresh_token_str = str(new_refresh_token)
 
         # 4. RTR: 기존 토큰 무효화 + 새 토큰 저장 (낙관적 잠금)
-        new_db_token, success = await self.refresh_token_repo.rotate(
+        _new_db_token, success = await self.refresh_token_repo.rotate(
             old_token=refresh_token_str,
             account_id=account.id,
             new_token=new_refresh_token_str,
@@ -323,8 +375,7 @@ class OAuthService:
         return await self.refresh_token_repo.revoke(token)
 
     async def delete_account(self, account: Account) -> bool:
-        """
-        회원 탈퇴 처리
+        """회원 탈퇴 처리
         1. 해당 계정의 모든 Refresh Token 무효화 (보안 상 필수)
         2. 계정 비활성화 처리
         """

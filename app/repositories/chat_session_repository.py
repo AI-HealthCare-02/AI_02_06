@@ -1,7 +1,7 @@
-"""
-ChatSession Repository
+"""Chat session repository module.
 
-chat_sessions 테이블 데이터 접근 계층
+This module provides data access layer for the chat_sessions table,
+handling conversation session management operations.
 """
 
 from uuid import UUID, uuid4
@@ -10,19 +10,34 @@ from app.models.chat_sessions import ChatSession
 
 
 class ChatSessionRepository:
-    """ChatSession DB 저장소"""
+    """Chat session database repository for conversation management."""
 
     async def get_by_id(self, session_id: UUID) -> ChatSession | None:
-        """세션 ID로 조회 (soft delete 제외)"""
+        """Get session by ID (excluding soft deleted).
+
+        Args:
+            session_id: Session UUID.
+
+        Returns:
+            ChatSession | None: Session if found, None otherwise.
+        """
         return await ChatSession.filter(
             id=session_id,
             deleted_at__isnull=True,
         ).first()
 
     async def get_all_by_account(self, account_id: UUID) -> list[ChatSession]:
-        """계정의 모든 채팅 세션 조회"""
+        """Get all chat sessions for an account.
+
+        Args:
+            account_id: Account UUID.
+
+        Returns:
+            list[ChatSession]: List of chat sessions.
+        """
         return (
-            await ChatSession.filter(
+            await ChatSession
+            .filter(
                 account_id=account_id,
                 deleted_at__isnull=True,
             )
@@ -31,9 +46,17 @@ class ChatSessionRepository:
         )
 
     async def get_by_profile(self, profile_id: UUID) -> list[ChatSession]:
-        """프로필의 채팅 세션 조회"""
+        """Get chat sessions for a profile.
+
+        Args:
+            profile_id: Profile UUID.
+
+        Returns:
+            list[ChatSession]: List of chat sessions.
+        """
         return (
-            await ChatSession.filter(
+            await ChatSession
+            .filter(
                 profile_id=profile_id,
                 deleted_at__isnull=True,
             )
@@ -42,9 +65,17 @@ class ChatSessionRepository:
         )
 
     async def get_by_medication(self, medication_id: UUID) -> list[ChatSession]:
-        """약품 관련 채팅 세션 조회"""
+        """Get medication-related chat sessions.
+
+        Args:
+            medication_id: Medication UUID.
+
+        Returns:
+            list[ChatSession]: List of medication-related sessions.
+        """
         return (
-            await ChatSession.filter(
+            await ChatSession
+            .filter(
                 medication_id=medication_id,
                 deleted_at__isnull=True,
             )
@@ -59,7 +90,17 @@ class ChatSessionRepository:
         medication_id: UUID | None = None,
         title: str | None = None,
     ) -> ChatSession:
-        """새 채팅 세션 생성"""
+        """Create new chat session.
+
+        Args:
+            account_id: Account UUID.
+            profile_id: Profile UUID.
+            medication_id: Optional medication UUID.
+            title: Optional session title.
+
+        Returns:
+            ChatSession: Created session.
+        """
         return await ChatSession.create(
             id=uuid4(),
             account_id=account_id,
@@ -69,12 +110,27 @@ class ChatSessionRepository:
         )
 
     async def update(self, session: ChatSession, **kwargs) -> ChatSession:
-        """채팅 세션 정보 업데이트"""
+        """Update chat session information.
+
+        Args:
+            session: Session to update.
+            **kwargs: Fields to update.
+
+        Returns:
+            ChatSession: Updated session.
+        """
         await session.update_from_dict(kwargs).save()
         return session
 
     async def soft_delete(self, session: ChatSession) -> ChatSession:
-        """채팅 세션 소프트 삭제"""
+        """Soft delete chat session.
+
+        Args:
+            session: Session to delete.
+
+        Returns:
+            ChatSession: Soft deleted session.
+        """
         from datetime import datetime
 
         from app.core import config

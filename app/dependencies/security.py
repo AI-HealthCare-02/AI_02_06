@@ -1,3 +1,9 @@
+"""Security dependencies module.
+
+This module provides authentication and authorization dependencies
+for FastAPI endpoints, including JWT token validation and user extraction.
+"""
+
 from typing import Annotated
 from uuid import UUID
 
@@ -9,29 +15,41 @@ from app.repositories.account_repository import AccountRepository
 from app.utils.jwt.exceptions import TokenError
 from app.utils.jwt.tokens import AccessToken
 
-# Authorization 헤더는 선택적 (쿠키 우선)
+# Authorization header is optional (cookie takes priority)
 security = HTTPBearer(auto_error=False)
 
 
 def _extract_token(request: Request, credential: HTTPAuthorizationCredentials | None) -> str:
-    """
-    토큰 추출 (쿠키 우선, Authorization 헤더 폴백)
+    """Extract token with cookie priority and Authorization header fallback.
 
-    XSS 방지를 위해 HttpOnly 쿠키를 우선 사용하고,
-    쿠키가 없으면 Authorization 헤더에서 추출 (API 클라이언트 호환)
+    Uses HttpOnly cookie first for XSS prevention, falls back to Authorization
+    header if cookie is not available (for API client compatibility).
+
+    Args:
+        request: FastAPI request object.
+        credential: HTTP authorization credentials from header.
+
+    Returns:
+        str: Extracted JWT token.
+
+    Raises:
+        HTTPException: If no token found in either cookie or header.
     """
-    # 1. 쿠키에서 access_token 확인 (우선)
+    # 1. Check access_token in cookie (priority)
     cookie_token = request.cookies.get("access_token")
     if cookie_token:
         return cookie_token
 
-    # 2. Authorization 헤더에서 확인 (폴백)
+    # 2. Check Authorization header (fallback)
     if credential and credential.credentials:
         return credential.credentials
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail={"error": "missing_token", "error_description": "인증 토큰이 필요합니다."},
+        detail={
+            "error": "missing_token",
+            "error_description": "Authentication token is required.",
+        },
     )
 
 
@@ -39,10 +57,20 @@ async def get_current_account(
     request: Request,
     credential: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
 ) -> Account:
-    """
-    OAuth 로그인 사용자 인증 의존성
+    """OAuth login user authentication dependency.
 
-    HttpOnly 쿠키 또는 Authorization 헤더에서 JWT Access Token을 검증하고 Account 반환
+    Validates JWT Access Token from HttpOnly cookie or Authorization header
+    and returns the authenticated Account.
+
+    Args:
+        request: FastAPI request object.
+        credential: HTTP authorization credentials from header.
+
+    Returns:
+        Account: Authenticated user account.
+
+    Raises:
+        HTTPException: If token is invalid, account not found, or account disabled.
     """
     token_str = _extract_token(request, credential)
 
@@ -51,15 +79,21 @@ async def get_current_account(
     except TokenError as err:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "invalid_token", "error_description": "유효하지 않은 토큰입니다."},
+            detail={
+                "error": "invalid_token",
+                "error_description": "Invalid token.",
+            },
         ) from err
 
-    # sub claim에서 account_id 추출
+    # Extract account_id from sub claim
     account_id_str = token.payload.get("sub")
     if not account_id_str:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "invalid_token", "error_description": "토큰에 사용자 정보가 없습니다."},
+            detail={
+                "error": "invalid_token",
+                "error_description": "Token does not contain user information.",
+            },
         )
 
     try:
@@ -67,20 +101,29 @@ async def get_current_account(
     except ValueError as err:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "invalid_token", "error_description": "잘못된 토큰 형식입니다."},
+            detail={
+                "error": "invalid_token",
+                "error_description": "Invalid token format.",
+            },
         ) from err
 
     account = await AccountRepository().get_by_id(account_id)
     if not account:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "account_not_found", "error_description": "계정을 찾을 수 없습니다."},
+            detail={
+                "error": "account_not_found",
+                "error_description": "Account not found.",
+            },
         )
 
     if not account.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "account_disabled", "error_description": "비활성화된 계정입니다."},
+            detail={
+                "error": "account_disabled",
+                "error_description": "Account is disabled.",
+            },
         )
 
     return account

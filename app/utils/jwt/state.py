@@ -1,3 +1,9 @@
+"""JWT token backend state.
+
+This module provides the global token backend instance
+used throughout the application for JWT operations.
+"""
+
 from app.core import config
 from app.utils.jwt.backends import TokenBackend
 

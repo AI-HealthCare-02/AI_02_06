@@ -1,31 +1,44 @@
+"""OCR service module.
+
+This module provides OCR (Optical Character Recognition) functionality
+for processing prescription images and extracting medication information.
+"""
+
+from datetime import datetime
 import json
 import os
+from pathlib import Path
 import shutil
 import tempfile
 import time
-import uuid
-from datetime import date
-from pathlib import Path
 from typing import Any
+import uuid
 
-import redis.asyncio as redis  # 비동기 레디스 클라이언트 추가
-import requests
 from fastapi import UploadFile
 from openai import OpenAI, OpenAIError
 from pydantic import BaseModel
+import redis.asyncio as redis  # Async Redis client
+import requests
 
+from app.core import config
 from app.dtos.ocr import ConfirmMedicationRequest, ExtractedMedicine, OcrExtractResponse
 
-# DTO 경로 반영
-from app.models.medication import Medication  # DB 모델 임포트
+# DTO path reflection
+from app.models.medication import Medication  # DB model import
 
-# 환경변수 우선, 없으면 OS 기본 임시 디렉토리 사용 (보안상 /tmp 하드코딩 방지)
+# Environment variable priority, fallback to OS default temp directory (security: avoid hardcoded /tmp)
 _UPLOAD_DIR = Path(os.environ.get("ALLOWED_IMAGE_DIR", tempfile.gettempdir())) / "ocr_images"
 _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# LLM이 파싱 결과를 담아줄 내부 전용 Pydantic 모델
+# Internal Pydantic model for LLM parsing results
 class LlmExtractionResult(BaseModel):
+    """LLM extraction result model for structured OCR parsing.
+
+    Attributes:
+        medicines: List of extracted medicine information.
+    """
+
     medicines: list[ExtractedMedicine]
 
 
@@ -33,16 +46,16 @@ def _call_clova_ocr(image_path: Path) -> str:
     invoke_url = os.environ.get("CLOVA_OCR_INVOKE_URL")
     secret_key = os.environ.get("CLOVA_OCR_SECRET_KEY")
     if not invoke_url or not secret_key:
-        raise ValueError("OCR 처리 실패: CLOVA_OCR 환경변수가 설정되지 않았습니다.")
+        raise ValueError("OCR processing failed: CLOVA_OCR environment variables not set.")
 
     ext = image_path.suffix.lstrip(".").lower()
     request_json = {
         "images": [{"format": ext, "name": image_path.stem}],
         "requestId": str(uuid.uuid4()),
         "version": "V2",
-        "timestamp": int(round(time.time() * 1000)),
+        "timestamp": round(time.time() * 1000),
     }
-    with open(image_path, "rb") as f:
+    with image_path.open("rb") as f:
         response = requests.post(
             invoke_url,
             headers={"X-OCR-SECRET": secret_key},
@@ -56,6 +69,12 @@ def _call_clova_ocr(image_path: Path) -> str:
 
 
 class OCRService:
+    """OCR service for prescription image processing.
+
+    This service handles OCR processing of prescription images,
+    extracts medication information using LLM, and manages temporary data storage.
+    """
+
     def __init__(self) -> None:
         # Redis 연결 (환경변수로 URL 관리 권장)
         redis_url = os.environ.get("REDIS_URL", "redis://redis:6379")
@@ -63,7 +82,7 @@ class OCRService:
 
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다.")
+            raise ValueError("OPENAI_API_KEY is not set.")
         self.client = OpenAI(api_key=api_key)
 
     async def extract_and_parse_image(self, file: UploadFile) -> OcrExtractResponse:
@@ -154,7 +173,7 @@ class OCRService:
                 intake_times=[],  # 초기값 (나중에 유저가 설정 기능 등 추가 가능)
                 total_intake_count=total_count,
                 remaining_intake_count=total_count,
-                start_date=date.today(),
+                start_date=datetime.now(tz=config.TIMEZONE).date(),
                 is_active=True,
             )
             saved_meds.append(new_med)
@@ -175,7 +194,6 @@ class OCRService:
 
     def _generate_final_guide(self, medicines: list[ExtractedMedicine]) -> str:
         """확정된 약품 리스트를 바탕으로 LLM을 호출하여 복약 가이드를 문자열로 만듭니다."""
-
         medicines_text = "\n".join(
             f"- {m.medicine_name} (1회 {m.dose_per_intake or '적정량'}, {m.intake_instruction or '지시대로 복용'})"
             for m in medicines

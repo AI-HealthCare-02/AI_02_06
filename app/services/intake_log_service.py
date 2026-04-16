@@ -1,7 +1,7 @@
-"""
-IntakeLog Service
+"""Intake log service module.
 
-복용 기록 관련 비즈니스 로직
+This module provides business logic for medication intake tracking operations
+including creation, status updates, and ownership verification.
 """
 
 from datetime import date, datetime, time
@@ -9,85 +9,166 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 
+from app.core import config
 from app.models.intake_log import IntakeLog
 from app.repositories.intake_log_repository import IntakeLogRepository
 from app.repositories.profile_repository import ProfileRepository
 
 
 class IntakeLogService:
-    """복용 기록 비즈니스 로직"""
+    """Intake log business logic service for medication tracking."""
 
     def __init__(self):
         self.repository = IntakeLogRepository()
         self.profile_repository = ProfileRepository()
 
     async def _verify_profile_ownership(self, profile_id: UUID, account_id: UUID) -> None:
-        """프로필 소유권 검증"""
+        """Verify profile ownership.
+
+        Args:
+            profile_id: Profile UUID to verify.
+            account_id: Account UUID that should own the profile.
+
+        Raises:
+            HTTPException: If profile not found or access denied.
+        """
         profile = await self.profile_repository.get_by_id(profile_id)
         if not profile:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="프로필을 찾을 수 없습니다.",
+                detail="Profile not found.",
             )
         if profile.account_id != account_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="해당 프로필에 대한 접근 권한이 없습니다.",
+                detail="Access denied to this profile.",
             )
 
     async def _verify_intake_log_ownership(self, intake_log: IntakeLog, account_id: UUID) -> None:
-        """복용 기록 소유권 검증 (프로필을 통해)"""
+        """Verify intake log ownership through profile.
+
+        Args:
+            intake_log: Intake log to verify ownership for.
+            account_id: Account UUID that should own the intake log.
+
+        Raises:
+            HTTPException: If access denied to intake log.
+        """
         await intake_log.fetch_related("profile")
         if intake_log.profile.account_id != account_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="해당 복용 기록에 대한 접근 권한이 없습니다.",
+                detail="Access denied to this intake log.",
             )
 
     async def get_intake_log(self, intake_log_id: UUID) -> IntakeLog:
-        """복용 기록 조회"""
+        """Get intake log by ID.
+
+        Args:
+            intake_log_id: Intake log UUID.
+
+        Returns:
+            IntakeLog: Intake log object.
+
+        Raises:
+            HTTPException: If intake log not found.
+        """
         intake_log = await self.repository.get_by_id(intake_log_id)
         if not intake_log:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="복용 기록을 찾을 수 없습니다.",
+                detail="Intake log not found.",
             )
         return intake_log
 
     async def get_intake_log_with_owner_check(self, intake_log_id: UUID, account_id: UUID) -> IntakeLog:
-        """소유권 검증 후 복용 기록 조회"""
+        """Get intake log with ownership verification.
+
+        Args:
+            intake_log_id: Intake log UUID.
+            account_id: Account UUID for ownership check.
+
+        Returns:
+            IntakeLog: Intake log if owned by account.
+        """
         intake_log = await self.get_intake_log(intake_log_id)
         await self._verify_intake_log_ownership(intake_log, account_id)
         return intake_log
 
     async def get_logs_by_profile_and_date(self, profile_id: UUID, target_date: date) -> list[IntakeLog]:
-        """프로필의 특정 날짜 복용 기록 조회"""
+        """Get intake logs for a profile on a specific date.
+
+        Args:
+            profile_id: Profile UUID.
+            target_date: Target date for intake logs.
+
+        Returns:
+            list[IntakeLog]: List of intake logs for the date.
+        """
         return await self.repository.get_by_profile_and_date(profile_id, target_date)
 
     async def get_logs_by_profile_and_date_with_owner_check(
         self, profile_id: UUID, target_date: date, account_id: UUID
     ) -> list[IntakeLog]:
-        """소유권 검증 후 프로필의 특정 날짜 복용 기록 조회"""
+        """Get intake logs for a profile on a specific date with ownership verification.
+
+        Args:
+            profile_id: Profile UUID.
+            target_date: Target date for intake logs.
+            account_id: Account UUID for ownership check.
+
+        Returns:
+            list[IntakeLog]: List of intake logs if profile is owned by account.
+        """
         await self._verify_profile_ownership(profile_id, account_id)
         return await self.repository.get_by_profile_and_date(profile_id, target_date)
 
     async def get_today_logs(self, profile_id: UUID) -> list[IntakeLog]:
-        """프로필의 오늘 복용 기록 조회"""
-        return await self.repository.get_by_profile_and_date(profile_id, date.today())
+        """Get today's intake logs for a profile.
+
+        Args:
+            profile_id: Profile UUID.
+
+        Returns:
+            list[IntakeLog]: List of today's intake logs.
+        """
+        return await self.repository.get_by_profile_and_date(profile_id, datetime.now(tz=config.TIMEZONE).date())
 
     async def get_today_logs_with_owner_check(self, profile_id: UUID, account_id: UUID) -> list[IntakeLog]:
-        """소유권 검증 후 프로필의 오늘 복용 기록 조회"""
+        """Get today's intake logs for a profile with ownership verification.
+
+        Args:
+            profile_id: Profile UUID.
+            account_id: Account UUID for ownership check.
+
+        Returns:
+            list[IntakeLog]: List of today's intake logs if profile is owned by account.
+        """
         await self._verify_profile_ownership(profile_id, account_id)
-        return await self.repository.get_by_profile_and_date(profile_id, date.today())
+        return await self.repository.get_by_profile_and_date(profile_id, datetime.now(tz=config.TIMEZONE).date())
 
     async def get_logs_by_account(self, account_id: UUID) -> list[IntakeLog]:
-        """계정의 모든 프로필에 해당하는 복용 기록 조회"""
+        """Get intake logs for all profiles of an account.
+
+        Args:
+            account_id: Account UUID.
+
+        Returns:
+            list[IntakeLog]: List of intake logs for all account profiles.
+        """
         profiles = await self.profile_repository.get_all_by_account(account_id)
         profile_ids = [p.id for p in profiles]
         return await self.repository.get_by_profiles(profile_ids)
 
     async def get_pending_logs(self, profile_id: UUID) -> list[IntakeLog]:
-        """프로필의 미복용 기록 조회"""
+        """Get pending intake logs for a profile.
+
+        Args:
+            profile_id: Profile UUID.
+
+        Returns:
+            list[IntakeLog]: List of pending intake logs.
+        """
         return await self.repository.get_pending_by_profile(profile_id)
 
     async def create_intake_log(
@@ -149,7 +230,17 @@ class IntakeLogService:
         return await self.repository.mark_as_taken(intake_log, taken_at)
 
     async def mark_as_skipped(self, intake_log_id: UUID) -> IntakeLog:
-        """복용 스킵 처리"""
+        """Mark intake log as skipped.
+
+        Args:
+            intake_log_id: Intake log UUID.
+
+        Returns:
+            IntakeLog: Updated intake log.
+
+        Raises:
+            HTTPException: If intake log already processed.
+        """
         intake_log = await self.get_intake_log(intake_log_id)
 
         if intake_log.intake_status != "SCHEDULED":
@@ -161,7 +252,18 @@ class IntakeLogService:
         return await self.repository.mark_as_skipped(intake_log)
 
     async def mark_as_skipped_with_owner_check(self, intake_log_id: UUID, account_id: UUID) -> IntakeLog:
-        """소유권 검증 후 복용 스킵 처리"""
+        """Mark intake log as skipped with ownership verification.
+
+        Args:
+            intake_log_id: Intake log UUID.
+            account_id: Account UUID for ownership check.
+
+        Returns:
+            IntakeLog: Updated intake log if owned by account.
+
+        Raises:
+            HTTPException: If intake log already processed.
+        """
         intake_log = await self.get_intake_log_with_owner_check(intake_log_id, account_id)
 
         if intake_log.intake_status != "SCHEDULED":
@@ -173,11 +275,20 @@ class IntakeLogService:
         return await self.repository.mark_as_skipped(intake_log)
 
     async def delete_intake_log(self, intake_log_id: UUID) -> None:
-        """복용 기록 삭제 (hard delete)"""
+        """Delete intake log (hard delete).
+
+        Args:
+            intake_log_id: Intake log UUID to delete.
+        """
         intake_log = await self.get_intake_log(intake_log_id)
         await self.repository.delete(intake_log)
 
     async def delete_intake_log_with_owner_check(self, intake_log_id: UUID, account_id: UUID) -> None:
-        """소유권 검증 후 복용 기록 삭제 (hard delete)"""
+        """Delete intake log with ownership verification (hard delete).
+
+        Args:
+            intake_log_id: Intake log UUID to delete.
+            account_id: Account UUID for ownership check.
+        """
         intake_log = await self.get_intake_log_with_owner_check(intake_log_id, account_id)
         await self.repository.delete(intake_log)

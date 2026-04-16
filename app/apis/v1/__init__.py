@@ -1,3 +1,9 @@
+"""API v1 routes module.
+
+This module aggregates all v1 API routes and creates the main v1 router
+for the FastAPI application.
+"""
+
 from fastapi import APIRouter
 
 from app.apis.v1.challenge_routers import router as challenge_router
@@ -11,7 +17,10 @@ from app.apis.v1.oauth_routers import oauth_router
 from app.apis.v1.ocr_routers import router as ocr_router
 from app.apis.v1.profile_routers import router as profile_router
 
+# Main v1 API router
 v1_routers = APIRouter(prefix="/api/v1")
+
+# Include all sub-routers
 v1_routers.include_router(health_router)
 v1_routers.include_router(challenge_router)
 v1_routers.include_router(intake_log_router)

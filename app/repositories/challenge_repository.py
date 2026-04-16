@@ -1,7 +1,7 @@
-"""
-Challenge Repository
+"""Challenge repository module.
 
-challenges 테이블 데이터 접근 계층
+This module provides data access layer for the challenges table,
+handling user health challenge tracking operations.
 """
 
 from datetime import date
@@ -11,24 +11,45 @@ from app.models.challenge import Challenge
 
 
 class ChallengeRepository:
-    """Challenge DB 저장소"""
+    """Challenge database repository for health challenge management."""
 
     async def get_by_id(self, challenge_id: UUID) -> Challenge | None:
-        """챌린지 ID로 조회 (soft delete 제외)"""
+        """Get challenge by ID (excluding soft deleted).
+
+        Args:
+            challenge_id: Challenge UUID.
+
+        Returns:
+            Challenge | None: Challenge if found, None otherwise.
+        """
         return await Challenge.filter(
             id=challenge_id,
             deleted_at__isnull=True,
         ).first()
 
     async def get_all_by_profile(self, profile_id: UUID) -> list[Challenge]:
-        """프로필의 모든 챌린지 조회"""
+        """Get all challenges for a profile.
+
+        Args:
+            profile_id: Profile UUID.
+
+        Returns:
+            list[Challenge]: List of challenges.
+        """
         return await Challenge.filter(
             profile_id=profile_id,
             deleted_at__isnull=True,
         ).all()
 
     async def get_all_by_profiles(self, profile_ids: list[UUID]) -> list[Challenge]:
-        """여러 프로필의 모든 챌린지 조회"""
+        """Get all challenges for multiple profiles.
+
+        Args:
+            profile_ids: List of profile UUIDs.
+
+        Returns:
+            list[Challenge]: List of challenges.
+        """
         if not profile_ids:
             return []
         return await Challenge.filter(
@@ -37,7 +58,14 @@ class ChallengeRepository:
         ).all()
 
     async def get_active_by_profile(self, profile_id: UUID) -> list[Challenge]:
-        """프로필의 진행 중인 챌린지 조회"""
+        """Get active challenges for a profile.
+
+        Args:
+            profile_id: Profile UUID.
+
+        Returns:
+            list[Challenge]: List of active challenges.
+        """
         return await Challenge.filter(
             profile_id=profile_id,
             challenge_status="IN_PROGRESS",
@@ -52,7 +80,18 @@ class ChallengeRepository:
         started_date: date,
         description: str | None = None,
     ) -> Challenge:
-        """새 챌린지 생성"""
+        """Create new challenge.
+
+        Args:
+            profile_id: Profile UUID.
+            title: Challenge title.
+            target_days: Target completion days.
+            started_date: Challenge start date.
+            description: Optional challenge description.
+
+        Returns:
+            Challenge: Created challenge.
+        """
         return await Challenge.create(
             id=uuid4(),
             profile_id=profile_id,
@@ -65,12 +104,27 @@ class ChallengeRepository:
         )
 
     async def update(self, challenge: Challenge, **kwargs) -> Challenge:
-        """챌린지 정보 업데이트"""
+        """Update challenge information.
+
+        Args:
+            challenge: Challenge to update.
+            **kwargs: Fields to update.
+
+        Returns:
+            Challenge: Updated challenge.
+        """
         await challenge.update_from_dict(kwargs).save()
         return challenge
 
     async def soft_delete(self, challenge: Challenge) -> Challenge:
-        """챌린지 소프트 삭제"""
+        """Soft delete challenge.
+
+        Args:
+            challenge: Challenge to delete.
+
+        Returns:
+            Challenge: Soft deleted challenge.
+        """
         from datetime import datetime
 
         from app.core import config

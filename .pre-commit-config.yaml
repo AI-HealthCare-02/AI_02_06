@@ -1,24 +1,82 @@
+# Modern Python Pre-commit Configuration (2025-2026)
+# Ensures code quality and consistency before commits
+
 repos:
+  # Local hooks using project dependencies
   - repo: local
     hooks:
+      # Ruff linting with auto-fix (replaces flake8, isort, pyupgrade)
       - id: ruff-check
-        name: Ruff Check and Fix
-        entry: uv run ruff check --fix
+        name: 🔧 Ruff Check & Auto-fix
+        entry: uv run ruff check --fix --exit-zero
         language: system
         types: [python]
         require_serial: true
         pass_filenames: true
+        stages: [pre-commit, pre-push]
+
+      # Ruff formatting (replaces black)
       - id: ruff-format
-        name: Ruff Format
+        name: 🎨 Ruff Format
         entry: uv run ruff format
         language: system
         types: [python]
         require_serial: true
         pass_filenames: true
-      - id: bandit
-        name: Bandit Security Check
-        entry: uv run bandit -c pyproject.toml -r app/ -lll
+        stages: [pre-commit, pre-push]
+
+      # Final Ruff check (no auto-fix, must pass)
+      - id: ruff-check-final
+        name: 🔍 Ruff Final Check
+        entry: uv run ruff check --no-fix
+        language: system
+        types: [python]
+        require_serial: true
+        pass_filenames: true
+        stages: [pre-commit, pre-push]
+
+      # Type checking with MyPy
+      - id: mypy
+        name: 🔍 MyPy Type Check
+        entry: uv run mypy
         language: system
         types: [python]
         require_serial: true
         pass_filenames: false
+        stages: [pre-push]
+
+      # Security scanning with Bandit
+      - id: bandit
+        name: 🔒 Bandit Security Check
+        entry: uv run bandit -c pyproject.toml -r app/ ai_worker/ -lll
+        language: system
+        types: [python]
+        require_serial: true
+        pass_filenames: false
+        stages: [pre-push]
+
+  # External hooks for additional checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        name: ✂️ Trim Trailing Whitespace
+      - id: end-of-file-fixer
+        name: 📝 Fix End of Files
+      - id: check-yaml
+        name: 📋 Check YAML
+      - id: check-toml
+        name: 📋 Check TOML
+      - id: check-json
+        name: 📋 Check JSON
+      - id: check-merge-conflict
+        name: ⚠️ Check Merge Conflicts
+      - id: check-case-conflict
+        name: 📁 Check Case Conflicts
+      - id: mixed-line-ending
+        name: 🔄 Fix Mixed Line Endings
+
+# Global configuration
+default_stages: [pre-commit]
+fail_fast: false
+minimum_pre_commit_version: "4.0.0"

@@ -1,7 +1,7 @@
-"""
-Medication Repository
+"""Medication repository module.
 
-medications 테이블 데이터 접근 계층
+This module provides data access layer for the medications table,
+handling prescription medication management operations.
 """
 
 from datetime import date
@@ -11,24 +11,45 @@ from app.models.medication import Medication
 
 
 class MedicationRepository:
-    """Medication DB 저장소"""
+    """Medication database repository for prescription management."""
 
     async def get_by_id(self, medication_id: UUID) -> Medication | None:
-        """약품 ID로 조회 (soft delete 제외)"""
+        """Get medication by ID (excluding soft deleted).
+
+        Args:
+            medication_id: Medication UUID.
+
+        Returns:
+            Medication | None: Medication if found, None otherwise.
+        """
         return await Medication.filter(
             id=medication_id,
             deleted_at__isnull=True,
         ).first()
 
     async def get_all_by_profile(self, profile_id: UUID) -> list[Medication]:
-        """프로필의 모든 약품 조회"""
+        """Get all medications for a profile.
+
+        Args:
+            profile_id: Profile UUID.
+
+        Returns:
+            list[Medication]: List of medications.
+        """
         return await Medication.filter(
             profile_id=profile_id,
             deleted_at__isnull=True,
         ).all()
 
     async def get_all_by_profiles(self, profile_ids: list[UUID]) -> list[Medication]:
-        """여러 프로필의 모든 약품 조회"""
+        """Get all medications for multiple profiles.
+
+        Args:
+            profile_ids: List of profile UUIDs.
+
+        Returns:
+            list[Medication]: List of medications.
+        """
         if not profile_ids:
             return []
         return await Medication.filter(
@@ -37,7 +58,14 @@ class MedicationRepository:
         ).all()
 
     async def get_active_by_profile(self, profile_id: UUID) -> list[Medication]:
-        """프로필의 현재 복용 중인 약품 조회"""
+        """Get currently active medications for a profile.
+
+        Args:
+            profile_id: Profile UUID.
+
+        Returns:
+            list[Medication]: List of active medications.
+        """
         return await Medication.filter(
             profile_id=profile_id,
             is_active=True,
@@ -59,7 +87,25 @@ class MedicationRepository:
         expiration_date: date | None = None,
         prescription_image_url: str | None = None,
     ) -> Medication:
-        """새 약품 생성"""
+        """Create new medication.
+
+        Args:
+            profile_id: Profile UUID.
+            medicine_name: Name of medication.
+            intake_times: List of daily intake times.
+            total_intake_count: Total prescribed intake count.
+            remaining_intake_count: Remaining intake count.
+            start_date: Medication start date.
+            dose_per_intake: Optional dosage per intake.
+            intake_instruction: Optional intake instructions.
+            end_date: Optional expected end date.
+            dispensed_date: Optional dispensing date.
+            expiration_date: Optional expiration date.
+            prescription_image_url: Optional prescription image URL.
+
+        Returns:
+            Medication: Created medication.
+        """
         return await Medication.create(
             id=uuid4(),
             profile_id=profile_id,
@@ -78,12 +124,27 @@ class MedicationRepository:
         )
 
     async def update(self, medication: Medication, **kwargs) -> Medication:
-        """약품 정보 업데이트"""
+        """Update medication information.
+
+        Args:
+            medication: Medication to update.
+            **kwargs: Fields to update.
+
+        Returns:
+            Medication: Updated medication.
+        """
         await medication.update_from_dict(kwargs).save()
         return medication
 
     async def soft_delete(self, medication: Medication) -> Medication:
-        """약품 소프트 삭제"""
+        """Soft delete medication.
+
+        Args:
+            medication: Medication to delete.
+
+        Returns:
+            Medication: Soft deleted medication.
+        """
         from datetime import datetime
 
         from app.core import config

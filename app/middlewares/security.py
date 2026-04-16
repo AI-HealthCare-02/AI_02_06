@@ -1,33 +1,32 @@
+"""Security middleware module.
+
+This module provides security middleware for input validation and security headers.
+Includes attack pattern detection, suspicious pattern logging, and security header injection.
+
+Note: CSP is recommended to be set in Next.js for SPA compatibility.
 """
-Security Middleware
 
-1. 입력값 검증 (로깅 + 명백한 공격만 차단, ORM이 주요 방어)
-2. 보안 헤더 추가 (X-Frame-Options, X-Content-Type-Options 등)
-
-Note: CSP는 Next.js SPA와 호환성 문제로 FE에서 설정 권장
-"""
-
+from collections.abc import Callable
 import logging
 import re
-from collections.abc import Callable
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
 
-# 명백한 공격 패턴 (로깅 + 차단)
-ATTACK_PATTERNS = [
-    # Path Traversal (명확한 공격)
+# Clear attack patterns (logging + blocking)
+ATTACK_PATTERNS: list[tuple[str, str]] = [
+    # Path Traversal (clear attack)
     (r"\.\.[/\\]", "path_traversal"),
     (r"\.\.%2[fF]", "path_traversal_encoded"),
-    # Null Byte Injection (명확한 공격)
+    # Null Byte Injection (clear attack)
     (r"%00", "null_byte"),
     (r"\x00", "null_byte"),
 ]
 
-# 의심 패턴 (로깅만, 차단 안 함 - ORM이 방어)
-SUSPICIOUS_PATTERNS = [
+# Suspicious patterns (logging only, no blocking - ORM provides defense)
+SUSPICIOUS_PATTERNS: list[tuple[str, str]] = [
     (r"('\s*OR\s+'?\s*'?\s*=|'\s*OR\s+1\s*=\s*1)", "sql_injection_suspect"),
     (r'("\s*OR\s+"?\s*"?\s*=|"\s*OR\s+1\s*=\s*1)', "sql_injection_suspect"),
     (r";\s*(DROP|DELETE|UPDATE|INSERT)\s+", "sql_injection_suspect"),
@@ -36,12 +35,20 @@ SUSPICIOUS_PATTERNS = [
     (r"javascript:", "xss_suspect"),
 ]
 
+# Compiled patterns for performance
 COMPILED_ATTACK_PATTERNS = [(re.compile(p, re.IGNORECASE), name) for p, name in ATTACK_PATTERNS]
 COMPILED_SUSPICIOUS_PATTERNS = [(re.compile(p, re.IGNORECASE), name) for p, name in SUSPICIOUS_PATTERNS]
 
 
 def check_attack_patterns(value: str) -> str | None:
-    """명백한 공격 패턴 검사 (차단 대상)"""
+    """Check for clear attack patterns (blocking targets).
+
+    Args:
+        value: Input value to check.
+
+    Returns:
+        Optional[str]: Attack pattern name if found, None otherwise.
+    """
     for pattern, name in COMPILED_ATTACK_PATTERNS:
         if pattern.search(value):
             return name
@@ -49,7 +56,14 @@ def check_attack_patterns(value: str) -> str | None:
 
 
 def check_suspicious_patterns(value: str) -> str | None:
-    """의심 패턴 검사 (로깅만)"""
+    """Check for suspicious patterns (logging only).
+
+    Args:
+        value: Input value to check.
+
+    Returns:
+        Optional[str]: Suspicious pattern name if found, None otherwise.
+    """
     for pattern, name in COMPILED_SUSPICIOUS_PATTERNS:
         if pattern.search(value):
             return name
@@ -57,11 +71,14 @@ def check_suspicious_patterns(value: str) -> str | None:
 
 
 def scan_request_params(request: Request) -> tuple[str | None, str | None]:
-    """
-    요청 파라미터 검사
+    """Scan request parameters for attack and suspicious patterns.
+
+    Args:
+        request: FastAPI request object.
 
     Returns:
-        (공격 패턴, 의심 패턴) - 발견 시 패턴 이름, 없으면 None
+        Tuple[Optional[str], Optional[str]]: (attack_pattern, suspicious_pattern)
+            Pattern names if found, None otherwise.
     """
     attack_found = None
     suspicious_found = None
@@ -75,7 +92,7 @@ def scan_request_params(request: Request) -> tuple[str | None, str | None]:
                 suspicious_found = check_suspicious_patterns(v)
 
     # Path Parameters
-    for _key, value in request.path_params.items():
+    for value in request.path_params.values():
         if isinstance(value, str):
             if not attack_found:
                 attack_found = check_attack_patterns(value)
@@ -86,13 +103,28 @@ def scan_request_params(request: Request) -> tuple[str | None, str | None]:
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):
-    """보안 미들웨어"""
+    """Security middleware for input validation and security headers.
+
+    This middleware provides:
+    1. Input validation with attack pattern detection
+    2. Suspicious pattern logging
+    3. Security header injection
+    """
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        # 1. 입력값 검사
+        """Process request through security middleware.
+
+        Args:
+            request: Incoming request.
+            call_next: Next middleware/handler in chain.
+
+        Returns:
+            Response: Processed response with security headers.
+        """
+        # 1. Input validation
         attack_pattern, suspicious_pattern = scan_request_params(request)
 
-        # 의심 패턴 로깅 (차단 안 함)
+        # Log suspicious patterns (no blocking)
         if suspicious_pattern:
             logger.warning(
                 "Suspicious pattern detected: %s, path=%s, ip=%s",
@@ -101,7 +133,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 request.client.host if request.client else "unknown",
             )
 
-        # 명백한 공격 패턴 차단
+        # Block clear attack patterns
         if attack_pattern:
             logger.error(
                 "Attack pattern blocked: %s, path=%s, ip=%s",
@@ -110,27 +142,31 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 request.client.host if request.client else "unknown",
             )
             return Response(
-                content='{"detail":{"error":"invalid_input","error_description":"허용되지 않는 입력입니다."}}',
+                content='{"detail":{"error":"invalid_input","error_description":"Invalid input detected."}}',
                 status_code=400,
                 media_type="application/json",
             )
 
-        # 2. 요청 처리
+        # 2. Process request
         response = await call_next(request)
 
-        # 3. 보안 헤더 추가
+        # 3. Add security headers
         self._add_security_headers(response)
 
         return response
 
     def _add_security_headers(self, response: Response) -> None:
-        """보안 헤더 추가 (CSP 제외 - SPA 호환성)"""
-        # 기본 보안 헤더
+        """Add security headers to response (excluding CSP for SPA compatibility).
+
+        Args:
+            response: Response object to add headers to.
+        """
+        # Basic security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
 
-        # CSP는 Next.js에서 설정 (next.config.js의 headers())
-        # SPA의 인라인 스크립트와 호환성 문제로 BE에서 제외
+        # CSP is set in Next.js (next.config.js headers())
+        # Excluded from BE due to compatibility issues with SPA inline scripts
