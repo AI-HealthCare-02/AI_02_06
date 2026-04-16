@@ -87,15 +87,12 @@ function OcrResultContent() {
 
     setIsSubmitting(true)
     try {
-      const response = await api.post('/api/v1/ocr/confirm', {
+      await api.post('/api/v1/ocr/confirm', {
         draft_id: draftId,
         confirmed_medicines: meds
-      })
+      }, { timeout: 60000 })
 
-      // 생성된 가이드를 Zustand나 세션에 임시로 담고 결과 페이지(또는 챗봇)로 이동!
-      alert('저장 완료! AI 복약 가이드를 확인해보세요.')
-      // 예: router.push('/main') 또는 생성된 guide를 보여주는 모달 띄우기
-      console.log(response.data.guide)
+      alert('저장 완료! 복약 목록에서 확인해보세요.')
       router.push('/main')
 
     } catch (error) {
