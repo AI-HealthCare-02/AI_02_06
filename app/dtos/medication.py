@@ -6,7 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class BaseMedication(BaseModel):
     medicine_name: str = Field(..., max_length=128, description="약품명")
+    department: str | None = Field(None, max_length=64, description="처방 진료과 (예: 내과)")
+    category: str | None = Field(None, max_length=64, description="약품 분류 (예: 해열진통제)")
     dose_per_intake: str | None = Field(None, max_length=32, description="1회 복용량 (예: 1정, 5ml)")
+    daily_intake_count: int | None = Field(None, description="1일 복용 횟수")
+    total_intake_days: int | None = Field(None, description="총 복용 일수")
     intake_instruction: str | None = Field(None, max_length=256, description="복용 지시사항")
     intake_times: list[str] = Field(..., description="일일 복용 시간 목록 (예: ['08:00', '13:00'])")
     total_intake_count: int = Field(..., description="처방된 총 복용 횟수")
@@ -25,7 +29,11 @@ class MedicationCreate(BaseMedication):
 
 class MedicationUpdate(BaseModel):
     medicine_name: str | None = Field(None, max_length=128, description="약품명")
+    department: str | None = Field(None, max_length=64, description="처방 진료과")
+    category: str | None = Field(None, max_length=64, description="약품 분류")
     dose_per_intake: str | None = Field(None, max_length=32, description="1회 복용량")
+    daily_intake_count: int | None = Field(None, description="1일 복용 횟수")
+    total_intake_days: int | None = Field(None, description="총 복용 일수")
     intake_instruction: str | None = Field(None, max_length=256, description="복용 지시사항")
     intake_times: list[str] | None = Field(None, description="일일 복용 시간 목록")
     total_intake_count: int | None = Field(None, description="처방된 총 복용 횟수")
