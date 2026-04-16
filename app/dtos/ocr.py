@@ -14,11 +14,13 @@ class ExtractedMedicine(BaseModel):
     including dosage, frequency, and instruction information.
     """
 
-    medicine_name: str = Field(description="Extracted medicine name (e.g., Tylenol 500mg)")
-    dose_per_intake: str | None = Field(None, description="Dose per intake (e.g., 1 tablet, 5ml)")
-    daily_intake_count: int | None = Field(None, description="Daily intake frequency (e.g., 3)")
-    total_intake_days: int | None = Field(None, description="Total intake days (e.g., 5)")
-    intake_instruction: str | None = Field(None, description="Intake instructions (e.g., 30 minutes after meal)")
+    medicine_name: str = Field(description="추출된 약품명 (예: 타이레놀정500mg)")
+    department: str | None = Field(None, description="처방 진료과 (예: 내과, 정형외과)")
+    category: str | None = Field(None, description="약품 분류 (예: 해열진통제, 항생제)")
+    dose_per_intake: str | None = Field(None, description="1회 복용량 단위 포함 (예: 1정, 2캡슐, 5ml)")
+    daily_intake_count: int | None = Field(None, description="1일 복용 횟수 (예: 3)")
+    total_intake_days: int | None = Field(None, description="총 복용 일수 (예: 5, daily_intake_count와 다른 값)")
+    intake_instruction: str | None = Field(None, description="복용 시점 지시사항 (예: 식후 30분, 취침 전)")
 
 
 class OcrExtractResponse(BaseModel):

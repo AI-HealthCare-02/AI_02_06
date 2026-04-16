@@ -176,6 +176,7 @@ class ChallengeService:
             title=data.title,
             description=data.description,
             target_days=data.target_days,
+            difficulty=data.difficulty,
             started_date=data.started_date or datetime.now(tz=config.TIMEZONE).date(),
         )
 

@@ -1,5 +1,5 @@
 services:
-  # 1. PostgreSQL (Database)
+  # 1. PostgreSQL (Database with pgvector)
   postgres:
     image: ankane/pgvector:v0.5.1
     container_name: postgres

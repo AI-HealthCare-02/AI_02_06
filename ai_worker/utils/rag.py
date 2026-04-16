@@ -8,8 +8,9 @@ Follows modern async patterns and error handling practices.
 import logging
 
 from openai import AsyncOpenAI
-
+from tortoise import Tortoise
 from app.core.config import config
+from ai_worker.core.logger import get_loggerj
 
 # 현재 모듈의 이름(__name__)으로 로거 생성
 logger = logging.getLogger(__name__)
@@ -21,7 +22,6 @@ class RAGGenerator:
     This class generates responses from a friendly pharmacist character 'Dayak'
     using Retrieval-Augmented Generation techniques with modern async patterns.
     """
-
     def __init__(self) -> None:
         """Initialize RAG generator with OpenAI client.
 
@@ -31,8 +31,9 @@ class RAGGenerator:
         self._api_key = config.OPENAI_API_KEY
         self.client = AsyncOpenAI(api_key=self._api_key) if self._api_key else None
         self.model = "gpt-4o-mini"  # Model name in use
+        self.embedding_model = "text-embedding-3-small"
 
-    async def get_relevant_documents(self, _query: str) -> str:
+    async def get_relevant_documents(self, query: str, limit: int = 3) -> str:
         """Get relevant documents for the given query.
 
         TODO: Implement actual vector DB (Pinecone, Chroma, etc.) search logic.
@@ -45,8 +46,46 @@ class RAGGenerator:
             str: Retrieved context information.
         """
         # In actual implementation, perform embedding and similarity search here
-        context = "The patient is concerned about side effects of currently taking medications."
-        return context
+        if not self.client:
+            return ""
+
+        try:
+            # 1. 쿼리 임베딩 생성
+            response = await self.client.embeddings.create(
+                input=query,
+                model=self.embedding_model
+            )
+            query_vector = response.data[0].embedding
+
+            # 2. pgvector 코사인 유사도 검색 (Raw SQL)
+            # <=> 연산자는 코사인 거리를 의미하며, 작을수록 유사함
+            conn = Tortoise.get_connection("default")
+            sql = """
+                SELECT medicine_name, category, efficacy, side_effects, precautions
+                FROM medicine_info
+                ORDER BY embedding <=> $1::vector
+                LIMIT $2;
+            """
+            results = await conn.execute_query_dict(sql, [str(query_vector), limit])
+
+            if not results:
+                return "관련된 약학 정보를 찾지 못했습니다."
+
+            # 3. 검색된 결과를 텍스트 컨텍스트로 변환
+            context_list = []
+            for res in results:
+                context_list.append(
+                    f"[약품명: {res['medicine_name']}]\n"
+                    f"- 분류: {res['category']}\n"
+                    f"- 효능: {res['efficacy']}\n"
+                    f"- 부작용 및 주의사항: {res['side_effects']}, {res['precautions']}"
+                )
+            
+            return "\n\n".join(context_list)
+
+        except Exception as e:
+            logger.error(f"RAG Retrieval Error: {e}")
+            return "정보 검색 중 오류가 발생했습니다."
 
     async def generate_chat_response(
         self,
@@ -65,8 +104,7 @@ class RAGGenerator:
         try:
             if self.client is None:
                 return (
-                    "AI response generation is currently not available. "
-                    "Please ask the administrator to configure OPENAI_API_KEY."
+                    "현재 AI 응답을 생성할 수 있는 설정이 준비되지 않았어요."
                 )
 
             # 1. Get context (based on most recent message)
@@ -76,9 +114,10 @@ class RAGGenerator:
             # 2. Set system prompt (use default if not provided)
             # Use \n instead of actual line breaks to prevent SyntaxError
             default_system = (
-                "You are a professional and caring pharmacist 'Dayak'.\n"
-                "Answer user questions kindly based on the provided [Context].\n"
-                "All answers should be based on medical evidence while maintaining a warm tone."
+                "You are 'Dayak,' a professional and warm-hearted pharmacist.\n"
+                "Please answer the user's questions based on the actual pharmaceutical information provided in the [Context].\n"
+                "If the [Context] does not contain information related to the question, answer based on general medical knowledge but strictly advise the user to consult with a professional.\n"
+                "Maintain a kind and warm tone (using the 'Haeyo-che' style) throughout your response."\n"
             )
 
             instruction = system_prompt or default_system
@@ -92,7 +131,7 @@ class RAGGenerator:
                 model=self.model,
                 messages=prompt_messages,
                 temperature=0.7,
-                max_tokens=500,
+                max_tokens=800,
             )
 
             return response.choices[0].message.content
@@ -103,8 +142,8 @@ class RAGGenerator:
             logger.exception("[RAG_ERROR] Response generation failed")
 
             return (
-                "Sorry, there seems to be a temporary server issue. "
-                "The pharmacist seems to be away for a moment. Could you please try again?"
+                "죄송합니다. 답변을 생성하는 중에 문제가 생겼어요."
+                "잠시 후 다시 한번 말씀해 주시겠어요?"
             )
 
 

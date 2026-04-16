@@ -79,6 +79,7 @@ class ChallengeRepository:
         target_days: int,
         started_date: date,
         description: str | None = None,
+        difficulty: str | None = None,
     ) -> Challenge:
         """Create new challenge.
 
@@ -98,6 +99,7 @@ class ChallengeRepository:
             title=title,
             description=description,
             target_days=target_days,
+            difficulty=difficulty,
             started_date=started_date,
             completed_dates=[],
             challenge_status="IN_PROGRESS",

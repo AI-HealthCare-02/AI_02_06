@@ -2,7 +2,7 @@
 // Project Downforce - Database Schema
 // AI 기반 복약 관리 시스템
 // PostgreSQL 15+
-// Updated: 2026-04-01
+// Updated: 2026-04-16
 // ============================================================
 
 Project downforce {
@@ -88,7 +88,11 @@ Table medications {
   id uuid [pk, default: `gen_random_uuid()`, note: '약품 고유 식별자']
   profile_id uuid [not null, ref: > profiles.id, note: '복용자 프로필 ID']
   medicine_name varchar(128) [not null, note: '약품명 (OCR 추출 또는 직접 입력)']
+  department varchar(64) [null, note: '처방 진료과 (예: 내과, 정형외과)']
+  category varchar(64) [null, note: '약품 분류 (예: 해열진통제, 항생제)']
   dose_per_intake varchar(32) [null, note: '1회 복용량 (예: 1정, 5ml, 2포)']
+  daily_intake_count int [null, note: '1일 복용 횟수 (예: 3)']
+  total_intake_days int [null, note: '총 복용 일수 (예: 5)']
   intake_instruction varchar(256) [null, note: '복용 지시사항 (예: 식후 30분, 취침 전)']
   intake_times jsonb [not null, note: '일일 복용 시간 목록']
   total_intake_count int [not null, note: '처방된 총 복용 횟수']
@@ -157,6 +161,7 @@ Table challenges {
   description varchar(256) [null, note: '챌린지 상세 설명']
   target_days int [not null, note: '목표 달성 일수']
   completed_dates jsonb [not null, default: '[]', note: '달성 완료 날짜 목록']
+  difficulty varchar(16) [null, note: '난이도 (쉬움/보통/어려움)']
   challenge_status varchar(16) [not null, default: 'IN_PROGRESS', note: '진행 상태']
   started_date date [not null, note: '챌린지 시작 날짜']
   created_at timestamptz [not null, default: `now()`, note: '생성 일시']

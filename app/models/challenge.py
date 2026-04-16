@@ -37,8 +37,9 @@ class Challenge(models.Model):
     # Store completion dates as JSON array instead of separate ChallengeLog table
     completed_dates = fields.JSONField(default=list, description="List of completion dates")
 
-    challenge_status = fields.CharField(max_length=16, default="IN_PROGRESS", description="Progress status")
-    started_date = fields.DateField(description="Challenge start date")
+    difficulty = fields.CharField(max_length=16, null=True, description="난이도 (쉬움/보통/어려움)")
+    challenge_status = fields.CharField(max_length=16, default="IN_PROGRESS", description="진행 상태")
+    started_date = fields.DateField(description="챌린지 시작 날짜")
 
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)

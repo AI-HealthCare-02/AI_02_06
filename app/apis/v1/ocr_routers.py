@@ -6,7 +6,7 @@ operations including image processing, medication extraction, and data confirmat
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 
 from app.dependencies.security import get_current_account
 from app.dtos.ocr import ConfirmMedicationRequest, OcrExtractResponse
@@ -113,6 +113,7 @@ async def get_draft_medication(
 )
 async def confirm_and_save_medication(
     request: ConfirmMedicationRequest,
+    background_tasks: BackgroundTasks,
     ocr_service: Annotated[OCRService, Depends(get_ocr_service)],
     current_account: Annotated[Account, Depends(get_current_account)],
 ) -> dict:
@@ -143,7 +144,7 @@ async def confirm_and_save_medication(
         )
 
     try:
-        result = await ocr_service.confirm_and_save(request, str(profile.id))
+        result = await ocr_service.confirm_and_save(request, str(profile.id), background_tasks)
         return result
     except Exception as e:
         # Print full error details to terminal in red

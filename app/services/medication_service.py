@@ -4,11 +4,18 @@ This module provides business logic for medication management operations
 including creation, updates, and ownership verification.
 """
 
+import hashlib
+import json
+import os
+from datetime import timedelta
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from openai import AsyncOpenAI, OpenAIError
 
+from app.dtos.drug_info import DrugInfoResponse, DrugInteraction
 from app.dtos.medication import MedicationCreate, MedicationUpdate
+from app.models.llm_response_cache import LLMResponseCache
 from app.models.medication import Medication
 from app.repositories.medication_repository import MedicationRepository
 from app.repositories.profile_repository import ProfileRepository
@@ -127,6 +134,11 @@ class MedicationService:
         """
         await self._verify_profile_ownership(profile_id, account_id)
         return await self.repository.get_active_by_profile(profile_id)
+
+    async def get_inactive_medications_with_owner_check(self, profile_id: UUID, account_id: UUID) -> list[Medication]:
+        """소유권 검증 후 프로필의 복용 완료된 약품 조회"""
+        await self._verify_profile_ownership(profile_id, account_id)
+        return await self.repository.get_inactive_by_profile(profile_id)
 
     async def get_medications_by_account(self, account_id: UUID) -> list[Medication]:
         """Get medications for all profiles of an account.
@@ -271,3 +283,80 @@ class MedicationService:
         """
         medication = await self.get_medication_with_owner_check(medication_id, account_id)
         await self.repository.soft_delete(medication)
+
+    async def get_drug_info_with_owner_check(self, medication_id: UUID, account_id: UUID) -> DrugInfoResponse:
+        """소유권 검증 후 LLM 기반 약품 정보(주의사항/부작용/상호작용) 반환. llm_response_cache로 비용 절감."""
+        medication = await self.get_medication_with_owner_check(medication_id, account_id)
+        return await self._get_drug_info(medication.medicine_name)
+
+    async def _get_drug_info(self, medicine_name: str) -> DrugInfoResponse:
+        """약품명 기반 LLM 호출. 캐시 히트 시 DB에서 반환, 미스 시 LLM 호출 후 30일 캐시 저장."""
+        from datetime import datetime, timezone
+
+        prompt_key = f"drug_info_v1:{medicine_name}"
+        prompt_hash = hashlib.sha256(prompt_key.encode()).hexdigest()
+
+        # 캐시 조회
+        cached = await LLMResponseCache.filter(
+            prompt_hash=prompt_hash,
+            expires_at__gte=datetime.now(tz=timezone.utc),
+        ).first()
+        if cached:
+            await LLMResponseCache.filter(id=cached.id).update(hit_count=cached.hit_count + 1)
+            return DrugInfoResponse.model_validate(cached.response)
+
+        # LLM 호출
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise HTTPException(status_code=500, detail="OPENAI_API_KEY가 설정되지 않았습니다.")
+
+        client = AsyncOpenAI(api_key=api_key)
+        prompt = f"""당신은 한국 약사 전문가입니다. '{medicine_name}' 약품에 대해 아래 JSON 형식으로만 답변하세요.
+
+{{
+  "medicine_name": "{medicine_name}",
+  "warnings": ["주의사항1", "주의사항2", ...],
+  "side_effects": ["부작용1", "부작용2", ...],
+  "interactions": [
+    {{"drug": "상호작용약품명", "description": "설명"}},
+    ...
+  ],
+  "severe_reaction_advice": "심각한 반응 시 조언 문장"
+}}
+
+규칙:
+- warnings: 복용 전 확인할 주의사항 3~5개 (임산부, 노약자, 음식 등)
+- side_effects: 주요 부작용 4~6개 (단어 형태, 예: "두통", "어지러움")
+- interactions: 병용 주의 약물 2~3개
+- 모든 내용은 한국어로 작성
+- JSON 외 다른 텍스트 없이 JSON만 반환"""
+
+        try:
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                response_format={"type": "json_object"},
+            )
+            raw = response.choices[0].message.content or "{}"
+            data = json.loads(raw)
+            drug_info = DrugInfoResponse(
+                medicine_name=data.get("medicine_name", medicine_name),
+                warnings=data.get("warnings", []),
+                side_effects=data.get("side_effects", []),
+                interactions=[DrugInteraction(**i) for i in data.get("interactions", [])],
+                severe_reaction_advice=data.get("severe_reaction_advice", "심한 부작용이 나타나면 즉시 복용을 중단하고 의사와 상담하세요."),
+            )
+        except (OpenAIError, json.JSONDecodeError) as e:
+            raise HTTPException(status_code=502, detail=f"약품 정보를 가져오는 데 실패했습니다: {e}") from e
+
+        # 30일 캐시 저장
+        expires_at = datetime.now(tz=timezone.utc) + timedelta(days=30)
+        await LLMResponseCache.create(
+            prompt_hash=prompt_hash,
+            prompt_text=prompt_key,
+            response=drug_info.model_dump(),
+            expires_at=expires_at,
+        )
+
+        return drug_info

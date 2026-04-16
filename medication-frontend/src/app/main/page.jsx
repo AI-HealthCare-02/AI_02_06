@@ -2,7 +2,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import api, { showError } from '@/lib/api'
-import { Pill, Flame, X, Check, Plus, MessageCircle } from 'lucide-react'
+import { Pill, Flame, X, Plus, MessageCircle } from 'lucide-react'
 import ChatModal from '@/components/ChatModal'
 
 // 스켈레톤은 main의 레이아웃을 따름
@@ -282,6 +282,8 @@ function MainPageContent() {
   const [showChat, setShowChat] = useState(false)
   const [userName, setUserName] = useState('사용자')
   const [profileId, setProfileId] = useState(null)
+  const [medications, setMedications] = useState([])
+  const [activeChallenge, setActiveChallenge] = useState(null)
   const [greeting, setGreeting] = useState({ msg: '반가워요', sub: '오늘 하루도 건강하게 시작해봐요' })
 
   // 설문 팝업 쿼리 파라미터 감지
@@ -302,6 +304,17 @@ function MainPageContent() {
           const self = profileRes.data.find(p => p.relation_type === 'SELF') || profileRes.data[0]
           setUserName(self.name.split('(')[0])
           setProfileId(self.id)
+
+          const [medRes, challengeRes] = await Promise.all([
+            api.get(`/api/v1/medications?profile_id=${self.id}&active_only=true`),
+            api.get('/api/v1/challenges').catch(() => ({ data: [] })),
+          ])
+          setMedications(medRes.data || [])
+          const inProgress = (challengeRes.data || []).filter(c => c.challenge_status === 'IN_PROGRESS')
+          if (inProgress.length > 0) {
+            const random = inProgress[Math.floor(Math.random() * inProgress.length)]
+            setActiveChallenge(random)
+          }
         }
         const hour = new Date().getHours()
         if (hour < 12) setGreeting({ msg: '좋은 아침이에요', sub: '오늘 하루도 건강하게 시작해봐요' })
@@ -344,26 +357,47 @@ function MainPageContent() {
             <div className="flex justify-between items-center mb-8">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-gray-100 rounded-2xl flex items-center justify-center"><Pill size={20} className="text-gray-900" /></div>
-                <h2 className="text-xl font-bold text-gray-900">오늘 복약 현황</h2>
+                <h2 className="text-xl font-bold text-gray-900">복용 중인 약</h2>
               </div>
-              <span className="text-sm font-black text-gray-900">2/3 완료</span>
+              <button onClick={() => router.push('/medication')} className="text-sm font-bold text-gray-400 hover:text-gray-900 transition-colors cursor-pointer">
+                전체보기 →
+              </button>
             </div>
-            <div className="w-full bg-gray-100 rounded-full h-1.5 mb-10 overflow-hidden">
-              <div className="bg-black h-full transition-all duration-1000" style={{ width: '66%' }} />
-            </div>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {[{time: '08:00', name: '혈압약', done: true}, {time: '13:00', name: '당뇨약', done: true}, {time: '19:00', name: '비타민', done: false}].map((med, i) => (
-                <div key={i} className={`p-6 rounded-2xl border transition-all ${med.done ? 'bg-gray-50 border-gray-100' : 'bg-white border-gray-200 shadow-sm'}`}>
-                  <div className="flex justify-between items-start mb-4">
-                    <span className="text-xs font-bold text-gray-400">{med.time}</span>
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center ${med.done ? 'bg-black text-white' : 'bg-gray-100 text-gray-400'}`}>
-                      {med.done ? <Check size={12} /> : <Plus size={12} />}
-                    </div>
-                  </div>
-                  <h3 className={`font-bold ${med.done ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{med.name}</h3>
+            {medications.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
+                  <Pill size={28} className="text-gray-300" />
                 </div>
-              ))}
-            </div>
+                <p className="text-gray-400 font-bold mb-1">등록된 약이 없어요</p>
+                <p className="text-gray-300 text-sm mb-6">처방전을 촬영해서 약을 등록해보세요</p>
+                <button onClick={() => router.push('/ocr')} className="px-6 py-3 bg-gray-900 text-white text-sm font-bold rounded-full cursor-pointer hover:bg-gray-800 transition-colors">
+                  처방전 등록하기
+                </button>
+              </div>
+            ) : (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {medications.slice(0, 6).map((med) => (
+                  <div
+                    key={med.id}
+                    onClick={() => router.push(`/medication/${med.id}`)}
+                    className="p-5 rounded-2xl border border-gray-100 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-all cursor-pointer"
+                  >
+                    <div className="flex justify-between items-start mb-3">
+                      {med.category && (
+                        <span className="text-[10px] font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded-full">{med.category}</span>
+                      )}
+                      <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center ml-auto">
+                        <Plus size={12} className="text-gray-400" />
+                      </div>
+                    </div>
+                    <h3 className="font-bold text-gray-900 text-sm mb-2 leading-snug">{med.medicine_name}</h3>
+                    <p className="text-xs text-gray-400">
+                      {[med.dose_per_intake, med.intake_instruction].filter(Boolean).join(' · ') || '복용 정보 없음'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
 
           {/* 사이드바 */}
@@ -371,8 +405,19 @@ function MainPageContent() {
             <div onClick={() => router.push('/challenge')} className="bg-gray-900 rounded-[32px] p-8 text-white cursor-pointer hover:-translate-y-1 transition-all min-h-[220px] flex flex-col justify-end relative overflow-hidden group">
               <Flame size={120} className="absolute -right-4 -top-4 opacity-[0.05] group-hover:scale-110 transition-transform" />
               <p className="text-gray-500 font-bold text-xs mb-2 tracking-widest">CHALLENGE</p>
-              <h2 className="text-2xl font-black mb-3">금연 챌린지</h2>
-              <p className="text-orange-500 text-sm font-bold">3일째 성공 중! →</p>
+              {activeChallenge ? (
+                <>
+                  <h2 className="text-2xl font-black mb-3">{activeChallenge.title}</h2>
+                  <p className="text-orange-500 text-sm font-bold">
+                    {activeChallenge.completed_dates?.length || 0}일째 성공 중! →
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h2 className="text-2xl font-black mb-3">챌린지 시작하기</h2>
+                  <p className="text-gray-400 text-sm font-bold">건강한 습관을 만들어보세요 →</p>
+                </>
+              )}
             </div>
           </div>
         </div>
