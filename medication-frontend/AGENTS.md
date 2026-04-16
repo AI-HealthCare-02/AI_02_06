@@ -1,247 +1,586 @@
-<!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
+# AI Agent Development Guide
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
-<!-- END:nextjs-agent-rules -->
+**IMPORTANT: Read DESIGN_SYSTEM.md first before starting any development work. This document contains the complete frontend architecture, patterns, and standards that must be followed.**
 
-# Frontend (Next.js) - AI Assistant Guide
+Development guidelines for AI agents working on the medication management system frontend.
 
-## Architecture
+---
 
+## Project Structure and Absolute Path Imports
+
+### Project Structure
 ```
 medication-frontend/
 ├── src/
-│   ├── app/              # App Router (Pages)
-│   │   ├── layout.js     # Root Layout
-│   │   ├── page.js       # Landing Page
-│   │   ├── login/        # Auth Pages
-│   │   ├── main/         # Dashboard
-│   │   ├── medication/   # Drug Details
-│   │   ├── ocr/          # Prescription OCR
-│   │   ├── chat/         # AI Consultation
-│   │   ├── challenge/    # Health Challenges
-│   │   ├── survey/       # Health Survey
-│   │   └── mypage/       # User Settings
-│   ├── components/       # Shared Components
-│   └── lib/              # Utilities
-│       ├── api.js        # Axios + RTR
-│       ├── errors.js     # Error Handling
-│       └── tokenManager.js
-├── out/                  # Static Export 빌드 결과물
-├── public/               # Static Assets
-└── package.json
+│   ├── app/                    # Next.js App Router pages
+│   │   ├── auth/              # Authentication pages
+│   │   ├── challenge/         # Challenge pages
+│   │   ├── chat/              # Chat pages
+│   │   ├── login/             # Login page
+│   │   ├── main/              # Main dashboard
+│   │   ├── medication/        # Medication management pages
+│   │   ├── mypage/            # My page
+│   │   ├── ocr/               # OCR prescription registration
+│   │   └── survey/            # Health survey
+│   ├── components/            # Reusable components
+│   │   ├── auth/              # Authentication components
+│   │   ├── chat/              # Chat components
+│   │   ├── common/            # Common components
+│   │   └── layout/            # Layout components
+│   ├── config/                # Configuration files
+│   │   └── env.js             # Environment variables
+│   └── lib/                   # Utilities and libraries
+│       ├── api.js             # API client
+│       ├── errors.js          # Error handling
+│       └── tokenManager.js    # Token management
+├── jsconfig.json             # JavaScript configuration (absolute paths)
+└── package.json              # Dependencies
 ```
 
-## CRITICAL: JavaScript Only
+### Absolute Path Import Rules (CRITICAL)
 
-**TypeScript를 사용하지 않습니다. 모든 파일은 `.jsx` 확장자를 사용합니다.**
-
-- `.tsx` 파일 생성 금지
-- `.ts` 파일 생성 금지
-- 타입 어노테이션 (`: string`, `: number`, `: any` 등) 사용 금지
-- 제네릭 타입 (`<T>`, `Array<string>` 등) 사용 금지
-- `interface`, `type` 키워드 사용 금지
-
-## Deployment: Static Export
-
-Next.js를 **Static Export** 모드로 빌드합니다.
-
-```javascript
-// next.config.mjs
-const nextConfig = {
-  output: "export",        // 정적 파일만 생성
-  trailingSlash: true,     // /page -> /page/index.html
-  images: { unoptimized: true },
-}
-```
-
-### 빌드 및 배포
-```bash
-# 빌드
-npm run build
-# -> out/ 폴더에 정적 파일 생성
-
-# 배포
-# Nginx가 out/ 폴더를 직접 서빙
-```
-
-### Static Export 제약사항
-- `getServerSideProps` 사용 불가
-- `middleware.ts` 사용 불가
-- Next.js API Routes 사용 불가
-- Image Optimization 사용 불가 (unoptimized: true)
-
-## Technology Stack
-
-- **Framework**: Next.js 16.2.2 (App Router, Static Export)
-- **React**: 19.2.4
-- **Styling**: Tailwind CSS v4
-- **HTTP**: Axios with RTR interceptors
-- **Notifications**: react-hot-toast
-
-## Coding Conventions
-
-### File Naming (JavaScript Only)
-- Pages: `page.jsx`
-- Components: `PascalCase.jsx`
-- Utilities: `camelCase.js`
-
-### Component Structure
-```jsx
-// 1. Imports
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-
-// 2. Component
-export default function MyComponent() {
-  // 3. Hooks
-  const router = useRouter()
-  const [data, setData] = useState(null)
-  const [isLoading, setIsLoading] = useState(true)
-
-  // 4. Effects
-  useEffect(() => {
-    fetchData()
-  }, [])
-
-  // 5. Handlers
-  const handleClick = () => {}
-
-  // 6. Render
-  if (isLoading) return <Skeleton />
-
-  return <div>...</div>
-}
-```
-
-### Tailwind Patterns
-```jsx
-// Button
-className="bg-blue-500 text-white px-6 py-3 rounded-xl font-bold
-           hover:bg-blue-600 active:scale-[0.98] transition-all"
-
-// Card
-className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100"
-
-// Responsive Grid
-className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-```
-
-## API Integration
-
-### JWT Cookie 기반 인증
-```jsx
-// Cookie는 브라우저가 자동으로 전송
-// withCredentials: true 설정 필요
-const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_BASE_URL || '',
-  withCredentials: true,  // HttpOnly Cookie 전송
-})
-```
-
-### 환경별 API URL (루트 .env에서 설정)
-```bash
-# 로컬 개발 (ENV=local 또는 ENV=dev)
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
-
-# Docker 통합 / 프로덕션
-NEXT_PUBLIC_API_BASE_URL=
-# -> 비워두면 Nginx 프록시 사용 (/api/... -> FastAPI)
-```
-
-### Data Fetching Pattern
-```jsx
-useEffect(() => {
-  const fetchData = async () => {
-    try {
-      setIsLoading(true)
-      const res = await api.get('/api/v1/items')
-      setData(res.data)
-    } catch (err) {
-      showError(err.parsed?.message || 'Failed to load')
-    } finally {
-      setIsLoading(false)
+**jsconfig.json Configuration:**
+```json
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
     }
   }
-  fetchData()
-}, [])
-```
-
-### Error Handling
-```jsx
-import { showError } from '@/lib/errors'
-
-try {
-  await api.post('/api/v1/items', data)
-} catch (err) {
-  showError(err)  // Displays toast notification
 }
 ```
 
-## Do NOTs
+**Correct Import Patterns:**
+```javascript
+// ✅ Correct absolute path imports (mandatory)
+import api from '@/lib/api'
+import { config } from '@/config/env'
+import Header from '@/components/layout/Header'
+import ChatModal from '@/components/chat/ChatModal'
+import LogoutModal from '@/components/auth/LogoutModal'
 
-- `'use client'` 없이 hooks 사용 금지
-- API URL 하드코딩 금지 (`/api/v1/...` 사용)
-- `console.log` 프로덕션 코드에 남기기 금지
-- 인라인 스타일 사용 금지 (Tailwind 사용)
-- `.tsx`, `.ts` 파일 생성 금지 (JavaScript Only)
-- localStorage에 JWT 저장 금지 -> HttpOnly Cookie 사용
-
-## State Management
-
-- 전역 상태: 필요 시 React Context
-- 서버 상태: useEffect + useState
-- 폼 상태: useState
-- URL 상태: useSearchParams
-
-## Routing
-
-### Navigation
-```jsx
-import { useRouter } from 'next/navigation'
-
-const router = useRouter()
-router.push('/main')
-router.back()
+// ❌ Incorrect relative path imports (absolutely prohibited)
+import api from '../../lib/api'
+import Header from '../components/layout/Header'
+import ChatModal from '../ChatModal'
 ```
 
-### Protected Routes
-인증 검증은 FastAPI에서 처리합니다.
-- 인증 필요 API 호출 시 401 응답 -> 로그인 페이지로 리다이렉트
-- 클라이언트에서 인증 상태 확인 후 UI 분기
+**Import Order:**
+```javascript
+// 1. React and Next.js
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import Image from 'next/image'
 
-## Loading States
+// 2. External libraries
+import { Pill, Camera } from 'lucide-react'
+import toast from 'react-hot-toast'
 
-```jsx
-// Skeleton UI
-if (isLoading) {
+// 3. Internal modules (absolute paths only)
+import api from '@/lib/api'
+import { config } from '@/config/env'
+import Header from '@/components/layout/Header'
+```
+
+---
+
+## Environment Configuration System
+
+### 1. Environment Variable Structure
+
+**config/env.js based configuration:**
+```javascript
+const ENV = process.env.NEXT_PUBLIC_ENV || 'local'
+
+const ENV_CONFIG = {
+  local: {
+    API_BASE_URL: '',
+    KAKAO_REDIRECT_URI: 'http://localhost:3000/auth/kakao/callback',
+  },
+  dev: {
+    API_BASE_URL: '',
+    KAKAO_REDIRECT_URI: 'http://localhost:3000/auth/kakao/callback',
+  },
+  prod: {
+    API_BASE_URL: '',
+    KAKAO_REDIRECT_URI: 'https://ai-02-06.vercel.app/auth/kakao/callback',
+  },
+}
+
+export const config = {
+  ENV,
+  API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL ?? ENV_CONFIG[ENV].API_BASE_URL,
+  KAKAO_CLIENT_ID: process.env.NEXT_PUBLIC_KAKAO_CLIENT_ID || '',
+  KAKAO_REDIRECT_URI: process.env.NEXT_PUBLIC_KAKAO_REDIRECT_URI || ENV_CONFIG[ENV].KAKAO_REDIRECT_URI,
+
+  // Security settings
+  ENABLE_DEV_LOGIN: ENV !== 'prod' && process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN === 'true'
+}
+```
+
+### 2. Environment-specific Developer Login Control
+
+```javascript
+// Developer login component example
+const DeveloperLogin = () => {
+  // SECURITY: Completely hidden in prod environment (both EC2 and Vercel)
+  if (!config.ENABLE_DEV_LOGIN) {
+    return null
+  }
+
   return (
-    <div className="animate-pulse">
-      <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
-      <div className="h-4 bg-gray-200 rounded w-1/2" />
+    <div className="border-2 border-red-500 p-4 rounded-lg bg-red-50">
+      <p className="text-red-600 text-sm mb-2">
+        WARNING: Developer-only login (ENV: {config.ENV})
+      </p>
+      <button
+        onClick={handleDevLogin}
+        className="bg-red-500 text-white px-4 py-2 rounded"
+      >
+        Developer Login
+      </button>
     </div>
   )
 }
 ```
 
-## Development
+### 3. Security Utilities
 
-### 로컬 개발
-```bash
-# 1. 루트 .env 설정 (환경변수 통합 관리)
-# 프로젝트 루트에서 cp .env.example .env 후 필수 값 입력
+```javascript
+// lib/security.js
+import { config } from '@/config/env'
 
-# 2. 개발 서버 실행 (루트 .env 자동 로드)
-npm run dev
-# -> http://localhost:3000
+export const securityUtils = {
+  // Check if dev feature is enabled
+  isDevFeatureEnabled: (featureName) => {
+    if (config.ENV === 'prod') {
+      return false
+    }
+    return process.env[`NEXT_PUBLIC_ENABLE_${featureName}`] === 'true'
+  },
 
-# 3. 백엔드는 Docker로 실행
-docker compose up fastapi redis
+  // Check if local development environment
+  isLocalEnvironment: () => {
+    return config.ENV === 'local' || config.ENV === 'dev'
+  },
+
+  // Check if production environment
+  isProductionEnvironment: () => {
+    return config.ENV === 'prod'
+  },
+
+  // Mask sensitive data
+  maskSensitiveData: (data, fields = ['password', 'token', 'key']) => {
+    const masked = { ...data }
+    fields.forEach(field => {
+      if (masked[field]) {
+        masked[field] = '***'
+      }
+    })
+    return masked
+  }
+}
 ```
 
-### 빌드 테스트
-```bash
-npm run build
-npx serve out
-# -> http://localhost:3000 에서 정적 파일 테스트
+---
+
+## Component Writing Rules
+
+### 1. PropTypes Usage
+
+```javascript
+import PropTypes from 'prop-types'
+
+const MedicationCard = ({ medication, onEdit, onDelete, className }) => {
+  return (
+    <div className={`bg-white rounded-lg p-4 ${className || ''}`}>
+      <h3>{medication.name}</h3>
+      <p>{medication.dosage}</p>
+      <div className="flex gap-2 mt-4">
+        <button onClick={() => onEdit(medication.id)}>Edit</button>
+        <button onClick={() => onDelete(medication.id)}>Delete</button>
+      </div>
+    </div>
+  )
+}
+
+MedicationCard.propTypes = {
+  medication: PropTypes.shape({
+    id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+    name: PropTypes.string.isRequired,
+    dosage: PropTypes.string.isRequired
+  }).isRequired,
+  onEdit: PropTypes.func,
+  onDelete: PropTypes.func,
+  className: PropTypes.string
+}
+
+MedicationCard.defaultProps = {
+  onEdit: () => {},
+  onDelete: () => {},
+  className: ''
+}
+
+export default MedicationCard
 ```
+
+### 2. Custom Hook Patterns
+
+```javascript
+// hooks/useApi.js
+import { useState, useEffect } from 'react'
+import { config } from '@/config/env'
+import { handleApiError } from '@/lib/errors'
+
+/**
+ * Custom hook for API calls
+ * @param {string} endpoint - API endpoint
+ * @param {Object} options - Request options
+ * @returns {Object} { data, loading, error, refetch }
+ */
+export const useApi = (endpoint, options = {}) => {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  const fetchData = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      const url = `${config.API_BASE_URL}${endpoint}`
+      const response = await fetch(url, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers
+        },
+        ...options
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const result = await response.json()
+      setData(result)
+    } catch (err) {
+      // SECURITY: Server error details are not exposed to users
+      const userFriendlyError = handleApiError(err)
+      setError(userFriendlyError)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchData()
+  }, [endpoint])
+
+  return { data, loading, error, refetch: fetchData }
+}
+
+// Usage example
+const MedicationList = () => {
+  const { data: medications, loading, error } = useApi('/api/v1/medications')
+
+  if (loading) return <div>Loading...</div>
+  if (error) return <div className="text-red-600">{error}</div>
+
+  return (
+    <div>
+      {medications?.map(med => (
+        <MedicationCard key={med.id} medication={med} />
+      ))}
+    </div>
+  )
+}
+```
+
+---
+
+## Error Handling and Logging
+
+### lib/errors.js Structure
+
+```javascript
+import toast from 'react-hot-toast'
+import { config } from '@/config/env'
+
+export const HTTP_STATUS_MESSAGES = {
+  400: 'Invalid request.',
+  401: 'Authentication required.',
+  403: 'Access denied.',
+  404: 'Resource not found.',
+  422: 'Invalid input values.',
+  429: 'Too many requests. Please try again later.',
+  500: 'Server error occurred. Please try again later.'
+}
+
+export function parseApiError(error) {
+  const response = error.response
+  const status = response?.status
+  const data = response?.data
+
+  const result = {
+    status: status || 0,
+    code: null,
+    message: 'An unknown error occurred.',
+    shouldRedirectToLogin: false,
+    isRetryable: false,
+    raw: data,
+  }
+
+  if (!response) {
+    result.code = 'network_error'
+    result.message = 'Cannot communicate with server. Please check your network connection.'
+    result.isRetryable = true
+    return result
+  }
+
+  if (status >= 500) {
+    result.code = 'server_error'
+    result.message = 'A temporary error occurred. Please try again later.'
+    result.isRetryable = true
+    return result
+  }
+
+  // User-friendly messages based on HTTP status codes
+  result.message = HTTP_STATUS_MESSAGES[status] || result.message
+
+  if (status === 401) {
+    result.shouldRedirectToLogin = true
+  }
+
+  return result
+}
+
+export function showError(message) {
+  toast.error(message)
+}
+
+export function handleApiError(error, options = {}) {
+  const {
+    showMessage = true,
+    redirectOnAuth = true,
+  } = options
+
+  const parsed = parseApiError(error)
+
+  if (showMessage) {
+    showError(parsed.message)
+  }
+
+  if (redirectOnAuth && parsed.shouldRedirectToLogin) {
+    if (typeof window !== 'undefined') {
+      window.location.href = '/login'
+    }
+  }
+
+  return parsed
+}
+```
+
+---
+
+## Performance Optimization
+
+### 1. Image Optimization
+
+```javascript
+import Image from 'next/image'
+
+const MedicationImage = ({ src, alt, ...props }) => {
+  return (
+    <Image
+      src={src}
+      alt={alt}
+      width={300}
+      height={200}
+      placeholder="blur"
+      blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ..."
+      {...props}
+    />
+  )
+}
+```
+
+### 2. Code Splitting
+
+```javascript
+import dynamic from 'next/dynamic'
+
+// Dynamic loading for heavy components
+const ChatModal = dynamic(() => import('@/components/chat/ChatModal'), {
+  loading: () => <div>Loading chat...</div>,
+  ssr: false // Client-side rendering only
+})
+
+const MedicationPage = () => {
+  const [showChat, setShowChat] = useState(false)
+
+  return (
+    <div>
+      {/* Page content */}
+      {showChat && <ChatModal onClose={() => setShowChat(false)} />}
+    </div>
+  )
+}
+```
+
+---
+
+## Skeleton UI Active Usage
+
+```javascript
+// components/common/Skeleton.jsx
+export const Skeleton = ({ className = '', width, height, rounded = true }) => {
+  return (
+    <div
+      className={`animate-pulse bg-gray-200 ${rounded ? 'rounded' : ''} ${className}`}
+      style={{ width, height }}
+    />
+  )
+}
+
+export const CardSkeleton = () => (
+  <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
+    <Skeleton height="20px" className="mb-3" />
+    <Skeleton height="16px" width="60%" className="mb-2" />
+    <Skeleton height="16px" width="40%" />
+  </div>
+)
+
+export const ListSkeleton = ({ count = 5 }) => (
+  <div className="space-y-4">
+    {Array.from({ length: count }).map((_, i) => (
+      <CardSkeleton key={i} />
+    ))}
+  </div>
+)
+
+// Usage example
+const MedicationList = () => {
+  const { data, loading, error } = useApi('/api/v1/medications')
+
+  if (loading) return <ListSkeleton count={5} />
+  if (error) return <div className="text-red-600">{error}</div>
+
+  return (
+    <div className="space-y-4">
+      {data?.map(med => <MedicationCard key={med.id} medication={med} />)}
+    </div>
+  )
+}
+```
+
+---
+
+## 2025-2026 Modern Frontend Trends
+
+### Modern React Patterns
+```javascript
+// Server Components and Client Components separation
+'use client'
+
+import { useState, useTransition } from 'react'
+
+const MedicationForm = () => {
+  const [isPending, startTransition] = useTransition()
+
+  const handleSubmit = (formData) => {
+    startTransition(async () => {
+      await submitMedication(formData)
+    })
+  }
+
+  return (
+    <form action={handleSubmit}>
+      <button disabled={isPending}>
+        {isPending ? 'Saving...' : 'Save'}
+      </button>
+    </form>
+  )
+}
+```
+
+---
+
+## Code Quality Management
+
+### ESLint Configuration
+```javascript
+// .eslintrc.js
+module.exports = {
+  extends: ['next/core-web-vitals', 'eslint:recommended'],
+  rules: {
+    'no-console': 'warn',
+    'no-unused-vars': 'error',
+    'prefer-const': 'error',
+    'no-var': 'error',
+    'object-shorthand': 'error',
+    'prefer-template': 'error',
+    'no-trailing-spaces': 'error',
+    'react/prop-types': 'warn',
+    'react/jsx-key': 'error',
+    'no-eval': 'error'
+  }
+}
+```
+
+### Pre-commit Validation
+```json
+{
+  "scripts": {
+    "lint": "eslint . --ext .js,.jsx --fix",
+    "lint:check": "eslint . --ext .js,.jsx",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "pre-commit": "npm run lint:check && npm run format:check"
+  }
+}
+```
+
+---
+
+## Mandatory Compliance Items
+
+1. **Security**: Developer backdoor must only be activated in ENV=local
+2. **Vercel Deployment**: GitHub auto-deployment, utilize Next.js serverless functions (including API proxy)
+3. **JWT Authentication**: Immediately redirect unauthenticated users to login page (no UI display)
+4. **Error Security**: Never expose server errors and tracebacks to client (prohibited even in F12 developer mode)
+5. **Performance**: Leverage Next.js automatic caching and modern optimization features
+6. **Accessibility**: Provide appropriate aria-labels for all interactive elements
+7. **SEO**: Mandatory page-specific metadata configuration
+8. **Error Handling**: Include user-friendly error handling logic for all API calls
+9. **Skeleton UI**: Actively use skeleton UI during loading states
+10. **Code Quality**: Mandatory pre-commit validation with ESLint and Prettier
+11. **2025-2026 Trends**: Actively reflect community-validated latest best practices
+12. **Emoji Prohibition**: Absolutely prohibit emoji usage in all code and comments
+
+---
+
+## API Call Patterns
+
+### Trailing Slash Removal Rules
+
+```javascript
+// CRITICAL: Automatically remove trailing slash from API URLs
+export const config = {
+  API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, '') || 'http://localhost:8000'
+}
+
+export const API_ENDPOINTS = {
+  MEDICATION: {
+    LIST: '/api/v1/medications',                    // Correct format
+    DETAIL: (id) => `/api/v1/medications/${id}`,   // Correct format
+    CREATE: '/api/v1/medications'                  // Correct format
+  }
+}
+
+// Usage example
+const response = await fetch(`${config.API_BASE_URL}${API_ENDPOINTS.MEDICATION.LIST}`)
+// Result: http://localhost:8000/api/v1/medications (correct format)
+```
+
+Strictly follow these guidelines to write safe and modern frontend code.
