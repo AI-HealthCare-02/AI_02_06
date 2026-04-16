@@ -161,6 +161,7 @@ Table challenges {
   description varchar(256) [null, note: '챌린지 상세 설명']
   target_days int [not null, note: '목표 달성 일수']
   completed_dates jsonb [not null, default: '[]', note: '달성 완료 날짜 목록']
+  difficulty varchar(16) [null, note: '난이도 (쉬움/보통/어려움)']
   challenge_status varchar(16) [not null, default: 'IN_PROGRESS', note: '진행 상태']
   started_date date [not null, note: '챌린지 시작 날짜']
   created_at timestamptz [not null, default: `now()`, note: '생성 일시']

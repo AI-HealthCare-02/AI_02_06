@@ -13,6 +13,7 @@ class Challenge(models.Model):
     # 기존 ChallengeLog 테이블을 없애고, 달성 날짜들을 JSON 배열 형식으로 한 번에 관리합니다.
     completed_dates = fields.JSONField(default=list, description="달성 완료 날짜 목록")
 
+    difficulty = fields.CharField(max_length=16, null=True, description="난이도 (쉬움/보통/어려움)")
     challenge_status = fields.CharField(max_length=16, default="IN_PROGRESS", description="진행 상태")
     started_date = fields.DateField(description="챌린지 시작 날짜")
 
