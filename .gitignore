@@ -32,7 +32,7 @@ nul
 *.pem
 
 # 로컬 전용 문서 (개인/민감 정보)
-docs-local/
+docs-private/
 
 # SQL문서
 *.sql

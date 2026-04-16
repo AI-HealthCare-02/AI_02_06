@@ -366,5 +366,5 @@ uv run uvicorn app.main:app --reload
 - [SYSTEM_DESIGN.md](docs/SYSTEM_DESIGN_KR.md): Technical design specifications
 - [docs/01_DB_MIGRATION_GUIDE.md](./docs/01_DB_MIGRATION_GUIDE.md): Database migration guide
 - [docs/02_ENV_AND_CICD_GUIDE.md](./docs/02_ENV_AND_CICD_GUIDE.md): Environment setup and CI/CD
-- [docs/OCR_FLOW.md](./docs/OCR_FLOW.md): OCR processing flow
+- [docs/OCR_FLOW.md](docs/OCR_FLOW.md): OCR processing flow
 - [PLAN.md](./PLAN.md): Development planning and architecture design
