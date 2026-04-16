@@ -118,8 +118,9 @@ class MessageService:
 
         try:
             rag = RAGGenerator()
-            # RAGGenerator에 system_prompt를 전달하도록 수정
-            reply = await rag.generate_chat_response(content, history, system_prompt=system_prompt)
+            # 현재 사용자 메시지를 히스토리에 추가
+            messages = history + [{"role": "user", "content": content}]
+            reply = await rag.generate_chat_response(messages, system_prompt=system_prompt)
         except (ValueError, RuntimeError) as e:
             # 실패를 201 성공으로 숨기지 않기 위해, 저장한 user_msg를 정리하고 에러를 표면화합니다.
             await self.repository.soft_delete(user_msg)

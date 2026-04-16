@@ -11,7 +11,7 @@ TEST_BASE_URL = "http://test"
 
 
 @pytest_asyncio.fixture
-async def client() -> AsyncGenerator[AsyncClient, None]:
+async def client() -> AsyncGenerator[AsyncClient]:
     """비동기 테스트 클라이언트"""
     async with AsyncClient(
         transport=ASGITransport(app=app),

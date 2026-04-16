@@ -321,3 +321,31 @@ class OAuthService:
     async def revoke_refresh_token(self, token: str) -> bool:
         """Refresh Token 무효화 (로그아웃)"""
         return await self.refresh_token_repo.revoke(token)
+
+    async def delete_account(self, account: Account) -> bool:
+        """
+        회원 탈퇴 처리
+        1. 해당 계정의 모든 Refresh Token 무효화 (보안 상 필수)
+        2. 계정 비활성화 처리
+        """
+        try:
+            # [수정] Repository의 실제 메서드명인 revoke_all_for_account 사용
+            await self.refresh_token_repo.revoke_all_for_account(account.id)
+
+            # 계정 비활성화 (보여주신 AccountRepository의 deactivate 메서드 활용)
+            await self.account_repo.deactivate(account)
+
+            # 모델에 deleted_at 필드가 있다면 삭제 시점 기록
+            if hasattr(account, "deleted_at"):
+                from datetime import datetime
+
+                account.deleted_at = datetime.now(config.TIMEZONE)
+                await account.save()
+
+            return True
+        except Exception as e:
+            # 에러 발생 시 로그를 남기거나 상세 에러를 던집니다.
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={"error": "delete_failed", "error_description": "회원 탈퇴 처리 중 오류가 발생했습니다."},
+            ) from e

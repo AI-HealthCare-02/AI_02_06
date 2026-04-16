@@ -11,7 +11,11 @@ from app.middlewares.rate_limit import RateLimitMiddleware
 from app.middlewares.security import SecurityMiddleware
 
 app = FastAPI(
-    default_response_class=ORJSONResponse, docs_url="/api/docs", redoc_url="/api/redoc", openapi_url="/api/openapi.json"
+    default_response_class=ORJSONResponse,
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
+    redirect_slashes=False,  # Nginx에서 trailing slash 제거
 )
 
 
@@ -59,6 +63,10 @@ async def orm_exception_handler(request: Request, exc: BaseORMException):
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """예기치 못한 모든 에러 처리 (500 Internal Server Error)"""
+    import traceback
+
+    print(f"[ERROR] {request.method} {request.url.path}: {type(exc).__name__}: {exc}")
+    traceback.print_exc()
     return ORJSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
@@ -71,19 +79,22 @@ async def general_exception_handler(request: Request, exc: Exception):
 # --- 미들웨어 설정 ---
 
 # CORS 설정 (환경별 분기)
+# localhost는 로컬 머신에서만 접근 가능하므로 모든 환경에서 허용해도 보안상 안전
+_localhost_origins = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost", "http://localhost:80"]
+
 if config.ENV == Env.PROD:
-    # 운영 환경: 엄격한 설정
-    cors_origins = [config.FRONTEND_URL]
+    # 운영 환경: Vercel + localhost (로컬 prod 테스트용)
+    cors_origins = [config.FRONTEND_URL] + _localhost_origins
     cors_methods = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
     cors_headers = ["Content-Type", "Authorization"]
 elif config.ENV == Env.DEV:
     # 개발/테스트 환경: Vercel Preview + localhost 허용
-    cors_origins = [config.FRONTEND_URL, "http://localhost:3000", "http://127.0.0.1:3000"]
+    cors_origins = [config.FRONTEND_URL] + _localhost_origins
     cors_methods = ["*"]
     cors_headers = ["*"]
 else:
-    # 로컬/개발 환경: 느슨한 설정
-    cors_origins = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost", "http://localhost:80"]
+    # 로컬 환경: localhost만
+    cors_origins = _localhost_origins
     cors_methods = ["*"]
     cors_headers = ["*"]
 

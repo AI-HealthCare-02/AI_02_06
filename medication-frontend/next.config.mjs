@@ -1,11 +1,24 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Static Export: Nginx가 out/ 폴더를 정적 파일로 서빙
-  output: 'export',
-  // 이미지 최적화 설정 (Static Export에서는 unoptimized: true 필수)
   images: {
     remotePatterns: [],
     unoptimized: true,
+  },
+
+  // trailing slash 자동 리다이렉트 비활성화 (API 프록시 호환)
+  skipTrailingSlashRedirect: true,
+
+  // API 프록시: /api/* -> 백엔드 서버
+  // - local/dev: http://localhost:8000
+  // - prod: Vercel 환경변수 API_BASE_URL
+  async rewrites() {
+    const apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:8000'
+    return [
+      {
+        source: '/api/:path*',
+        destination: `${apiBaseUrl}/api/:path*`,
+      },
+    ]
   },
 }
 

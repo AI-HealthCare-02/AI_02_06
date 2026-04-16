@@ -2,13 +2,10 @@ name: Deploy to EC2
 
 on:
   push:
-    branches:
-      - main
-  # 수동 배포도 가능하도록
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  # 1단계: 테스트 실행
   test:
     name: Run Tests
     runs-on: ubuntu-latest
@@ -54,10 +51,9 @@ jobs:
         run: |
           uv run pytest app/tests/ -v --tb=short || echo "No tests found or tests failed"
 
-  # 2단계: EC2 배포
   deploy:
     name: Deploy to EC2
-    needs: test  # 테스트 통과해야 배포 진행
+    needs: test
     runs-on: ubuntu-latest
 
     steps:
@@ -69,23 +65,30 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
           script: |
+            set -e
             cd ~/AI_02_06
 
-            echo "=== Pulling latest code ==="
+            echo "=== [1/5] Pull latest code ==="
             git fetch origin main
             git reset --hard origin/main
+            echo "Commit: $(git log -1 --oneline)"
 
-            echo "=== Building and restarting containers ==="
-            docker compose -f docker-compose.prod.yml down
+            echo "=== [2/5] Stop containers ==="
+            docker compose -f docker-compose.prod.yml down || true
+
+            echo "=== [3/5] Build and start ==="
             docker compose -f docker-compose.prod.yml up -d --build
 
-            echo "=== Waiting for services to start ==="
-            sleep 30
+            echo "=== [4/5] Wait 45s ==="
+            sleep 45
 
-            echo "=== Checking container status ==="
+            echo "=== [5/5] Status ==="
             docker compose -f docker-compose.prod.yml ps
+            echo "--- FastAPI Logs ---"
+            docker compose -f docker-compose.prod.yml logs fastapi --tail=15 || true
+            echo "--- Health Check ---"
+            docker exec nginx curl -sf http://fastapi:8000/api/v1/health && echo " OK" || echo " FAILED"
 
-  # 3단계: Health Check
   health-check:
     name: Health Check
     needs: deploy
@@ -96,39 +99,31 @@ jobs:
         run: sleep 10
 
       - name: Check API Health
+        env:
+          DOMAIN: ai-02-06.duckdns.org
         run: |
-          echo "Checking API health..."
+          echo "Checking https://${DOMAIN}/api/v1/health"
           for i in 1 2 3 4 5; do
-            if curl -sf http://${{ secrets.EC2_HOST }}/api/v1/health; then
-              echo "Health check passed!"
+            HTTP_CODE=$(curl -s -o /tmp/resp.txt -w "%{http_code}" https://${DOMAIN}/api/v1/health || echo "000")
+            echo "Attempt $i: HTTP $HTTP_CODE"
+            if [ "$HTTP_CODE" = "200" ]; then
+              cat /tmp/resp.txt && echo ""
               exit 0
             fi
-            echo "Attempt $i failed, retrying in 10s..."
             sleep 10
           done
-          echo "Health check failed after 5 attempts"
+          echo "Failed after 5 attempts"
           exit 1
 
       - name: Check Nginx Health
-        run: |
-          curl -sf http://${{ secrets.EC2_HOST }}/health || exit 1
-          echo "Nginx health check passed!"
+        run: curl -sf https://ai-02-06.duckdns.org/health && echo "Nginx OK"
 
-  # 4단계: 배포 실패 시 알림 (선택사항)
   notify-failure:
-    name: Notify on Failure
+    name: Notify Failure
     needs: [test, deploy, health-check]
     if: failure()
     runs-on: ubuntu-latest
-
     steps:
-      - name: Send failure notification
+      - name: Log failure
         run: |
-          echo "Deployment failed! Check GitHub Actions logs."
-          echo "Repository: ${{ github.repository }}"
-          echo "Branch: ${{ github.ref_name }}"
-          echo "Commit: ${{ github.sha }}"
-          # Discord/Slack 웹훅 추가 가능
-          # curl -X POST -H "Content-Type: application/json" \
-          #   -d '{"content": "Deployment failed!"}' \
-          #   ${{ secrets.DISCORD_WEBHOOK }}
+          echo "Deploy failed: ${{ github.repository }}@${{ github.sha }}"

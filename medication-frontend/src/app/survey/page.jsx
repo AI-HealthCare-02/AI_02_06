@@ -27,7 +27,7 @@ export default function SurveyPage() {
     const fetchData = async () => {
       try {
         // 프로필 목록 조회
-        const profileRes = await api.get('/api/v1/profiles/')
+        const profileRes = await api.get('/api/v1/profiles')
         const profiles = profileRes.data
 
         // SELF 프로필 찾기
@@ -81,7 +81,7 @@ export default function SurveyPage() {
   const createEmptyProfile = async () => {
     setIsSubmitting(true)
     try {
-      await api.post('/api/v1/profiles/', {
+      await api.post('/api/v1/profiles', {
         relation_type: 'SELF',
         name: '나',
         health_survey: null,
@@ -109,7 +109,7 @@ export default function SurveyPage() {
       age: parseInt(form.age) || null,
       gender: form.gender || null,
       height: parseInt(form.height) || null,
-      weight: parseInt(form.weight) || null,
+      weight: parseFloat(form.weight) || null,
       is_smoking: form.is_smoking,
       is_drinking: form.is_drinking,
       conditions: form.conditions.length > 0 ? form.conditions : null,
@@ -124,7 +124,7 @@ export default function SurveyPage() {
         })
       } else {
         // 새 프로필 생성
-        await api.post('/api/v1/profiles/', {
+        await api.post('/api/v1/profiles', {
           relation_type: 'SELF',
           name: accountNickname || '나',
           health_survey: healthSurvey,
@@ -185,8 +185,14 @@ export default function SurveyPage() {
               <div>
                 <label className="text-gray-400 text-xs font-bold mb-1.5 block px-1">나이 *</label>
                 <input type="number" placeholder="세"
+                  min={1} max={120} step={1}
                   value={form.age}
-                  onChange={(e) => setForm({...form, age: e.target.value})}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val === '' || (parseInt(val) >= 1 && parseInt(val) <= 120)) {
+                      setForm({...form, age: val})
+                    }
+                  }}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none transition-colors"
                 />
               </div>
@@ -210,16 +216,28 @@ export default function SurveyPage() {
               <div>
                 <label className="text-gray-400 text-xs font-bold mb-1.5 block px-1">키 (cm)</label>
                 <input type="number" placeholder="cm"
+                  min={50} max={250} step={1}
                   value={form.height}
-                  onChange={(e) => setForm({...form, height: e.target.value})}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val === '' || (parseInt(val) >= 50 && parseInt(val) <= 250)) {
+                      setForm({...form, height: val})
+                    }
+                  }}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none transition-colors"
                 />
               </div>
               <div>
                 <label className="text-gray-400 text-xs font-bold mb-1.5 block px-1">몸무게 (kg)</label>
                 <input type="number" placeholder="kg"
+                  min={1} max={300} step={0.1}
                   value={form.weight}
-                  onChange={(e) => setForm({...form, weight: e.target.value})}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val === '' || (parseFloat(val) >= 1 && parseFloat(val) <= 300)) {
+                      setForm({...form, weight: val})
+                    }
+                  }}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none transition-colors"
                 />
               </div>

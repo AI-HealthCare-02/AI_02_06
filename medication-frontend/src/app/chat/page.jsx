@@ -1,8 +1,9 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Home, User, Camera, Trophy, ClipboardList, MessageCircle, X, Send } from 'lucide-react'
 import api from '@/lib/api'
+import ChatModal from '@/components/ChatModal'
 
 // 챗봇 로딩 점 3개
 function TypingDots() {
@@ -157,6 +158,23 @@ export default function Navigation() {
   const router = useRouter()
   const [isOpen, setIsOpen] = useState(false)
   const [showChat, setShowChat] = useState(false)
+  const [profileId, setProfileId] = useState(null)
+
+  // 프로필 ID 가져오기
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const res = await api.get('/api/v1/profiles')
+        if (res.data?.length > 0) {
+          const self = res.data.find(p => p.relation_type === 'SELF') || res.data[0]
+          setProfileId(self.id)
+        }
+      } catch (err) {
+        console.error('프로필 조회 실패:', err)
+      }
+    }
+    fetchProfile()
+  }, [])
 
   const menus = [
     { icon: <Home size={18} />, label: '홈', path: '/main' },
@@ -168,7 +186,7 @@ export default function Navigation() {
 
   return (
     <>
-      {showChat && <ChatModal onClose={() => setShowChat(false)} />}
+      {showChat && <ChatModal onClose={() => setShowChat(false)} profileId={profileId} />}
 
       {/* 햄버거 버튼 */}
       <button

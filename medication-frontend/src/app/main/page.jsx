@@ -1,8 +1,9 @@
 'use client'
-import { useState, useEffect, useRef, Suspense } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import api, { showError } from '@/lib/api'
 import { Pill, Flame, X, Check, Plus, MessageCircle } from 'lucide-react'
+import ChatModal from '@/components/ChatModal'
 
 // 스켈레톤은 main의 레이아웃을 따름
 function MainSkeleton() {
@@ -36,7 +37,7 @@ function SurveyModal({ onClose, userName }) {
   useEffect(() => {
     const fetchProfile = async () => {
       try {
-        const res = await api.get('/api/v1/profiles/')
+        const res = await api.get('/api/v1/profiles')
         const selfProfile = res.data?.find(p => p.relation_type === 'SELF')
         if (selfProfile) {
           setExistingProfile(selfProfile)
@@ -63,7 +64,7 @@ function SurveyModal({ onClose, userName }) {
     if (!existingProfile) {
       setIsSubmitting(true)
       try {
-        await api.post('/api/v1/profiles/', { relation_type: 'SELF', name: userName || '나', health_survey: null })
+        await api.post('/api/v1/profiles', { relation_type: 'SELF', name: userName || '나', health_survey: null })
       } catch (err) { console.error(err) }
       setIsSubmitting(false)
     }
@@ -80,7 +81,7 @@ function SurveyModal({ onClose, userName }) {
       age: parseInt(form.age) || null,
       gender: form.gender || null,
       height: parseInt(form.height) || null,
-      weight: parseInt(form.weight) || null,
+      weight: parseFloat(form.weight) || null,
       is_smoking: form.is_smoking,
       is_drinking: form.is_drinking,
       conditions: form.conditions.length > 0 ? form.conditions : null,
@@ -90,7 +91,7 @@ function SurveyModal({ onClose, userName }) {
       if (existingProfile) {
         await api.patch(`/api/v1/profiles/${existingProfile.id}`, { health_survey: healthSurvey })
       } else {
-        await api.post('/api/v1/profiles/', { relation_type: 'SELF', name: userName || '나', health_survey: healthSurvey })
+        await api.post('/api/v1/profiles', { relation_type: 'SELF', name: userName || '나', health_survey: healthSurvey })
       }
       onClose()
     } catch (err) {
@@ -130,8 +131,12 @@ function SurveyModal({ onClose, userName }) {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-gray-400 text-xs font-bold mb-1.5 block">나이 *</label>
-                <input type="number" placeholder="세" value={form.age}
-                  onChange={(e) => setForm({...form, age: e.target.value})}
+                <input type="number" placeholder="세" min={1} max={120}
+                  value={form.age}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val === '' || (parseInt(val) >= 1 && parseInt(val) <= 120)) setForm({...form, age: val})
+                  }}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none bg-white" />
               </div>
               <div>
@@ -147,14 +152,22 @@ function SurveyModal({ onClose, userName }) {
               </div>
               <div>
                 <label className="text-gray-400 text-xs font-bold mb-1.5 block">키 (cm)</label>
-                <input type="number" placeholder="cm" value={form.height}
-                  onChange={(e) => setForm({...form, height: e.target.value})}
+                <input type="number" placeholder="cm" min={50} max={250}
+                  value={form.height}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val === '' || (parseInt(val) >= 50 && parseInt(val) <= 250)) setForm({...form, height: val})
+                  }}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none bg-white" />
               </div>
               <div>
                 <label className="text-gray-400 text-xs font-bold mb-1.5 block">몸무게 (kg)</label>
-                <input type="number" placeholder="kg" value={form.weight}
-                  onChange={(e) => setForm({...form, weight: e.target.value})}
+                <input type="number" placeholder="kg" min={1} max={300} step={0.1}
+                  value={form.weight}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val === '' || (parseFloat(val) >= 1 && parseFloat(val) <= 300)) setForm({...form, weight: val})
+                  }}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none bg-white" />
               </div>
             </div>
@@ -418,7 +431,7 @@ function MainPageContent() {
   const [showSurvey, setShowSurvey] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [userName, setUserName] = useState('사용자')
-
+  const [profileId, setProfileId] = useState(null)
   const [greeting, setGreeting] = useState({ msg: '반가워요', sub: '오늘 하루도 건강하게 시작해봐요' })
 
   // 설문 팝업 쿼리 파라미터 감지
@@ -434,10 +447,11 @@ function MainPageContent() {
     const initPage = async () => {
       try {
         setIsLoading(true)
-        const profileRes = await api.get('/api/v1/profiles/')
+        const profileRes = await api.get('/api/v1/profiles')
         if (profileRes.data?.length > 0) {
           const self = profileRes.data.find(p => p.relation_type === 'SELF') || profileRes.data[0]
           setUserName(self.name.split('(')[0])
+          setProfileId(self.id)
         }
         const hour = new Date().getHours()
         if (hour < 12) setGreeting({ msg: '좋은 아침이에요', sub: '오늘 하루도 건강하게 시작해봐요' })
@@ -453,7 +467,7 @@ function MainPageContent() {
   return (
     <>
       {showSurvey && <SurveyModal onClose={() => setShowSurvey(false)} userName={userName} />}
-      {showChat && <ChatModal onClose={() => setShowChat(false)} />}
+      {showChat && <ChatModal onClose={() => setShowChat(false)} profileId={profileId} />}
 
       {/* ── 히어로 섹션 (main의 다크 테마 + donghoon의 이름 데이터) ── */}
       <section className="relative w-full min-h-[540px] flex items-center justify-center overflow-hidden bg-black">
