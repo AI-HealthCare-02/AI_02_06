@@ -1,14 +1,34 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import api, { parseApiError, showError } from '@/lib/api'
 import { config, securityUtils } from '@/config/env'
 import { Pill } from 'lucide-react'
+import LoadingSpinner from '@/components/common/LoadingSpinner'
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true)
   const router = useRouter()
+
+  // 로그인 상태 확인
+  useEffect(() => {
+    const checkAuthStatus = async () => {
+      try {
+        // 이미 로그인된 사용자인지 확인
+        await api.get('/api/v1/profiles', { skipAuthInterceptor: true })
+        // 로그인된 상태라면 메인으로 리다이렉트
+        router.replace('/main')
+        return
+      } catch (error) {
+        // 로그인되지 않은 상태 - 로그인 페이지 표시
+        setIsCheckingAuth(false)
+      }
+    }
+
+    checkAuthStatus()
+  }, [router])
 
   // 보안 검증: 개발자 로그인 표시 여부
   const showDevLogin = securityUtils.shouldShowDevLogin()
@@ -78,6 +98,18 @@ const handleTestLogin = async () => {
       showError(parsed.message || '로그인 처리 중 오류가 발생했습니다.')
       setIsLoading(false)
     }
+  }
+
+  // 인증 상태 확인 중이면 로딩 표시
+  if (isCheckingAuth) {
+    return (
+      <main className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
+        <div className="flex flex-col items-center gap-4">
+          <LoadingSpinner size="lg" />
+          <p className="text-gray-600 font-medium">로그인 상태 확인 중...</p>
+        </div>
+      </main>
+    )
   }
 
   return (

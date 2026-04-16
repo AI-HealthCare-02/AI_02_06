@@ -24,6 +24,11 @@ api.interceptors.response.use(
     const originalRequest = error.config;
     const status = error.response?.status;
 
+    // AuthGuard에서 인터셉터 비활성화 요청 시 바로 에러 반환
+    if (originalRequest.skipAuthInterceptor) {
+      return Promise.reject(error);
+    }
+
     // 401 Unauthorized - 토큰 갱신 시도
     if (status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
@@ -33,7 +38,7 @@ api.interceptors.response.use(
       }
 
       try {
-        const { refreshToken } = await import('./tokenManager');
+        const { refreshToken } = await import('./authManager');
         const refreshed = await refreshToken();
 
         if (refreshed) {

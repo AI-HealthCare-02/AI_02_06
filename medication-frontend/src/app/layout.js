@@ -3,6 +3,7 @@ import { Toaster } from "react-hot-toast";
 import "./globals.css";
 import Navigation from '@/components/layout/Navigation'
 import BottomNav from '@/components/layout/BottomNav'
+import GlobalAuthGuard from '@/components/auth/AuthGuard'
 
 // 폰트 최적화: preload와 display swap 적용
 const geistSans = Geist({
@@ -40,9 +41,11 @@ export default function RootLayout({ children }) {
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
       <body className="min-h-full flex flex-col">
-        <Navigation />
-        {children}
-        <BottomNav />
+        <GlobalAuthGuard>
+          <Navigation />
+          {children}
+          <BottomNav />
+        </GlobalAuthGuard>
         <Toaster
           position="top-center"
           toastOptions={{
