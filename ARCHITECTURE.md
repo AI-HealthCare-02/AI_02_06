@@ -12,7 +12,7 @@
                         │                                │             │
                         │  AI Worker ◀── Redis ──────────┤             │
                         │                                │             │
-                        │                             MySQL            │
+                        │                             PostgreSQL       │
                         └─────────────────────────────────────────────┘
 ```
 
@@ -23,7 +23,7 @@
 | Nginx | 리버스 프록시, `/api/*` 요청 라우팅 | nginx:latest |
 | FastAPI | REST API 서버, 인증/비즈니스 로직 처리 | FastAPI + Uvicorn |
 | AI Worker | 모델 추론/학습 비동기 처리 | Python Worker |
-| MySQL | 영구 데이터 저장 | MySQL 8.0 |
+| PostgreSQL | 영구 데이터 저장 | PostgreSQL 15 |
 | Redis | 메시지 브로커 / 캐싱 | Redis Alpine |
 
 ## FastAPI 내부 구조

@@ -3,7 +3,6 @@ import json
 import os
 import shutil
 import tempfile
-import time
 import uuid
 from datetime import date
 from pathlib import Path
@@ -16,11 +15,10 @@ from openai import AsyncOpenAI, OpenAIError
 from pydantic import BaseModel
 
 from app.dtos.ocr import ConfirmMedicationRequest, ExtractedMedicine, OcrExtractResponse
+from app.models.medication import Medication
+from app.core.config import config
 
-# DTO 경로 반영
-from app.models.medication import Medication  # DB 모델 임포트
-
-# 환경변수 우선, 없으면 OS 기본 임시 디렉토리 사용 (보안상 /tmp 하드코딩 방지)
+# 공유 볼륨 경로 (Docker Compose의 ai-worker와 공유되어야 함)
 _UPLOAD_DIR = Path(os.environ.get("ALLOWED_IMAGE_DIR", tempfile.gettempdir())) / "ocr_images"
 _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -134,7 +132,7 @@ class OCRService:
             raise ValueError(f"LLM 파싱 실패: {e}") from e
 
     async def get_draft_data(self, draft_id: str) -> OcrExtractResponse | None:
-        """Redis에서 임시 저장된 데이터를 조회합니다."""
+        """Redis에서 워커가 완료한 데이터를 조회합니다 (Polling 대상)."""
         data_json = await self.redis.get(f"ocr_draft:{draft_id}")
         if data_json:
             return OcrExtractResponse.model_validate_json(data_json)
@@ -152,7 +150,6 @@ class OCRService:
 
         # 2. DB 영구 저장 (Tortoise ORM)
         for med in request.confirmed_medicines:
-            # 복용 횟수 계산 로직 (기본값 처리)
             daily_count = med.daily_intake_count or 1
             total_days = med.total_intake_days or 1
             total_count = daily_count * total_days
