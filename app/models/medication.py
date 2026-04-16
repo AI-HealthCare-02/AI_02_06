@@ -8,7 +8,11 @@ class Medication(models.Model):
     profile = fields.ForeignKeyField("models.Profile", related_name="medications")
 
     medicine_name = fields.CharField(max_length=128, description="약품명")
+    department = fields.CharField(max_length=64, null=True, description="처방 진료과 (예: 내과)")
+    category = fields.CharField(max_length=64, null=True, description="약품 분류 (예: 해열진통제)")
     dose_per_intake = fields.CharField(max_length=32, null=True, description="1회 복용량 (예: 1정, 5ml)")
+    daily_intake_count = fields.IntField(null=True, description="1일 복용 횟수")
+    total_intake_days = fields.IntField(null=True, description="총 복용 일수")
     intake_instruction = fields.CharField(max_length=256, null=True, description="복용 지시사항")
 
     # PostgreSQL의 JSONB를 활용하여 ["08:00", "13:00"] 같은 배열을 통째로 저장합니다.

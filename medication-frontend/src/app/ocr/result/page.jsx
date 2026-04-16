@@ -37,6 +37,7 @@ function OcrResultContent() {
 
   const [isLoading, setIsLoading] = useState(true)
   const [meds, setMeds] = useState([])
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
     // [뒤로가기 기능] URL에 draft_id가 없으면 튕겨냅니다.
@@ -78,11 +79,13 @@ function OcrResultContent() {
 
   // 최종 확인 버튼 (Phase 3으로 연결될 부분)
   const handleConfirm = async () => {
+    if (isSubmitting) return
     if (meds.length === 0) {
       alert('등록할 약이 없습니다.')
       return
     }
 
+    setIsSubmitting(true)
     try {
       const response = await api.post('/api/v1/ocr/confirm', {
         draft_id: draftId,
@@ -97,6 +100,7 @@ function OcrResultContent() {
 
     } catch (error) {
       alert('저장 중 오류가 발생했습니다.')
+      setIsSubmitting(false)
     }
   }
 
@@ -196,8 +200,9 @@ function OcrResultContent() {
           </button>
           <button
             onClick={handleConfirm}
-            className="flex-1 bg-gray-900 text-white py-4 rounded-xl font-semibold cursor-pointer hover:bg-gray-800 transition-all active:scale-[0.98]">
-            수정 완료 및 저장
+            disabled={isSubmitting}
+            className="flex-1 bg-gray-900 text-white py-4 rounded-xl font-semibold transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed enabled:hover:bg-gray-800 enabled:cursor-pointer">
+            {isSubmitting ? '저장 중...' : '수정 완료 및 저장'}
           </button>
         </div>
       </div>

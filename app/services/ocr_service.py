@@ -102,18 +102,23 @@ class OCRService:
 
     def _parse_text_with_llm(self, text: str) -> LlmExtractionResult:
         """OCR 원문 텍스트를 LLM에 전달하여 정형화된 JSON 데이터로 파싱합니다."""
-        prompt = f"""
-        당신은 의료 데이터 파싱 전문가입니다. 다음 처방전(또는 약봉투) OCR 텍스트에서
-        약품명과 복용 지시사항을 정확하게 추출하세요.
+        prompt = f"""당신은 한국 처방전 데이터 파싱 전문가입니다. 아래 OCR 텍스트에서 약품 정보를 추출하세요.
 
-        [OCR 텍스트]
-        {text}
+[OCR 텍스트]
+{text}
 
-        지침:
-        1. 약품명(medicine_name)은 오탈자를 문맥에 맞게 보정하세요. (예: '타이레뉼' -> '타이레놀')
-        2. 복용량, 횟수, 일수 등의 숫자를 정확히 분리하세요.
-        3. 알 수 없는 필드는 null로 비워두세요.
-        """
+[추출 규칙]
+1. medicine_name: 약품명 오탈자를 보정하세요. (예: '타이레뉼' -> '타이레놀')
+2. department: 처방 진료과를 추출하세요. (예: '내과', '정형외과') 없으면 null.
+3. category: 약품 분류를 추론하세요. (예: '해열진통제', '항생제', '소화제') 없으면 null.
+4. dose_per_intake: 1회 복용량을 단위 포함하여 추출하세요. (예: '1정', '2캡슐', '5ml') 없으면 null.
+5. daily_intake_count: 하루에 몇 번 복용하는지 정수로 추출하세요. (예: 1일 3회 -> 3) 없으면 null.
+6. total_intake_days: 총 며칠간 복용하는지 정수로 추출하세요. (예: 5일치 -> 5) daily_intake_count와 다른 값입니다. 없으면 null.
+7. intake_instruction: 복용 시점만 추출하세요. (예: '식후 30분', '취침 전', '공복') 없으면 null.
+
+[중요] daily_intake_count(1일 횟수)와 total_intake_days(총 일수)는 반드시 다른 값입니다.
+예시: "1일 3회 5일분" -> daily_intake_count=3, total_intake_days=5
+알 수 없는 필드는 반드시 null로 설정하세요."""
         try:
             # beta.chat.completions.parse를 사용하면 지정한 Pydantic 모델을 100% 보장하여 반환합니다.
             response = self.client.beta.chat.completions.parse(
@@ -137,7 +142,13 @@ class OCRService:
         """최종 데이터를 DB에 저장하고, 가이드를 생성한 뒤 Redis를 정리합니다."""
         saved_meds = []
 
-        # 1. DB 영구 저장 (Tortoise ORM)
+        # 1. Redis 원자적 삭제 (중복 저장 방지 게이트)
+        # delete()는 삭제된 키 개수를 반환합니다. 0이면 이미 처리된 요청입니다.
+        deleted = await self.redis.delete(f"ocr_draft:{request.draft_id}")
+        if deleted == 0:
+            raise ValueError("이미 처리된 요청입니다. 새로 처방전을 등록해주세요.")
+
+        # 2. DB 영구 저장 (Tortoise ORM)
         for med in request.confirmed_medicines:
             # 복용 횟수 계산 로직 (기본값 처리)
             daily_count = med.daily_intake_count or 1
@@ -147,21 +158,19 @@ class OCRService:
             new_med = await Medication.create(
                 profile_id=profile_id,
                 medicine_name=med.medicine_name,
+                department=med.department,
+                category=med.category,
                 dose_per_intake=med.dose_per_intake,
                 intake_instruction=med.intake_instruction,
                 daily_intake_count=daily_count,
                 total_intake_days=total_days,
-                intake_times=[],  # 초기값 (나중에 유저가 설정 기능 등 추가 가능)
+                intake_times=[],  # TODO: 복용 시간 설정 기능 (다음 sprint)
                 total_intake_count=total_count,
                 remaining_intake_count=total_count,
                 start_date=date.today(),
                 is_active=True,
             )
             saved_meds.append(new_med)
-
-        # 2. Redis 보안 데이터 파기
-        # 처리가 끝났으므로 찌꺼기가 남지 않도록 즉시 삭제합니다.
-        await self.redis.delete(f"ocr_draft:{request.draft_id}")
 
         # 3. LLM 기반 최종 복약 가이드 생성
         # DB JSON이 아니라 "사용자가 수정한 정확한 데이터"를 기반으로 작성합니다.
