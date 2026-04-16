@@ -1,7 +1,7 @@
-"""
-Account Repository
+"""Account repository module.
 
-accounts 테이블 데이터 접근 계층
+This module provides data access layer for the accounts table,
+handling social login account management operations.
 """
 
 from uuid import UUID, uuid4
@@ -10,10 +10,18 @@ from app.models.accounts import Account, AuthProvider
 
 
 class AccountRepository:
-    """Account DB 저장소"""
+    """Account database repository for social login management."""
 
     async def get_by_provider(self, provider: AuthProvider, provider_account_id: str) -> Account | None:
-        """소셜 로그인 정보로 계정 조회"""
+        """Get account by social login provider information.
+
+        Args:
+            provider: Authentication provider.
+            provider_account_id: Provider account ID.
+
+        Returns:
+            Account | None: Account if found, None otherwise.
+        """
         return await Account.filter(
             auth_provider=provider,
             provider_account_id=provider_account_id,
@@ -21,7 +29,14 @@ class AccountRepository:
         ).first()
 
     async def get_by_id(self, account_id: UUID) -> Account | None:
-        """계정 ID로 조회"""
+        """Get account by ID.
+
+        Args:
+            account_id: Account UUID.
+
+        Returns:
+            Account | None: Account if found, None otherwise.
+        """
         return await Account.filter(
             id=account_id,
             deleted_at__isnull=True,
@@ -34,7 +49,17 @@ class AccountRepository:
         nickname: str,
         profile_image_url: str | None = None,
     ) -> Account:
-        """새 계정 생성"""
+        """Create new account.
+
+        Args:
+            provider: Authentication provider.
+            provider_account_id: Provider account ID.
+            nickname: User nickname.
+            profile_image_url: Optional profile image URL.
+
+        Returns:
+            Account: Created account.
+        """
         return await Account.create(
             id=uuid4(),
             auth_provider=provider,
@@ -50,14 +75,30 @@ class AccountRepository:
         nickname: str,
         profile_image_url: str | None = None,
     ) -> Account:
-        """로그인 시 최신 정보로 업데이트"""
+        """Update account with latest login information.
+
+        Args:
+            account: Account to update.
+            nickname: Updated nickname.
+            profile_image_url: Updated profile image URL.
+
+        Returns:
+            Account: Updated account.
+        """
         account.nickname = nickname
         account.profile_image_url = profile_image_url
         await account.save()
         return account
 
     async def deactivate(self, account: Account) -> Account:
-        """계정 비활성화"""
+        """Deactivate account.
+
+        Args:
+            account: Account to deactivate.
+
+        Returns:
+            Account: Deactivated account.
+        """
         account.is_active = False
         await account.save()
         return account

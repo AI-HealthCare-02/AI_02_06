@@ -1,14 +1,21 @@
+"""JWT token exceptions.
+
+This module defines custom exceptions for JWT token operations
+including backend errors and token validation failures.
+"""
+
+
 class TokenBackendError(Exception):
-    pass
+    """Base exception for token backend errors."""
 
 
 class TokenBackendExpiredError(TokenBackendError):
-    pass
+    """Exception raised when token is expired."""
 
 
 class TokenError(Exception):
-    pass
+    """Base exception for token-related errors."""
 
 
 class ExpiredTokenError(TokenError):
-    pass
+    """Exception raised when token has expired."""

@@ -1,9 +1,13 @@
-"""테스트 설정 - 공통 fixture"""
+"""Test configuration - common fixtures.
+
+This module provides common test fixtures and configuration
+for the test suite.
+"""
 
 from collections.abc import AsyncGenerator
 
-import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+import pytest_asyncio
 
 from app.main import app
 
@@ -12,7 +16,11 @@ TEST_BASE_URL = "http://test"
 
 @pytest_asyncio.fixture
 async def client() -> AsyncGenerator[AsyncClient]:
-    """비동기 테스트 클라이언트"""
+    """Async test client fixture.
+
+    Yields:
+        AsyncClient: HTTP client for testing API endpoints.
+    """
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url=TEST_BASE_URL,

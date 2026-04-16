@@ -1,7 +1,7 @@
-"""
-Message Router
+"""Message API router module.
 
-채팅 메시지 관련 HTTP 엔드포인트
+This module contains HTTP endpoints for chat message operations
+including sending messages, retrieving chat history, and AI responses.
 """
 
 from typing import Annotated
@@ -10,7 +10,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 
 from app.dependencies.security import get_current_account
-from app.dtos.message import ChatAskRequest, ChatAskResponse, MessageCreate, MessageResponse
+from app.dtos.message import (
+    ChatAskRequest,
+    ChatAskResponse,
+    MessageCreate,
+    MessageResponse,
+)
 from app.models.accounts import Account
 from app.services.message_service import MessageService
 
@@ -18,9 +23,15 @@ router = APIRouter(prefix="/messages", tags=["Chat"])
 
 
 def get_message_service() -> MessageService:
+    """Get message service instance.
+
+    Returns:
+        MessageService: Message service instance.
+    """
     return MessageService()
 
 
+# Type aliases for dependency injection
 MessageServiceDep = Annotated[MessageService, Depends(get_message_service)]
 CurrentAccount = Annotated[Account, Depends(get_current_account)]
 
@@ -29,13 +40,21 @@ CurrentAccount = Annotated[Account, Depends(get_current_account)]
     "/ask",
     response_model=ChatAskResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="사용자 질문 전송 및 AI 응답 수신",
+    summary="Send user question and receive AI response",
 )
 async def ask_message(
     data: ChatAskRequest,
     service: MessageServiceDep,
-):
-    """사용자 메시지를 저장하고 RAG 기반 AI 응답을 생성하여 반환합니다."""
+) -> ChatAskResponse:
+    """Send user message and generate RAG-based AI response.
+
+    Args:
+        data: Chat ask request data containing session ID and message content.
+        service: Message service instance.
+
+    Returns:
+        ChatAskResponse: Response containing both user and assistant messages.
+    """
     user_msg, assistant_msg = await service.ask_and_reply(
         session_id=data.session_id,
         content=data.content,
@@ -50,14 +69,23 @@ async def ask_message(
     "",
     response_model=MessageResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="메시지 전송",
+    summary="Send message",
 )
 async def send_message(
     data: MessageCreate,
     current_account: CurrentAccount,
     service: MessageServiceDep,
-):
-    """채팅 세션 내에서 메시지를 전송합니다."""
+) -> MessageResponse:
+    """Send a message within a chat session.
+
+    Args:
+        data: Message creation data.
+        current_account: Current authenticated account.
+        service: Message service instance.
+
+    Returns:
+        MessageResponse: Created message information.
+    """
     message = await service.create_user_message_with_owner_check(
         session_id=data.session_id,
         account_id=current_account.id,
@@ -69,15 +97,25 @@ async def send_message(
 @router.get(
     "/session/{session_id}",
     response_model=list[MessageResponse],
-    summary="채팅 이력 조회",
+    summary="Get chat history",
 )
 async def list_messages(
     session_id: UUID,
     current_account: CurrentAccount,
     service: MessageServiceDep,
     limit: int | None = None,
-):
-    """특정 채팅 세션의 모든 메시지 이력을 시간순으로 조회합니다."""
+) -> list[MessageResponse]:
+    """Get all message history for a specific chat session in chronological order.
+
+    Args:
+        session_id: Chat session ID to retrieve messages from.
+        current_account: Current authenticated account.
+        service: Message service instance.
+        limit: Optional limit on number of messages to retrieve.
+
+    Returns:
+        List[MessageResponse]: List of messages in chronological order.
+    """
     messages = await service.get_messages_by_session_with_owner_check(session_id, current_account.id, limit)
     return [MessageResponse.model_validate(m) for m in messages]
 
@@ -85,13 +123,18 @@ async def list_messages(
 @router.delete(
     "/{message_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="메시지 삭제",
+    summary="Delete message",
 )
 async def delete_message(
     message_id: UUID,
     current_account: CurrentAccount,
     service: MessageServiceDep,
-):
-    """특정 메시지를 삭제합니다."""
+) -> None:
+    """Delete a specific message.
+
+    Args:
+        message_id: Message ID to delete.
+        current_account: Current authenticated account.
+        service: Message service instance.
+    """
     await service.delete_message_with_owner_check(message_id, current_account.id)
-    return None

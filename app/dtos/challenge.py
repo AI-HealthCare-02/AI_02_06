@@ -1,3 +1,9 @@
+"""Challenge DTO models module.
+
+This module contains data transfer objects for challenge-related operations
+including creation, updates, and response serialization.
+"""
+
 from datetime import date, datetime
 from uuid import UUID
 
@@ -5,7 +11,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChallengeCreate(BaseModel):
-    """챌린지 생성 요청"""
+    """Challenge creation request model.
+
+    Used for creating new challenges with required fields
+    and optional configuration.
+    """
 
     profile_id: UUID = Field(..., description="연결된 프로필 ID")
     title: str = Field(..., max_length=64, description="챌린지 제목")
@@ -16,6 +26,12 @@ class ChallengeCreate(BaseModel):
 
 
 class ChallengeUpdate(BaseModel):
+    """Challenge update request model.
+
+    Used for partial updates to existing challenges.
+    All fields are optional for flexible updates.
+    """
+
     title: str | None = Field(None, max_length=64, description="챌린지 제목")
     description: str | None = Field(None, max_length=256, description="상세 설명")
     target_days: int | None = Field(None, description="목표 달성 일수")
@@ -26,7 +42,11 @@ class ChallengeUpdate(BaseModel):
 
 
 class ChallengeResponse(BaseModel):
-    """챌린지 응답"""
+    """Challenge response model.
+
+    Used for serializing challenge data in API responses.
+    Includes all challenge fields and metadata.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 

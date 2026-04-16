@@ -1,7 +1,7 @@
-"""
-Profile Service
+"""Profile service module.
 
-프로필 관련 비즈니스 로직
+This module provides business logic for user profile management operations
+including creation, updates, and ownership verification.
 """
 
 from uuid import UUID
@@ -14,37 +14,72 @@ from app.repositories.profile_repository import ProfileRepository
 
 
 class ProfileService:
-    """프로필 비즈니스 로직"""
+    """Profile business logic service for user profile management."""
 
     def __init__(self):
         self.repository = ProfileRepository()
 
     async def get_profile(self, profile_id: UUID) -> Profile:
-        """프로필 조회"""
+        """Get profile by ID.
+
+        Args:
+            profile_id: Profile UUID.
+
+        Returns:
+            Profile: Profile object.
+
+        Raises:
+            HTTPException: If profile not found.
+        """
         profile = await self.repository.get_by_id(profile_id)
         if not profile:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="프로필을 찾을 수 없습니다.",
+                detail="Profile not found.",
             )
         return profile
 
     async def get_profile_with_owner_check(self, profile_id: UUID, account_id: UUID) -> Profile:
-        """소유권 검증 후 프로필 조회"""
+        """Get profile with ownership verification.
+
+        Args:
+            profile_id: Profile UUID.
+            account_id: Account UUID for ownership check.
+
+        Returns:
+            Profile: Profile if owned by account.
+
+        Raises:
+            HTTPException: If access denied to profile.
+        """
         profile = await self.get_profile(profile_id)
         if profile.account_id != account_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="해당 프로필에 대한 접근 권한이 없습니다.",
+                detail="Access denied to this profile.",
             )
         return profile
 
     async def get_profiles_by_account(self, account_id: UUID) -> list[Profile]:
-        """계정의 모든 프로필 조회"""
+        """Get all profiles for an account.
+
+        Args:
+            account_id: Account UUID.
+
+        Returns:
+            list[Profile]: List of profiles.
+        """
         return await self.repository.get_all_by_account(account_id)
 
     async def get_self_profile(self, account_id: UUID) -> Profile | None:
-        """계정의 본인 프로필 조회"""
+        """Get account's self profile.
+
+        Args:
+            account_id: Account UUID.
+
+        Returns:
+            Profile | None: Self profile if found, None otherwise.
+        """
         return await self.repository.get_self_profile(account_id)
 
     async def create_profile(
@@ -52,16 +87,27 @@ class ProfileService:
         account_id: UUID,
         data: ProfileCreate,
     ) -> Profile:
-        """프로필 생성"""
+        """Create new profile.
+
+        Args:
+            account_id: Account UUID.
+            data: Profile creation data.
+
+        Returns:
+            Profile: Created profile.
+
+        Raises:
+            HTTPException: If SELF profile already exists for account.
+        """
         relation_type = RelationType(data.relation_type)
 
-        # SELF 프로필은 계정당 하나만 허용
+        # Only one SELF profile allowed per account
         if relation_type == RelationType.SELF:
             existing_self = await self.repository.get_self_profile(account_id)
             if existing_self:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="본인 프로필은 이미 존재합니다.",
+                    detail="Self profile already exists.",
                 )
 
         return await self.repository.create(
@@ -76,7 +122,15 @@ class ProfileService:
         profile_id: UUID,
         data: ProfileUpdate,
     ) -> Profile:
-        """프로필 수정"""
+        """Update profile.
+
+        Args:
+            profile_id: Profile UUID.
+            data: Profile update data.
+
+        Returns:
+            Profile: Updated profile.
+        """
         profile = await self.get_profile(profile_id)
         update_data = data.model_dump(exclude_unset=True)
         return await self.repository.update(profile, **update_data)
@@ -87,17 +141,35 @@ class ProfileService:
         account_id: UUID,
         data: ProfileUpdate,
     ) -> Profile:
-        """소유권 검증 후 프로필 수정"""
+        """Update profile with ownership verification.
+
+        Args:
+            profile_id: Profile UUID.
+            account_id: Account UUID for ownership check.
+            data: Profile update data.
+
+        Returns:
+            Profile: Updated profile if owned by account.
+        """
         profile = await self.get_profile_with_owner_check(profile_id, account_id)
         update_data = data.model_dump(exclude_unset=True)
         return await self.repository.update(profile, **update_data)
 
     async def delete_profile(self, profile_id: UUID) -> None:
-        """프로필 삭제 (soft delete)"""
+        """Delete profile (soft delete).
+
+        Args:
+            profile_id: Profile UUID to delete.
+        """
         profile = await self.get_profile(profile_id)
         await self.repository.soft_delete(profile)
 
     async def delete_profile_with_owner_check(self, profile_id: UUID, account_id: UUID) -> None:
-        """소유권 검증 후 프로필 삭제 (soft delete)"""
+        """Delete profile with ownership verification (soft delete).
+
+        Args:
+            profile_id: Profile UUID to delete.
+            account_id: Account UUID for ownership check.
+        """
         profile = await self.get_profile_with_owner_check(profile_id, account_id)
         await self.repository.soft_delete(profile)

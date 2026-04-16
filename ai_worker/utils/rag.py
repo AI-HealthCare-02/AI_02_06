@@ -1,28 +1,51 @@
-import json
+"""RAG (Retrieval-Augmented Generation) utility module.
+
+This module provides functionality for generating medication guidance
+using OpenAI's GPT models with retrieved context information.
+Follows modern async patterns and error handling practices.
+"""
+
+import logging
+
 from openai import AsyncOpenAI
 from tortoise import Tortoise
 from app.core.config import config
 from ai_worker.core.logger import get_logger
 
-logger = get_logger(__name__)
+# 현재 모듈의 이름(__name__)으로 로거 생성
+logger = logging.getLogger(__name__)
+
 
 class RAGGenerator:
-    """
-    pgvector와 OpenAI를 활용하여 실제 약학 정보를 검색하고
-    다정한 약사 '다약'의 답변을 생성하는 클래스입니다.
-    """
+    """RAG generator for creating friendly pharmacist responses.
 
-    def __init__(self):
+    This class generates responses from a friendly pharmacist character 'Dayak'
+    using Retrieval-Augmented Generation techniques with modern async patterns.
+    """
+    def __init__(self) -> None:
+        """Initialize RAG generator with OpenAI client.
+
+        API Key is handled lazily to prevent import failures
+        in test/CI environments without API keys.
+        """
         self._api_key = config.OPENAI_API_KEY
         self.client = AsyncOpenAI(api_key=self._api_key) if self._api_key else None
-        self.model = "gpt-4o-mini"
+        self.model = "gpt-4o-mini"  # Model name in use
         self.embedding_model = "text-embedding-3-small"
 
     async def get_relevant_documents(self, query: str, limit: int = 3) -> str:
+        """Get relevant documents for the given query.
+
+        TODO: Implement actual vector DB (Pinecone, Chroma, etc.) search logic.
+        Currently returns mock data or empty string for project structure.
+
+        Args:
+            _query: User query to search for relevant documents (unused in mock).
+
+        Returns:
+            str: Retrieved context information.
         """
-        사용자의 질문을 임베딩하여 pgvector가 적용된 DB에서 
-        가장 유사한 약학 정보를 검색합니다.
-        """
+        # In actual implementation, perform embedding and similarity search here
         if not self.client:
             return ""
 
@@ -69,35 +92,41 @@ class RAGGenerator:
         messages: list[dict[str, str]],
         system_prompt: str | None = None,
     ) -> str:
-        """
-        검색된 실제 약학 컨텍스트를 결합하여 답변을 생성합니다.
+        """Generate chat response using user message history and retrieved context.
+
+        Args:
+            messages: List of message dictionaries with role and content.
+            system_prompt: Optional custom system prompt.
+
+        Returns:
+            str: Generated response from the AI pharmacist.
         """
         try:
             if self.client is None:
-                return "현재 AI 응답을 생성할 수 있는 설정이 준비되지 않았어요."
+                return (
+                    "현재 AI 응답을 생성할 수 있는 설정이 준비되지 않았어요."
+                )
 
-            # 1. 최신 메시지 기반 컨텍스트 확보
+            # 1. Get context (based on most recent message)
             user_query = messages[-1]["content"] if messages else ""
             context = await self.get_relevant_documents(user_query)
 
-            # 2. 시스템 프롬프트 구성 (다약 페르소나 강화)
+            # 2. Set system prompt (use default if not provided)
+            # Use \n instead of actual line breaks to prevent SyntaxError
             default_system = (
-                "당신은 전문적이고 다정한 약사 '다약'입니다.\n"
-                "제공된 [Context]에 있는 실제 약학 정보를 바탕으로 사용자의 질문에 답변하세요.\n"
-                "만약 [Context]에 질문과 관련된 정보가 없다면, 일반적인 상식선에서 답변하되 "
-                "반드시 전문가와 상의할 것을 권고하세요.\n"
-                "답변은 친절하고 따뜻한 말투(해요체)를 유지하세요."
+                "You are 'Dayak,' a professional and warm-hearted pharmacist.\n"
+                "Please answer the user's questions based on the actual pharmaceutical information provided in the [Context].\n"
+                "If the [Context] does not contain information related to the question, answer based on general medical knowledge but strictly advise the user to consult with a professional.\n"
+                "Maintain a kind and warm tone (using the 'Haeyo-che' style) throughout your response."
             )
 
-            instruction = system_prompt if system_prompt else default_system
+            instruction = system_prompt or default_system
 
-            # 3. 메시지 구성
-            prompt_messages = [
-                {"role": "system", "content": f"{instruction}\n\n[Context]\n{context}"}
-            ]
+            # 3. Construct messages for OpenAI API call
+            prompt_messages = [{"role": "system", "content": f"{instruction}\n\n[Context]\n{context}"}]
             prompt_messages.extend(messages)
 
-            # 4. LLM 추론
+            # 4. LLM inference
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=prompt_messages,
@@ -107,8 +136,16 @@ class RAGGenerator:
 
             return response.choices[0].message.content
 
-        except Exception as e:
-            logger.error(f"RAG Generation Error: {e}")
-            return "죄송합니다. 답변을 생성하는 중에 문제가 생겼어요. 다시 한번 말씀해 주시겠어요?"
+        except Exception:
+            # Architectural error handling: log error and provide fallback message
+            # TODO: Replace with proper logging when logger is available
+            logger.exception("[RAG_ERROR] Response generation failed")
 
+            return (
+                "죄송합니다. 답변을 생성하는 중에 문제가 생겼어요."
+                "잠시 후 다시 한번 말씀해 주시겠어요?"
+            )
+
+
+# Global RAG generator instance (singleton pattern for memory efficiency and state management)
 rag_generator = RAGGenerator()

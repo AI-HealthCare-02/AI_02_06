@@ -1,56 +1,81 @@
-"""
-Rate Limiting 서비스
+"""Rate limiting service module.
 
-현재: 인메모리 기반 (단일 워커용)
-운영: Redis 기반으로 교체 권장
+This module provides rate limiting functionality to prevent abuse.
+Currently uses in-memory storage for single worker environments.
+For production with multiple workers, Redis-based implementation is recommended.
 """
 
-import time
 from abc import ABC, abstractmethod
+import time
 
 from fastapi import HTTPException, status
 
 
 class RateLimiter(ABC):
-    """Rate Limiter 인터페이스"""
+    """Abstract base class for rate limiters."""
 
     @abstractmethod
     def check(self, key: str) -> None:
-        """Rate limit 체크. 초과 시 HTTPException 발생"""
-        pass
+        """Check rate limit for given key.
+
+        Args:
+            key: Identifier for rate limiting (e.g., IP address).
+
+        Raises:
+            HTTPException: If rate limit is exceeded.
+        """
 
 
 class InMemoryRateLimiter(RateLimiter):
-    """
-    인메모리 기반 Rate Limiter
+    """In-memory based rate limiter.
 
-    주의: 다중 워커 환경에서는 각 워커가 별도 상태를 유지함
-    운영 환경에서는 RedisRateLimiter 사용 권장
+    Warning: In multi-worker environments, each worker maintains separate state.
+    For production environments, RedisRateLimiter is recommended.
+
+    Attributes:
+        max_requests: Maximum number of requests allowed in the time window.
+        window_seconds: Time window duration in seconds.
     """
 
     def __init__(self, max_requests: int = 10, window_seconds: int = 60) -> None:
+        """Initialize in-memory rate limiter.
+
+        Args:
+            max_requests: Maximum requests allowed per window.
+            window_seconds: Time window duration in seconds.
+        """
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self._tracker: dict[str, tuple[int, float]] = {}
 
     def check(self, key: str) -> None:
+        """Check rate limit for given key.
+
+        Args:
+            key: Identifier for rate limiting.
+
+        Raises:
+            HTTPException: If rate limit is exceeded.
+        """
         current_time = time.time()
 
         if key in self._tracker:
             count, timestamp = self._tracker[key]
 
-            # 윈도우 초과 시 리셋
+            # Reset if window exceeded
             if current_time - timestamp > self.window_seconds:
                 self._tracker[key] = (1, current_time)
                 return
 
-            # 요청 횟수 초과
+            # Check if request count exceeded
             if count >= self.max_requests:
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail={
                         "error": "rate_limit_exceeded",
-                        "error_description": f"요청 횟수를 초과했습니다. {self.window_seconds}초 후에 다시 시도해주세요.",
+                        "error_description": (
+                            f"Request limit exceeded. Please try again after {self.window_seconds} seconds."
+                        ),
                     },
                 )
 
@@ -59,10 +84,14 @@ class InMemoryRateLimiter(RateLimiter):
             self._tracker[key] = (1, current_time)
 
 
-# 기본 인스턴스 (DI용)
+# Default instance for dependency injection
 default_rate_limiter = InMemoryRateLimiter(max_requests=10, window_seconds=60)
 
 
 def get_rate_limiter() -> RateLimiter:
-    """Rate Limiter 의존성"""
+    """Get rate limiter dependency.
+
+    Returns:
+        RateLimiter: Rate limiter instance.
+    """
     return default_rate_limiter

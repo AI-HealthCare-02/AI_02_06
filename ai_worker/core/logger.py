@@ -1,3 +1,8 @@
+"""AI Worker logging configuration module.
+
+This module provides logging setup functionality for the AI worker service.
+"""
+
 import logging
 import sys
 
@@ -6,26 +11,42 @@ def setup_logger(
     name: str = "AI Worker",
     level: int = logging.INFO,
 ) -> logging.Logger:
-    _logger = logging.getLogger(name)
+    """Set up a logger with console output.
 
-    # 중복 핸들러 방지 (중요)
-    if _logger.handlers:
-        return _logger
+    Args:
+        name: Logger name.
+        level: Logging level.
 
-    _logger.setLevel(level)
+    Returns:
+        logging.Logger: Configured logger instance.
+    """
+    logger = logging.getLogger(name)
+
+    # Prevent duplicate handlers (important)
+    if logger.handlers:
+        return logger
+
+    logger.setLevel(level)
 
     formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s")
 
-    # 콘솔 출력
+    # Console output
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
 
-    _logger.addHandler(console_handler)
-    _logger.propagate = False  # root logger로 중복 전달 방지
+    logger.addHandler(console_handler)
+    logger.propagate = False  # Prevent duplicate forwarding to root logger
 
-    return _logger
+    return logger
 
 
 def get_logger(name: str) -> logging.Logger:
-    """모듈별 로거 생성"""
+    """Create a module-specific logger.
+
+    Args:
+        name: Module name for the logger.
+
+    Returns:
+        logging.Logger: Configured logger instance.
+    """
     return setup_logger(name)

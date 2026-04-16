@@ -1,48 +1,57 @@
-"""
-LLM 응답 캐시 모델
+"""LLM response cache model module.
 
-비용 최적화: LLM API 토큰 비용 절감
+This module defines the LLMResponseCache model for caching LLM API responses
+to reduce token costs through semantic caching.
+
+Cost optimization: Reduces LLM API token costs through response caching.
 """
 
 from tortoise import fields, models
 
 
 class LLMResponseCache(models.Model):
-    """
-    LLM 응답 캐시 모델
+    """LLM response cache model for token cost optimization.
 
-    - 동일/유사 질문에 대한 토큰 비용 절감
-    - 프롬프트 SHA-256 해시 기반 시맨틱 캐싱
-    - hit_count로 캐시 효율 모니터링
+    This model caches LLM responses for identical/similar questions to reduce token costs.
+    Uses SHA-256 hash-based semantic caching with hit count monitoring for cache efficiency.
+
+    Attributes:
+        id: Primary key for cache record.
+        prompt_hash: SHA-256 hash of the prompt.
+        prompt_text: Original prompt text.
+        response: LLM response data as JSON.
+        hit_count: Cache hit counter for efficiency monitoring.
+        expires_at: Cache expiration timestamp.
+        created_at: Cache creation timestamp.
     """
 
     id = fields.BigIntField(
         primary_key=True,
-        description="캐시 레코드 ID",
+        description="Cache record ID",
     )
     prompt_hash = fields.CharField(
         max_length=64,
         unique=True,
-        description="프롬프트 SHA-256 해시값",
+        description="SHA-256 hash of prompt",
         db_index=True,
     )
     prompt_text = fields.TextField(
-        description="원본 프롬프트 텍스트",
+        description="Original prompt text",
     )
     response = fields.JSONField(
-        description="LLM 응답 데이터",
+        description="LLM response data",
     )
     hit_count = fields.IntField(
         default=0,
-        description="캐시 히트 횟수",
+        description="Cache hit count",
     )
     expires_at = fields.DatetimeField(
-        description="캐시 만료 일시",
+        description="Cache expiration timestamp",
         db_index=True,
     )
     created_at = fields.DatetimeField(
         auto_now_add=True,
-        description="캐시 생성 일시",
+        description="Cache creation timestamp",
     )
 
     class Meta:

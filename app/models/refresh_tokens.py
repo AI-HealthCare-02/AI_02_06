@@ -1,57 +1,68 @@
-"""
-Refresh Token 모델
+"""Refresh token model module.
 
-REQ-USR-AUT-010: 토큰 기반 인증 보안 강화
-RTR (Refresh Token Rotation) + Grace Period 지원
+This module defines the RefreshToken model for secure token management
+with RTR (Refresh Token Rotation) and Grace Period support.
+
+REQ-USR-AUT-010: Token-based authentication security enhancement.
 """
 
 from tortoise import fields, models
 
 
 class RefreshToken(models.Model):
-    """
-    Refresh Token 관리 모델
+    """Refresh token management model.
 
-    - 토큰 원본이 아닌 SHA-256 해시값만 저장 (보안)
-    - 로그아웃 시 is_revoked = True로 즉시 무효화
-    - 다중 기기 로그인 지원 (계정당 여러 토큰 가능)
-    - RTR: 토큰 사용 시 새 토큰 발급 + 기존 토큰 무효화
-    - Grace Period: 동시 요청 대응 (rotated_at 기준 2초간 유효)
+    This model manages refresh tokens with enhanced security features:
+    - Stores SHA-256 hash values only (not original tokens)
+    - Immediate invalidation on logout (is_revoked = True)
+    - Multi-device login support (multiple tokens per account)
+    - RTR: Issues new token + invalidates old token on use
+    - Grace Period: Handles concurrent requests (2-second validity after rotation)
+
+    Attributes:
+        id: Primary key for token record.
+        account: Foreign key to Account model.
+        token_hash: SHA-256 hash of refresh token.
+        expires_at: Token expiration timestamp.
+        is_revoked: Token revocation status (logout or RTR).
+        rotated_at: Token rotation timestamp (for Grace Period calculation).
+        replaced_by_id: ID of replacement token (for tracking).
+        created_at: Token issuance timestamp.
     """
 
     id = fields.BigIntField(
         primary_key=True,
-        description="토큰 레코드 ID",
+        description="Token record ID",
     )
     account: fields.ForeignKeyRelation["models.Model"] = fields.ForeignKeyField(
         "models.Account",
         related_name="refresh_tokens",
         on_delete=fields.CASCADE,
-        description="토큰 소유 계정",
+        description="Token owner account",
     )
     token_hash = fields.CharField(
         max_length=64,
-        description="Refresh Token SHA-256 해시값",
+        description="SHA-256 hash of refresh token",
         db_index=True,
     )
     expires_at = fields.DatetimeField(
-        description="토큰 만료 일시",
+        description="Token expiration timestamp",
     )
     is_revoked = fields.BooleanField(
         default=False,
-        description="토큰 무효화 여부 (로그아웃 또는 RTR 시 True)",
+        description="Token revocation status (logout or RTR)",
     )
     rotated_at = fields.DatetimeField(
         null=True,
-        description="토큰 교체 시점 (RTR 시 기록, Grace Period 계산용)",
+        description="Token rotation timestamp (for Grace Period calculation)",
     )
     replaced_by_id = fields.BigIntField(
         null=True,
-        description="이 토큰을 대체한 새 토큰 ID (추적용)",
+        description="ID of replacement token (for tracking)",
     )
     created_at = fields.DatetimeField(
         auto_now_add=True,
-        description="토큰 발급 일시",
+        description="Token issuance timestamp",
     )
 
     class Meta:

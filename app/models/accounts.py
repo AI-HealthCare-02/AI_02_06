@@ -1,22 +1,39 @@
+"""Account model module.
+
+This module defines the Account model for storing user authentication information
+from social login providers.
+"""
+
 from enum import StrEnum
 
 from tortoise import fields, models
 
-"""
-Account 모델 (뼈대)
-
-TODO: 담당 팀원이 구현 예정
-- 소셜 로그인 인증 정보 저장
-- profiles, chat_sessions, refresh_tokens와 1:N 관계
-"""
-
 
 class AuthProvider(StrEnum):
+    """Authentication provider enumeration."""
+
     KAKAO = "KAKAO"
     NAVER = "NAVER"
 
 
 class Account(models.Model):
+    """Account model for storing user authentication information.
+
+    This model stores social login authentication information and has
+    1:N relationships with profiles, chat_sessions, and refresh_tokens.
+
+    Attributes:
+        id: Primary key UUID.
+        auth_provider: Authentication provider (KAKAO, NAVER).
+        provider_account_id: Account ID from the provider.
+        nickname: User's nickname.
+        profile_image_url: URL of user's profile image.
+        is_active: Whether the account is active.
+        created_at: Account creation timestamp.
+        updated_at: Last update timestamp.
+        deleted_at: Soft deletion timestamp.
+    """
+
     id = fields.UUIDField(primary_key=True)
     auth_provider = fields.CharEnumField(enum_type=AuthProvider, max_length=16)
     provider_account_id = fields.CharField(max_length=128)

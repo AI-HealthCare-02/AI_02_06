@@ -1,3 +1,9 @@
+"""Logging configuration module.
+
+This module provides logging setup functionality for the application
+with modern Python logging patterns and type safety.
+"""
+
 import logging
 import sys
 
@@ -6,25 +12,34 @@ def setup_logger(
     name: str = "ai_worker",
     level: int = logging.INFO,
 ) -> logging.Logger:
-    _logger = logging.getLogger(name)
+    """Set up a logger with console output.
 
-    # 중복 핸들러 방지 (중요)
-    if _logger.handlers:
-        return _logger
+    Args:
+        name: Logger name for identification.
+        level: Logging level (default: INFO).
 
-    _logger.setLevel(level)
+    Returns:
+        logging.Logger: Configured logger instance with console handler.
+    """
+    logger = logging.getLogger(name)
+
+    # Prevent duplicate handlers (important for multiple imports)
+    if logger.handlers:
+        return logger
+
+    logger.setLevel(level)
 
     formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s")
 
-    # 콘솔 출력
+    # Console output handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
 
-    _logger.addHandler(console_handler)
-    _logger.propagate = False  # root logger로 중복 전달 방지
+    logger.addHandler(console_handler)
+    logger.propagate = False  # Prevent duplicate forwarding to root logger
 
-    return _logger
+    return logger
 
 
-# 앱 전역에서 사용할 로거
+# Global logger for the application
 default_logger = setup_logger()

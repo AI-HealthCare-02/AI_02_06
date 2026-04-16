@@ -1,3 +1,9 @@
+"""Medication DTO models module.
+
+This module contains data transfer objects for medication operations
+including creation, updates, and response serialization.
+"""
+
 from datetime import date, datetime
 from uuid import UUID
 
@@ -5,6 +11,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class BaseMedication(BaseModel):
+    """Base medication model with common fields.
+
+    Provides shared fields for medication operations
+    including dosage, schedule, and prescription information.
+    """
+
     medicine_name: str = Field(..., max_length=128, description="약품명")
     department: str | None = Field(None, max_length=64, description="처방 진료과 (예: 내과)")
     category: str | None = Field(None, max_length=64, description="약품 분류 (예: 해열진통제)")
@@ -24,10 +36,21 @@ class BaseMedication(BaseModel):
 
 
 class MedicationCreate(BaseMedication):
-    profile_id: UUID = Field(..., description="연결된 프로필 ID")
+    """Medication creation request model.
+
+    Used for creating new medications with profile association.
+    """
+
+    profile_id: UUID = Field(..., description="Connected profile ID")
 
 
 class MedicationUpdate(BaseModel):
+    """Medication update request model.
+
+    Used for partial updates to existing medications.
+    All fields are optional for flexible updates.
+    """
+
     medicine_name: str | None = Field(None, max_length=128, description="약품명")
     department: str | None = Field(None, max_length=64, description="처방 진료과")
     category: str | None = Field(None, max_length=64, description="약품 분류")
@@ -47,10 +70,16 @@ class MedicationUpdate(BaseModel):
 
 
 class MedicationResponse(BaseMedication):
+    """Medication response model.
+
+    Used for serializing medication data in API responses.
+    Includes all medication fields and metadata.
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID = Field(..., description="약품 레코드 ID")
-    profile_id: UUID = Field(..., description="연결된 프로필 ID")
-    created_at: datetime = Field(..., description="생성 일시")
-    updated_at: datetime = Field(..., description="수정 일시")
-    deleted_at: datetime | None = Field(None, description="삭제 일시")
+    id: UUID = Field(..., description="Medication record ID")
+    profile_id: UUID = Field(..., description="Connected profile ID")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
+    deleted_at: datetime | None = Field(None, description="Deletion timestamp")

@@ -1,41 +1,49 @@
-"""
-DUR 병용금기 캐시 모델
+"""Drug interaction cache model module.
 
-REQ-MED-004: 공공 API 호출 비용 절감
+This module defines the DrugInteractionCache model for caching DUR (Drug Utilization Review)
+interaction results to reduce public API costs.
+
+REQ-MED-004: Public API cost reduction through caching.
 """
 
 from tortoise import fields, models
 
 
 class DrugInteractionCache(models.Model):
-    """
-    DUR 병용금기 캐시 모델
+    """Drug interaction cache model for DUR analysis results.
 
-    - 공공 API 호출 비용 절감 목적
-    - drug_pair: 두 약품명을 정렬하여 결합 (예: "아스피린::타이레놀")
-    - TTL 기반 캐시 만료 관리
+    This model caches DUR interaction analysis results to reduce public API costs.
+    Uses drug_pair as a sorted combination of two drug names (e.g., "aspirin::tylenol").
+    Implements TTL-based cache expiration management.
+
+    Attributes:
+        id: Primary key for cache record.
+        drug_pair: Sorted drug pair key (e.g., "aspirin::tylenol").
+        interaction: DUR interaction analysis results as JSON.
+        expires_at: Cache expiration timestamp.
+        created_at: Cache creation timestamp.
     """
 
     id = fields.BigIntField(
         primary_key=True,
-        description="캐시 레코드 ID",
+        description="Cache record ID",
     )
     drug_pair = fields.CharField(
         max_length=256,
         unique=True,
-        description="정렬된 약품쌍 키 (예: 아스피린::타이레놀)",
+        description="Sorted drug pair key (e.g., aspirin::tylenol)",
         db_index=True,
     )
     interaction = fields.JSONField(
-        description="DUR 상호작용 분석 결과",
+        description="DUR interaction analysis results",
     )
     expires_at = fields.DatetimeField(
-        description="캐시 만료 일시",
+        description="Cache expiration timestamp",
         db_index=True,
     )
     created_at = fields.DatetimeField(
         auto_now_add=True,
-        description="캐시 생성 일시",
+        description="Cache creation timestamp",
     )
 
     class Meta:
