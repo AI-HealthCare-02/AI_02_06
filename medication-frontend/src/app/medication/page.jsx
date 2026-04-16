@@ -1,190 +1,225 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Clock, Utensils, Pill, AlertTriangle, AlertCircle, Ban } from 'lucide-react'
-import Header from '../../components/Header'
+import { Pill, ChevronRight, Plus, Building2 } from 'lucide-react'
+import BottomNav from '@/components/BottomNav'
+import api from '@/lib/api'
 
-function MedicationSkeleton() {
+function MedicationListSkeleton() {
   return (
     <div className="min-h-screen bg-gray-50 pb-24 animate-pulse">
-      <div className="h-48 bg-white border-b border-gray-100" />
-      <div className="max-w-3xl mx-auto px-6 py-12">
-        <div className="h-32 bg-gray-900 rounded-3xl mb-12 shadow-sm" />
-        <div className="flex gap-8 mb-8 border-b border-gray-200">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-8 w-16 bg-gray-200 rounded-lg mb-2" />
-          ))}
-        </div>
-        <div className="space-y-6">
-          <div className="h-64 bg-white rounded-[40px] border border-gray-100 shadow-sm" />
-        </div>
+      <div className="h-16 bg-white border-b border-gray-100" />
+      <div className="max-w-3xl mx-auto px-6 py-6 space-y-4">
+        {[1, 2].map((i) => (
+          <div key={i} className="space-y-1">
+            <div className="h-4 w-24 bg-gray-200 rounded mb-3" />
+            <div className="h-36 bg-white rounded-2xl border border-gray-100" />
+          </div>
+        ))}
       </div>
     </div>
   )
 }
 
-export default function MedicationPage() {
+/** dispensed_date(없으면 start_date) + department 기준으로 처방전 그룹핑 */
+function groupByPrescription(medications) {
+  const groups = {}
+  for (const med of medications) {
+    const dateKey = med.dispensed_date || med.start_date || '날짜 미상'
+    const deptKey = med.department || '기타'
+    const key = `${dateKey}__${deptKey}`
+    if (!groups[key]) {
+      groups[key] = { dateKey, deptKey, items: [] }
+    }
+    groups[key].items.push(med)
+  }
+  // 날짜 내림차순 정렬
+  return Object.values(groups).sort((a, b) => (a.dateKey < b.dateKey ? 1 : -1))
+}
+
+function formatDate(dateStr) {
+  if (!dateStr || dateStr === '날짜 미상') return '날짜 미상'
+  const [year, month, day] = dateStr.split('-')
+  return `${year}년 ${parseInt(month)}월 ${parseInt(day)}일`
+}
+
+function PrescriptionGroup({ group, onMedClick }) {
+  const { deptKey, items } = group
+  // 처방 기간: 가장 이른 start ~ 가장 늦은 end_date
+  const startDates = items.map(m => m.start_date).filter(Boolean).sort()
+  const endDates = items.map(m => m.end_date).filter(Boolean).sort()
+  const rangeStart = startDates[0]
+  const rangeEnd = endDates[endDates.length - 1]
+
+  const hasActive = items.some(m => m.is_active)
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden hover:border-gray-200 hover:shadow-sm transition-all">
+      {/* 그룹 헤더 */}
+      <div className="px-5 pt-5 pb-4 border-b border-gray-50">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 bg-gray-100 rounded-lg flex items-center justify-center shrink-0">
+              <Building2 size={13} className="text-gray-500" />
+            </div>
+            <span className="font-bold text-gray-900 text-sm">{deptKey}</span>
+            <span className="text-xs text-gray-400 font-medium">{items.length}종</span>
+          </div>
+          <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${hasActive ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+            {hasActive ? '복용중' : '완료'}
+          </span>
+        </div>
+        {rangeStart && (
+          <p className="text-xs text-gray-400 mt-2 ml-9">
+            {formatDate(rangeStart)}{rangeEnd ? ` ~ ${formatDate(rangeEnd)}` : ''}
+          </p>
+        )}
+      </div>
+
+      {/* 약품 목록 */}
+      <div className="divide-y divide-gray-50">
+        {items.map((med) => (
+          <button
+            key={med.id}
+            onClick={() => onMedClick(med.id)}
+            className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-gray-50 transition-colors cursor-pointer text-left"
+          >
+            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${med.is_active ? 'bg-green-400' : 'bg-gray-300'}`} />
+            <div className="flex-1 min-w-0">
+              <span className={`text-sm font-bold truncate block ${med.is_active ? 'text-gray-900' : 'text-gray-400'}`}>
+                {med.medicine_name}
+              </span>
+              {med.dose_per_intake && (
+                <span className="text-xs text-gray-400">{med.dose_per_intake}</span>
+              )}
+            </div>
+            {med.category && (
+              <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
+                {med.category}
+              </span>
+            )}
+            <ChevronRight size={14} className="text-gray-300 shrink-0" />
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+const TABS = [
+  { label: '복용중', param: 'active_only=true' },
+  { label: '완료', param: 'inactive_only=true' },
+]
+
+export default function MedicationListPage() {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('용법')
+  const [medications, setMedications] = useState([])
+  const [activeTab, setActiveTab] = useState('복용중')
+  const [profileId, setProfileId] = useState(null)
 
   useEffect(() => {
-    setTimeout(() => setIsLoading(false), 800)
+    const fetchProfile = async () => {
+      try {
+        const profileRes = await api.get('/api/v1/profiles')
+        const self = profileRes.data?.find(p => p.relation_type === 'SELF')
+        if (self) setProfileId(self.id)
+      } catch (err) {
+        console.error(err)
+      }
+    }
+    fetchProfile()
   }, [])
 
-  if (isLoading) return <MedicationSkeleton />
+  useEffect(() => {
+    if (!profileId) return
+    const fetchMedications = async () => {
+      setIsLoading(true)
+      try {
+        const tab = TABS.find(t => t.label === activeTab)
+        const res = await api.get(`/api/v1/medications?profile_id=${profileId}&${tab.param}`)
+        setMedications(res.data || [])
+      } catch (err) {
+        console.error(err)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    fetchMedications()
+  }, [activeTab, profileId])
 
-  const medication = {
-    name: '암로디핀정 5mg',
-    dose: '1정',
-    frequency: '1일 1회',
-    instruction: '식후 30분',
-    days: 30,
-    warnings: [
-      '임산부 또는 수유 중인 경우 복용 전 의사와 상담하세요',
-      '자몽 주스와 함께 복용하지 마세요',
-      '어지러움이 있을 수 있으니 운전 시 주의하세요',
-    ],
-    sideEffects: [
-      '두통', '부종', '어지러움', '홍조', '피로감'
-    ],
-    interactions: [
-      '심바스타틴 - 병용 시 근육 부작용 위험 증가',
-      '사이클로스포린 - 혈중 농도 증가 가능',
-    ]
-  }
+  if (isLoading) return <MedicationListSkeleton />
+
+  const groups = groupByPrescription(medications)
+
+  const emptyMessage = activeTab === '복용중'
+    ? { title: '복용 중인 약이 없어요', sub: '처방전을 촬영해서 약을 등록해보세요' }
+    : { title: '완료된 처방 내역이 없어요', sub: '복용이 끝난 처방전은 여기에 표시됩니다' }
 
   return (
     <main className="min-h-screen bg-gray-50 pb-24">
-      {/* 공통 헤더 적용 */}
-      <Header title={medication.name} subtitle="용법 및 주의사항" showBack={true} />
-
-      {/* 복약 정보 카드 */}
-      <div className="max-w-3xl mx-auto px-6 py-6">
-        <div className="bg-gray-900 rounded-2xl p-6 text-white mb-6 shadow-sm">
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <p className="text-gray-400 text-xs mb-1 opacity-80">1회 복용량</p>
-              <p className="font-bold text-lg">{medication.dose}</p>
-            </div>
-            <div>
-              <p className="text-gray-400 text-xs mb-1 opacity-80">복용 횟수</p>
-              <p className="font-bold text-lg">{medication.frequency}</p>
-            </div>
-            <div>
-              <p className="text-gray-400 text-xs mb-1 opacity-80">복용 방법</p>
-              <p className="font-bold text-lg">{medication.instruction}</p>
-            </div>
-          </div>
-        </div>
-
-        {/* 탭 */}
-        <div className="flex gap-6 mb-6 border-b border-gray-200 overflow-x-auto whitespace-nowrap scrollbar-hide">
-          {['용법', '주의사항', '부작용', '상호작용'].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`pb-3 text-sm font-semibold cursor-pointer transition-colors active:scale-[0.98] transition-transform duration-150
-                ${activeTab === tab
-                  ? 'text-blue-500 border-b-2 border-blue-500'
-                  : 'text-gray-400'
-                }`}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-
-        {/* 탭 컨텐츠 영역 (여백 유지) */}
-        <div className="space-y-4">
-          {/* 용법 */}
-          {activeTab === '용법' && (
-            <div className="bg-white rounded-2xl shadow-sm p-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <h2 className="font-bold mb-4">복용 방법</h2>
-              <div className="space-y-4">
-                <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                  <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center shrink-0">
-                    <Clock size={18} className="text-blue-500" />
-                  </div>
-                  <div>
-                    <p className="font-semibold text-sm">복용 시간</p>
-                    <p className="text-gray-400 text-xs mt-1">매일 같은 시간에 복용하세요</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                  <div className="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center shrink-0">
-                    <Utensils size={18} className="text-green-500" />
-                  </div>
-                  <div>
-                    <p className="font-semibold text-sm">{medication.instruction}</p>
-                    <p className="text-gray-400 text-xs mt-1">식사와 함께 복용하면 효과적이에요</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                  <div className="w-10 h-10 bg-purple-50 rounded-xl flex items-center justify-center shrink-0">
-                    <Pill size={18} className="text-purple-500" />
-                  </div>
-                  <div>
-                    <p className="font-semibold text-sm">1회 {medication.dose} 복용</p>
-                    <p className="text-gray-400 text-xs mt-1">임의로 용량을 변경하지 마세요</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* 주의사항 */}
-          {activeTab === '주의사항' && (
-            <div className="bg-white rounded-2xl shadow-sm p-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <h2 className="font-bold mb-4">주의사항</h2>
-              <div className="space-y-3">
-                {medication.warnings.map((w, i) => (
-                  <div key={i} className="flex gap-3 p-4 bg-yellow-50 rounded-xl">
-                    <AlertTriangle size={16} className="text-yellow-500 shrink-0 mt-0.5" />
-                    <p className="text-sm text-gray-600 leading-relaxed">{w}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 부작용 */}
-          {activeTab === '부작용' && (
-            <div className="bg-white rounded-2xl shadow-sm p-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <h2 className="font-bold mb-4">주요 부작용</h2>
-              <div className="flex flex-wrap gap-2 mb-6">
-                {medication.sideEffects.map((s, i) => (
-                  <span key={i} className="bg-red-50 text-red-500 px-4 py-2 rounded-full text-sm font-medium">
-                    {s}
-                  </span>
-                ))}
-              </div>
-              <div className="bg-red-50 rounded-xl p-4 border border-red-100">
-                <p className="text-red-600 text-sm font-semibold mb-1 flex items-center gap-1">
-                  <AlertCircle size={14} />
-                  이런 증상이 나타나면
-                </p>
-                <p className="text-gray-500 text-xs leading-relaxed">심한 부작용이 나타나면 즉시 복용을 중단하고 의사와 상담하세요</p>
-              </div>
-            </div>
-          )}
-
-          {/* 상호작용 */}
-          {activeTab === '상호작용' && (
-            <div className="bg-white rounded-2xl shadow-sm p-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <h2 className="font-bold mb-4">약물 상호작용</h2>
-              <div className="space-y-3">
-                {medication.interactions.map((item, i) => (
-                  <div key={i} className="flex gap-3 p-4 bg-orange-50 rounded-xl">
-                    <Ban size={16} className="text-orange-500 shrink-0 mt-0.5" />
-                    <p className="text-sm text-gray-600 leading-relaxed">{item}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+      {/* 헤더 */}
+      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+        <h1 className="font-bold text-gray-900 text-lg">내 처방 내역</h1>
+        <button
+          onClick={() => router.push('/ocr')}
+          className="flex items-center gap-1 text-sm font-bold text-gray-900 cursor-pointer hover:opacity-70 transition-opacity"
+        >
+          <Plus size={16} />
+          추가
+        </button>
       </div>
+
+      {/* 탭 */}
+      <div className="bg-white border-b border-gray-100 px-6 flex gap-6">
+        {TABS.map(({ label }) => (
+          <button
+            key={label}
+            onClick={() => setActiveTab(label)}
+            className={`py-3 text-sm font-bold cursor-pointer transition-colors border-b-2 ${
+              activeTab === label ? 'text-gray-900 border-gray-900' : 'text-gray-400 border-transparent'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="max-w-3xl mx-auto px-6 py-4">
+        {groups.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
+              <Pill size={28} className="text-gray-300" />
+            </div>
+            <p className="text-gray-400 font-bold mb-1">{emptyMessage.title}</p>
+            <p className="text-gray-300 text-sm mb-6">{emptyMessage.sub}</p>
+            {activeTab === '복용중' && (
+              <button
+                onClick={() => router.push('/ocr')}
+                className="px-6 py-3 bg-gray-900 text-white text-sm font-bold rounded-full cursor-pointer hover:bg-gray-800 transition-colors"
+              >
+                처방전 등록하기
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {groups.map((group) => (
+              <div key={`${group.dateKey}__${group.deptKey}`}>
+                <p className="text-xs font-bold text-gray-400 mb-2 px-1">
+                  {formatDate(group.dateKey)} 처방
+                </p>
+                <PrescriptionGroup
+                  group={group}
+                  onMedClick={(id) => router.push(`/medication/${id}`)}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <BottomNav />
     </main>
   )
 }
