@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Home, User, Camera, Trophy, ClipboardList, MessageCircle, X } from 'lucide-react'
+import { Home, User, Camera, Trophy, ClipboardList, MessageCircle, X, Send } from 'lucide-react'
 import api from '@/lib/api'
 import ChatModal from '@/components/ChatModal'
 

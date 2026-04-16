@@ -2,7 +2,7 @@
 const nextConfig = {
   images: {
     remotePatterns: [],
-    unoptimized: false,
+    unoptimized: true,
   },
 
   // trailing slash 자동 리다이렉트 비활성화 (API 프록시 호환)
