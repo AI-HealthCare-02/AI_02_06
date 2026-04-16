@@ -82,15 +82,13 @@ async def list_medications(
     """
     if profile_id:
         # Verify profile ownership and retrieve medications
-         if active_only:
+        if active_only:
             medications = await service.get_active_medications_with_owner_check(profile_id, current_account.id)
         elif inactive_only:
             medications = await service.get_inactive_medications_with_owner_check(profile_id, current_account.id)
         else:
             medications = await service.get_medications_by_profile_with_owner_check(profile_id, current_account.id)
     else:
-      
-
         # Retrieve medications for all profiles of the account
         medications = await service.get_medications_by_account(current_account.id)
     return [MedicationResponse.model_validate(med) for med in medications]
