@@ -1,5 +1,6 @@
 'use client'
 import { AlertCircle } from 'lucide-react'
+import PropTypes from 'prop-types'
 
 export default function EmptyState({
   icon,
@@ -28,4 +29,20 @@ export default function EmptyState({
       )}
     </div>
   )
+}
+
+EmptyState.propTypes = {
+  icon: PropTypes.node,
+  title: PropTypes.string.isRequired,
+  message: PropTypes.string.isRequired,
+  actionLabel: PropTypes.string,
+  onAction: PropTypes.func,
+  actionClassName: PropTypes.string
+}
+
+EmptyState.defaultProps = {
+  icon: null,
+  actionLabel: null,
+  onAction: null,
+  actionClassName: null
 }

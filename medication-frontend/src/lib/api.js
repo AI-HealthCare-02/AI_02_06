@@ -7,7 +7,7 @@ import { config } from '@/config/env';
 import { parseApiError, ERROR_CODE_MESSAGES, HTTP_STATUS_MESSAGES } from './errors';
 
 const api = axios.create({
-  baseURL: config.API_BASE_URL,
+  baseURL: config.API_BASE_URL, // 이미 cleanApiUrl로 처리됨
   withCredentials: true,
   timeout: 10000,
 });

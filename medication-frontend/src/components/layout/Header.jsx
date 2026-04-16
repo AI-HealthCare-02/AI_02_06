@@ -1,6 +1,7 @@
 'use client'
 import { useRouter } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
+import PropTypes from 'prop-types'
 
 export default function Header({ title, subtitle, showBack = false, onBack }) {
   const router = useRouter()
@@ -31,4 +32,17 @@ export default function Header({ title, subtitle, showBack = false, onBack }) {
       </div>
     </header>
   )
+}
+
+Header.propTypes = {
+  title: PropTypes.string.isRequired,
+  subtitle: PropTypes.string,
+  showBack: PropTypes.bool,
+  onBack: PropTypes.func
+}
+
+Header.defaultProps = {
+  subtitle: null,
+  showBack: false,
+  onBack: null
 }

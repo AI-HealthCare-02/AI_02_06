@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { LogOut, UserX } from 'lucide-react'
+import PropTypes from 'prop-types'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 
@@ -70,6 +71,11 @@ export function DeleteAccountModal({ onClose, onConfirm }) {
   )
 }
 
+DeleteAccountModal.propTypes = {
+  onClose: PropTypes.func.isRequired,
+  onConfirm: PropTypes.func.isRequired
+}
+
 export default function LogoutModal({ onClose, onConfirm }) {
   return (
     <div className="fixed inset-0 bg-black/50 z-[200] flex items-center justify-center p-4">
@@ -94,4 +100,9 @@ export default function LogoutModal({ onClose, onConfirm }) {
       </div>
     </div>
   )
+}
+
+LogoutModal.propTypes = {
+  onClose: PropTypes.func.isRequired,
+  onConfirm: PropTypes.func.isRequired
 }
