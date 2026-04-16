@@ -96,6 +96,7 @@ jobs:
       - name: Run Tests with Coverage
         if: steps.check_tests.outputs.has_tests == 'true'
         env:
+          PYTHONPATH: "."
           DB_USER: postgres
           DB_PASSWORD: pw1234
           DB_HOST: localhost
