@@ -283,6 +283,7 @@ function MainPageContent() {
   const [userName, setUserName] = useState('사용자')
   const [profileId, setProfileId] = useState(null)
   const [medications, setMedications] = useState([])
+  const [activeChallenge, setActiveChallenge] = useState(null)
   const [greeting, setGreeting] = useState({ msg: '반가워요', sub: '오늘 하루도 건강하게 시작해봐요' })
 
   // 설문 팝업 쿼리 파라미터 감지
@@ -304,8 +305,16 @@ function MainPageContent() {
           setUserName(self.name.split('(')[0])
           setProfileId(self.id)
 
-          const medRes = await api.get(`/api/v1/medications?profile_id=${self.id}&active_only=true`)
+          const [medRes, challengeRes] = await Promise.all([
+            api.get(`/api/v1/medications?profile_id=${self.id}&active_only=true`),
+            api.get('/api/v1/challenges').catch(() => ({ data: [] })),
+          ])
           setMedications(medRes.data || [])
+          const inProgress = (challengeRes.data || []).filter(c => c.challenge_status === 'IN_PROGRESS')
+          if (inProgress.length > 0) {
+            const random = inProgress[Math.floor(Math.random() * inProgress.length)]
+            setActiveChallenge(random)
+          }
         }
         const hour = new Date().getHours()
         if (hour < 12) setGreeting({ msg: '좋은 아침이에요', sub: '오늘 하루도 건강하게 시작해봐요' })
@@ -396,8 +405,19 @@ function MainPageContent() {
             <div onClick={() => router.push('/challenge')} className="bg-gray-900 rounded-[32px] p-8 text-white cursor-pointer hover:-translate-y-1 transition-all min-h-[220px] flex flex-col justify-end relative overflow-hidden group">
               <Flame size={120} className="absolute -right-4 -top-4 opacity-[0.05] group-hover:scale-110 transition-transform" />
               <p className="text-gray-500 font-bold text-xs mb-2 tracking-widest">CHALLENGE</p>
-              <h2 className="text-2xl font-black mb-3">금연 챌린지</h2>
-              <p className="text-orange-500 text-sm font-bold">3일째 성공 중! →</p>
+              {activeChallenge ? (
+                <>
+                  <h2 className="text-2xl font-black mb-3">{activeChallenge.title}</h2>
+                  <p className="text-orange-500 text-sm font-bold">
+                    {activeChallenge.completed_dates?.length || 0}일째 성공 중! →
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h2 className="text-2xl font-black mb-3">챌린지 시작하기</h2>
+                  <p className="text-gray-400 text-sm font-bold">건강한 습관을 만들어보세요 →</p>
+                </>
+              )}
             </div>
           </div>
         </div>
