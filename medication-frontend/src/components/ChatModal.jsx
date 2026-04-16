@@ -16,6 +16,7 @@ export default function ChatModal({ onClose, profileId }) {
   const [isLoading, setIsLoading] = useState(false)
   const [sessionId, setSessionId] = useState(null)
   const [isInitializing, setIsInitializing] = useState(true)
+  const [initError, setInitError] = useState(false)
   const scrollRef = useRef(null)
 
   // 모달 열릴 때: 기존 세션 조회 또는 새 세션 생성
@@ -130,16 +131,15 @@ export default function ChatModal({ onClose, profileId }) {
             </div>
           ))}
 
-          {/* 로딩 애니메이션 */}
-          {isLoading && (
+          {/* 점 바운스: 세션 초기화 중 또는 AI 응답 대기 중 */}
+          {(isInitializing || isLoading) && (
             <div className="flex justify-start">
-              <div className="bg-white border border-gray-200 px-4 py-3 rounded-2xl rounded-bl-none shadow-sm flex gap-1.5">
-                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
-                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
-                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
-              </div>
-            </div>
-          )}
+                <div className="bg-white border border-gray-200 px-4 py-3 rounded-2xl rounded-bl-none shadow-sm flex gap-1.5">
+                  <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
+                  <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
+                  <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
+                </div>
+            </div>)}
         </div>
 
         {/* 입력창 */}
