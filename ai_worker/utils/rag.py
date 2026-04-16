@@ -10,7 +10,7 @@ import logging
 from openai import AsyncOpenAI
 from tortoise import Tortoise
 from app.core.config import config
-from ai_worker.core.logger import get_loggerj
+from ai_worker.core.logger import get_logger
 
 # 현재 모듈의 이름(__name__)으로 로거 생성
 logger = logging.getLogger(__name__)
