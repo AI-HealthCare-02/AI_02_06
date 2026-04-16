@@ -10,6 +10,7 @@ TORTOISE_APP_MODELS = [
     "app.models.refresh_tokens",
     "app.models.profiles",
     "app.models.medication",
+    "app.models.medicine_info",
     "app.models.challenge",
     "app.models.chat_sessions",
     "app.models.messages",
