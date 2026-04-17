@@ -51,6 +51,15 @@ class IntakeLogUpdate(BaseModel):
     taken_at: datetime | None = Field(None, description="Actual intake completion time")
 
 
+class StreakResponse(BaseModel):
+    """Medication streak response model.
+
+    Used for returning consecutive medication days count for a profile.
+    """
+
+    streak_days: int = Field(..., description="Number of consecutive days with at least one taken medication")
+
+
 class IntakeLogResponse(BaseIntakeLog):
     """Intake log response model.
 

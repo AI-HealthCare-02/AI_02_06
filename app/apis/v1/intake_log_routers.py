@@ -11,7 +11,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 
 from app.dependencies.security import get_current_account
-from app.dtos.intake_log import IntakeLogCreate, IntakeLogResponse
+from app.dtos.intake_log import IntakeLogCreate, IntakeLogResponse, StreakResponse
 from app.models.accounts import Account
 from app.services.intake_log_service import IntakeLogService
 
@@ -92,6 +92,32 @@ async def list_intake_logs(
     else:
         logs = await service.get_logs_by_account(current_account.id)
     return [IntakeLogResponse.model_validate(log) for log in logs]
+
+
+@router.get(
+    "/streak",
+    response_model=StreakResponse,
+    summary="Get medication streak",
+)
+async def get_streak(
+    current_account: CurrentAccount,
+    service: IntakeLogServiceDep,
+    profile_id: UUID | None = None,
+) -> StreakResponse:
+    """Get consecutive medication days for a profile.
+
+    Args:
+        current_account: Current authenticated account.
+        service: Intake log service instance.
+        profile_id: Profile ID to calculate streak for.
+
+    Returns:
+        StreakResponse: Consecutive medication days count.
+    """
+    if not profile_id:
+        return StreakResponse(streak_days=0)
+    streak = await service.get_streak_with_owner_check(profile_id, current_account.id)
+    return StreakResponse(streak_days=streak)
 
 
 @router.get(

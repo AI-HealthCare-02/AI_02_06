@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 
 from app.dependencies.security import get_current_account
-from app.dtos.profile import ProfileCreate, ProfileResponse, ProfileUpdate
+from app.dtos.profile import ProfileCreate, ProfileResponse, ProfileSummaryResponse, ProfileUpdate
 from app.models.accounts import Account
 from app.services.profile_service import ProfileService
 
@@ -83,24 +83,27 @@ async def get_profile(
 
 @router.get(
     "",
-    response_model=list[ProfileResponse],
+    response_model=list[ProfileSummaryResponse],
     summary="List profiles",
 )
 async def list_profiles(
     current_account: CurrentAccount,
     service: ProfileServiceDep,
-) -> list[ProfileResponse]:
+) -> list[ProfileSummaryResponse]:
     """Get all profile list for the current account.
+
+    Returns lightweight summary (no health_survey) for profile switching UI.
+    Use GET /profiles/{id} to retrieve full profile including health survey data.
 
     Args:
         current_account: Current authenticated account.
         service: Profile service instance.
 
     Returns:
-        List[ProfileResponse]: List of profiles for the account.
+        List[ProfileSummaryResponse]: Summary list of profiles for the account.
     """
     profiles = await service.get_profiles_by_account(current_account.id)
-    return [ProfileResponse.model_validate(p) for p in profiles]
+    return [ProfileSummaryResponse.model_validate(p) for p in profiles]
 
 
 @router.patch(

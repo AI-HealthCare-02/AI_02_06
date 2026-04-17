@@ -1,9 +1,10 @@
 'use client'
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import api, { showError } from '@/lib/api'
 import { Pill, Flame, X, Plus, MessageCircle } from 'lucide-react'
 import ChatModal from '@/components/chat/ChatModal'
+import { useProfile } from '@/contexts/ProfileContext'
 
 // 스켈레톤은 main의 레이아웃을 따름
 function MainSkeleton() {
@@ -24,7 +25,7 @@ function MainSkeleton() {
 }
 
 // 종합 설문 모달 (survey 페이지 내용 + 팝업 스타일)
-function SurveyModal({ onClose, userName }) {
+function SurveyModal({ onClose, userName, profileId }) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [existingProfile, setExistingProfile] = useState(null)
   const [form, setForm] = useState({
@@ -33,16 +34,17 @@ function SurveyModal({ onClose, userName }) {
     conditions: [], allergies: []
   })
 
-  // 기존 프로필 데이터 로드
+  // 기존 프로필 데이터 로드 (상세 API로 health_survey 포함 조회)
   useEffect(() => {
+    if (!profileId) return
     const fetchProfile = async () => {
       try {
-        const res = await api.get('/api/v1/profiles')
-        const selfProfile = res.data?.find(p => p.relation_type === 'SELF')
-        if (selfProfile) {
-          setExistingProfile(selfProfile)
-          if (selfProfile.health_survey) {
-            const survey = selfProfile.health_survey
+        const res = await api.get(`/api/v1/profiles/${profileId}`)
+        const profile = res.data
+        if (profile) {
+          setExistingProfile(profile)
+          if (profile.health_survey) {
+            const survey = profile.health_survey
             setForm({
               age: survey.age?.toString() || '',
               gender: survey.gender || '',
@@ -58,7 +60,7 @@ function SurveyModal({ onClose, userName }) {
       } catch (err) { console.error(err) }
     }
     fetchProfile()
-  }, [])
+  }, [profileId])
 
   const handleSkip = async () => {
     if (!existingProfile) {
@@ -280,57 +282,63 @@ function MainPageContent() {
   const [isLoading, setIsLoading] = useState(true)
   const [showSurvey, setShowSurvey] = useState(false)
   const [showChat, setShowChat] = useState(false)
-  const [userName, setUserName] = useState('사용자')
-  const [profileId, setProfileId] = useState(null)
   const [medications, setMedications] = useState([])
   const [activeChallenge, setActiveChallenge] = useState(null)
   const [greeting, setGreeting] = useState({ msg: '반가워요', sub: '오늘 하루도 건강하게 시작해봐요' })
+
+  const { selectedProfileId, selectedProfile } = useProfile()
+  const userName = selectedProfile?.name?.split('(')[0] || '사용자'
+  const isInitialLoad = useRef(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
   // 설문 팝업 쿼리 파라미터 감지
   useEffect(() => {
     if (searchParams.get('showSurvey') === 'true') {
       setShowSurvey(true)
-      // URL 클린업
       router.replace('/main', { scroll: false })
     }
   }, [searchParams, router])
 
   useEffect(() => {
+    if (!selectedProfileId) return
     const initPage = async () => {
       try {
-        setIsLoading(true)
-        const profileRes = await api.get('/api/v1/profiles')
-        if (profileRes.data?.length > 0) {
-          const self = profileRes.data.find(p => p.relation_type === 'SELF') || profileRes.data[0]
-          setUserName(self.name.split('(')[0])
-          setProfileId(self.id)
-
-          const [medRes, challengeRes] = await Promise.all([
-            api.get(`/api/v1/medications?profile_id=${self.id}&active_only=true`),
-            api.get('/api/v1/challenges').catch(() => ({ data: [] })),
-          ])
-          setMedications(medRes.data || [])
-          const inProgress = (challengeRes.data || []).filter(c => c.challenge_status === 'IN_PROGRESS')
-          if (inProgress.length > 0) {
-            const random = inProgress[Math.floor(Math.random() * inProgress.length)]
-            setActiveChallenge(random)
-          }
+        if (isInitialLoad.current) {
+          setIsLoading(true)
+        } else {
+          setIsRefreshing(true)
+        }
+        const [medRes, challengeRes] = await Promise.all([
+          api.get(`/api/v1/medications?profile_id=${selectedProfileId}&active_only=true`),
+          api.get(`/api/v1/challenges?profile_id=${selectedProfileId}`).catch(() => ({ data: [] })),
+        ])
+        setMedications(medRes.data || [])
+        const inProgress = (challengeRes.data || []).filter(c => c.challenge_status === 'IN_PROGRESS')
+        if (inProgress.length > 0) {
+          const random = inProgress[Math.floor(Math.random() * inProgress.length)]
+          setActiveChallenge(random)
+        } else {
+          setActiveChallenge(null)
         }
         const hour = new Date().getHours()
         if (hour < 12) setGreeting({ msg: '좋은 아침이에요', sub: '오늘 하루도 건강하게 시작해봐요' })
         else if (hour < 17) setGreeting({ msg: '좋은 오후예요', sub: '점심 식사 후 약 챙기셨나요?' })
         else setGreeting({ msg: '좋은 저녁이에요', sub: '저녁 복약 시간을 확인해보세요' })
-      } catch (err) { console.error(err) } finally { setIsLoading(false) }
+      } catch (err) { console.error(err) } finally {
+        setIsLoading(false)
+        setIsRefreshing(false)
+        isInitialLoad.current = false
+      }
     }
     initPage()
-  }, [])
+  }, [selectedProfileId])
 
   if (isLoading) return <MainSkeleton />
 
   return (
-    <>
-      {showSurvey && <SurveyModal onClose={() => setShowSurvey(false)} userName={userName} />}
-      {showChat && <ChatModal onClose={() => setShowChat(false)} profileId={profileId} />}
+    <div className={`transition-opacity duration-200 ${isRefreshing ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
+      {showSurvey && <SurveyModal onClose={() => setShowSurvey(false)} userName={userName} profileId={selectedProfileId} />}
+      {showChat && <ChatModal onClose={() => setShowChat(false)} profileId={selectedProfileId} />}
 
       {/* ── 히어로 섹션 (main의 다크 테마 + donghoon의 이름 데이터) ── */}
       <section className="relative w-full min-h-[540px] flex items-center justify-center overflow-hidden bg-black">
@@ -422,7 +430,7 @@ function MainPageContent() {
           </div>
         </div>
       </main>
-    </>
+    </div>
   )
 }
 
