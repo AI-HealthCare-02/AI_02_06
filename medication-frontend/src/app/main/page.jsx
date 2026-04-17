@@ -3,7 +3,7 @@ import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import api, { showError } from '@/lib/api'
 import { Pill, Flame, X, Plus, MessageCircle } from 'lucide-react'
-import ChatModal from '@/components/ChatModal'
+import ChatModal from '@/components/chat/ChatModal'
 
 // 스켈레톤은 main의 레이아웃을 따름
 function MainSkeleton() {

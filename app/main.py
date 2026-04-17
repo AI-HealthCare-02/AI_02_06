@@ -7,7 +7,7 @@ and global exception handlers.
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import JSONResponse
 from tortoise.exceptions import BaseORMException, DBConnectionError
 
 from app.apis.v1 import v1_routers
@@ -17,7 +17,6 @@ from app.middlewares.rate_limit import RateLimitMiddleware
 from app.middlewares.security import SecurityMiddleware
 
 app = FastAPI(
-    default_response_class=ORJSONResponse,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -29,7 +28,7 @@ app = FastAPI(
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(_request: Request, exc: RequestValidationError) -> ORJSONResponse:
+async def validation_exception_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
     """Handle Pydantic validation errors.
 
     Converts 422 validation errors to 400 bad request with detailed error info.
@@ -39,9 +38,9 @@ async def validation_exception_handler(_request: Request, exc: RequestValidation
         exc: The validation exception.
 
     Returns:
-        ORJSONResponse: Error response with validation details.
+        JSONResponse: Error response with validation details.
     """
-    return ORJSONResponse(
+    return JSONResponse(
         status_code=status.HTTP_400_BAD_REQUEST,
         content={
             "error": "validation_error",
@@ -52,7 +51,7 @@ async def validation_exception_handler(_request: Request, exc: RequestValidation
 
 
 @app.exception_handler(DBConnectionError)
-async def db_connection_exception_handler(_request: Request, _exc: DBConnectionError) -> ORJSONResponse:
+async def db_connection_exception_handler(_request: Request, _exc: DBConnectionError) -> JSONResponse:
     """Handle database connection errors.
 
     Args:
@@ -60,9 +59,9 @@ async def db_connection_exception_handler(_request: Request, _exc: DBConnectionE
         exc: The database connection exception.
 
     Returns:
-        ORJSONResponse: 503 Service Unavailable response.
+        JSONResponse: 503 Service Unavailable response.
     """
-    return ORJSONResponse(
+    return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={
             "error": "db_connection_failed",
@@ -72,7 +71,7 @@ async def db_connection_exception_handler(_request: Request, _exc: DBConnectionE
 
 
 @app.exception_handler(BaseORMException)
-async def orm_exception_handler(_request: Request, exc: BaseORMException) -> ORJSONResponse:
+async def orm_exception_handler(_request: Request, exc: BaseORMException) -> JSONResponse:
     """Handle other Tortoise ORM errors.
 
     Args:
@@ -80,9 +79,9 @@ async def orm_exception_handler(_request: Request, exc: BaseORMException) -> ORJ
         exc: The ORM exception.
 
     Returns:
-        ORJSONResponse: 500 Internal Server Error response.
+        JSONResponse: 500 Internal Server Error response.
     """
-    return ORJSONResponse(
+    return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "error": "database_error",
@@ -93,7 +92,7 @@ async def orm_exception_handler(_request: Request, exc: BaseORMException) -> ORJ
 
 
 @app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception) -> ORJSONResponse:
+async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle all unexpected errors.
 
     Args:
@@ -101,14 +100,14 @@ async def general_exception_handler(request: Request, exc: Exception) -> ORJSONR
         exc: The general exception.
 
     Returns:
-        ORJSONResponse: 500 Internal Server Error response.
+        JSONResponse: 500 Internal Server Error response.
     """
     import traceback
 
     print(f"[ERROR] {request.method} {request.url.path}: {type(exc).__name__}: {exc}")
     traceback.print_exc()
 
-    return ORJSONResponse(
+    return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "error": "internal_server_error",

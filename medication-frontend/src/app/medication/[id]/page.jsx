@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { Clock, Utensils, Pill, Calendar, AlertTriangle, AlertCircle, Ban, Trash2 } from 'lucide-react'
-import BottomNav from '@/components/BottomNav'
+import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
 
 function DetailSkeleton() {

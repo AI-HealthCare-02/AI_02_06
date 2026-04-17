@@ -1,25 +1,42 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import api, { parseApiError, showError } from '../../lib/api'
+import api, { parseApiError, showError } from '@/lib/api'
+import { config, securityUtils } from '@/config/env'
 import { Pill } from 'lucide-react'
-
-// 환경 변수: local, dev, prod
-// - local: 개발자 로그인 버튼 표시 (빠른 개발용)
-// - dev: 개발자 로그인 버튼 숨김 (카카오 로그인 테스트용)
-// - prod: 개발자 로그인 버튼 숨김
-const ENV = process.env.NEXT_PUBLIC_ENV || 'local'
-const SHOW_DEV_LOGIN = ENV === 'local'
-
-// API Base URL (브라우저에서 직접 호출용)
-// - local: http://localhost:8000
-// - dev/prod (Docker): '' (Nginx 프록시)
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || ''
+import LoadingSpinner from '@/components/common/LoadingSpinner'
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true)
   const router = useRouter()
+
+  // 로그인 상태 확인
+  useEffect(() => {
+    const checkAuthStatus = async () => {
+      try {
+        // 이미 로그인된 사용자인지 확인
+        await api.get('/api/v1/profiles', { skipAuthInterceptor: true })
+        // 로그인된 상태라면 메인으로 리다이렉트
+        router.replace('/main')
+        return
+      } catch (error) {
+        // 로그인되지 않은 상태 - 로그인 페이지 표시
+        setIsCheckingAuth(false)
+      }
+    }
+
+    checkAuthStatus()
+  }, [router])
+
+  // 보안 검증: 개발자 로그인 표시 여부
+  const showDevLogin = securityUtils.shouldShowDevLogin()
+
+  // 환경 변조 탐지
+  if (securityUtils.detectEnvironmentTampering()) {
+    console.error('Security warning: Environment tampering detected')
+  }
 
   const handleKakaoLogin = async () => {
     setIsLoading(true)
@@ -83,6 +100,18 @@ const handleTestLogin = async () => {
     }
   }
 
+  // 인증 상태 확인 중이면 로딩 표시
+  if (isCheckingAuth) {
+    return (
+      <main className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
+        <div className="flex flex-col items-center gap-4">
+          <LoadingSpinner size="lg" />
+          <p className="text-gray-600 font-medium">로그인 상태 확인 중...</p>
+        </div>
+      </main>
+    )
+  }
+
   return (
     <main className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
 
@@ -104,14 +133,14 @@ const handleTestLogin = async () => {
           {isLoading ? '연결 중...' : '카카오로 로그인'}
         </button>
 
-        {/* 개발자 로그인 버튼 (local 환경에서만 표시) */}
-        {SHOW_DEV_LOGIN && (
+        {/* 개발자 로그인 버튼 (보안 검증된 환경에서만 표시) */}
+        {showDevLogin && (
           <button
             onClick={handleTestLogin}
             disabled={isLoading}
             className="w-full bg-slate-800 text-white py-3 rounded-xl font-semibold text-sm mb-3 cursor-pointer hover:bg-black transition-all disabled:opacity-50"
           >
-            개발자로 로그인 ({ENV})
+            개발자로 로그인 ({config.ENV})
           </button>
         )}
 

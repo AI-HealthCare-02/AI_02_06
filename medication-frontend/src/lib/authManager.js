@@ -1,5 +1,6 @@
 /**
- * Token Manager (JavaScript 복구 버전)
+ * Auth Manager (인증 관리자)
+ * 인증 상태 관리, 토큰 갱신, 로그아웃 처리
  */
 
 import api from './api';
@@ -36,7 +37,7 @@ export async function refreshToken() {
 
   if (refreshAttempts >= MAX_REFRESH_ATTEMPTS) {
     console.error('Token refresh max attempts exceeded');
-    handleLogout('세션이 만료되었습니다. 다시 로그인해주세요.');
+    handleLogout('로그아웃 되었습니다.');
     return null;
   }
 
@@ -53,9 +54,9 @@ export async function refreshToken() {
     const errorCode = error.response?.data?.detail?.error;
 
     if (status === 403 && errorCode === 'token_compromised') {
-      handleLogout('보안을 위해 로그아웃되었습니다. 다시 로그인해주세요.');
+      handleLogout('보안을 위해 로그아웃 되었습니다.');
     } else if (status === 401) {
-      handleLogout('세션이 만료되었습니다. 다시 로그인해주세요.');
+      handleLogout('로그아웃 되었습니다.');
     } else {
       console.error('Token refresh failed:', error);
     }
@@ -79,10 +80,9 @@ export async function handleLogout(message) {
     showError(message);
   }
 
+  // AuthGuard가 이미 리다이렉트를 처리하므로 지연 제거
   if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
-    setTimeout(() => {
-      window.location.href = '/login';
-    }, 1500);
+    window.location.href = '/login';
   }
 }
 

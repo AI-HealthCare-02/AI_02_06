@@ -3,9 +3,8 @@ import { useState, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { Home, FileText, Trophy, Pill, User, MessageCircle, X, LogOut } from 'lucide-react'
-import LogoutModal, { useLogout } from '@/components/LogoutModal'
-
-import ChatModal from '@/components/ChatModal'
+import LogoutModal, { useLogout } from '@/components/auth/LogoutModal'
+import ChatModal from '@/components/chat/ChatModal'
 import api from '@/lib/api'
 
 export default function Navigation() {

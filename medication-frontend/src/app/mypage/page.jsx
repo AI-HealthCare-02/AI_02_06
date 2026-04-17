@@ -2,9 +2,9 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { User, Activity, Users, Home, Trash2, X, Check, Plus, FileText, LogOut } from 'lucide-react'
-import EmptyState from '@/components/EmptyState'
-import BottomNav from '@/components/BottomNav'
-import LogoutModal, { useLogout, DeleteAccountModal, useDeleteAccount } from '@/components/LogoutModal'
+import EmptyState from '@/components/common/EmptyState'
+import BottomNav from '@/components/layout/BottomNav'
+import LogoutModal, { useLogout, DeleteAccountModal, useDeleteAccount } from '@/components/auth/LogoutModal'
 import api, { handleApiError } from '@/lib/api'
 import toast from 'react-hot-toast'
 

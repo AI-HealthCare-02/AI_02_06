@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Info, Camera } from 'lucide-react'
-import Header from '../../components/Header'
+import Header from '@/components/layout/Header'
 
 function OCRSkeleton() {
   return (
