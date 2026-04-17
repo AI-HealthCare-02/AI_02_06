@@ -1,28 +1,24 @@
 """RAG (Retrieval-Augmented Generation) service for pharmaceutical Q&A."""
 
-from dataclasses import dataclass
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 import logging
+import time
 from typing import Any
 
-from app.models.vector_models import DocumentChunk, DocumentType, PharmaceuticalDocument, UserCondition
+from app.dtos.rag import RAGResponse, SearchFilters
+from app.models.vector_models import (
+    DocumentChunk,
+    DocumentType,
+    PharmaceuticalDocument,
+    SearchQuery,
+    UserCondition,
+)
 from app.services.chunking_service import get_document_chunker
 from app.services.embedding_service import get_embedding_service
-from app.services.vector_search_service import SearchFilters, get_vector_search_service
+from app.services.vector_search_service import get_vector_search_service
 from app.utils.rag import RAGGenerator
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class RAGResponse:
-    """Response from RAG system."""
-
-    answer: str
-    sources: list[dict[str, Any]]
-    confidence_score: float
-    search_results_count: int
-    processing_time_ms: int
 
 
 class RAGService:
@@ -50,8 +46,6 @@ class RAGService:
         Returns:
             RAG response with answer and sources
         """
-        import time
-
         start_time = time.time()
 
         try:
@@ -306,13 +300,7 @@ class RAGService:
         Returns:
             Analytics data
         """
-        from datetime import datetime, timedelta
-
         cutoff_date = datetime.now(tz=UTC) - timedelta(days=days)
-
-        # Get search queries from the past N days
-        from app.models.vector_models import SearchQuery
-
         recent_queries = await SearchQuery.filter(created_at__gte=cutoff_date).all()
 
         if not recent_queries:

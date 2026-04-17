@@ -1,45 +1,16 @@
 """Vector search service for RAG system."""
 
-from dataclasses import dataclass
 import logging
+import re
 import time
 
 from tortoise import connections
 
-from app.models.vector_models import ChunkType, DocumentChunk, SearchQuery, UserCondition
+from app.dtos.rag import SearchFilters, SearchResult
+from app.models.vector_models import DocumentChunk, SearchQuery
 from app.services.embedding_service import get_embedding_service
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class SearchResult:
-    """Represents a search result with relevance scores."""
-
-    chunk: DocumentChunk
-    vector_score: float
-    keyword_score: float
-    metadata_score: float
-    final_score: float
-
-
-@dataclass
-class SearchFilters:
-    """Search filters for metadata-based filtering."""
-
-    user_conditions: list[UserCondition] = None
-    medicine_names: list[str] = None
-    chunk_types: list[ChunkType] = None
-    date_range: tuple[str, str] | None = None
-
-    def __post_init__(self):
-        """Initialize empty lists if None."""
-        if self.user_conditions is None:
-            self.user_conditions = []
-        if self.medicine_names is None:
-            self.medicine_names = []
-        if self.chunk_types is None:
-            self.chunk_types = []
 
 
 class VectorSearchService:
@@ -275,17 +246,9 @@ class VectorSearchService:
         Returns:
             List of extracted keywords
         """
-        # Simple keyword extraction - can be enhanced with NLP
-        import re
-
-        # Remove common stop words
         stop_words = {"은", "는", "이", "가", "을", "를", "의", "에", "에서", "로", "으로", "와", "과", "하고"}
-
-        # Split and clean
         words = re.findall(r"[가-힣a-zA-Z0-9]+", query)
-        keywords = [word for word in words if word.lower() not in stop_words and len(word) > 1]
-
-        return keywords
+        return [word for word in words if word.lower() not in stop_words and len(word) > 1]
 
     async def _calculate_metadata_scores(
         self, filters: SearchFilters, vector_results: list[tuple[DocumentChunk, float]]

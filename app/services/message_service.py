@@ -8,6 +8,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 
+# TODO: Replace RAGGenerator with RAGPipeline after Task 2 implementation
 from ai_worker.utils.rag import RAGGenerator
 from app.models.messages import ChatMessage
 from app.repositories.chat_session_repository import ChatSessionRepository

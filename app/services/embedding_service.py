@@ -8,9 +8,11 @@ from typing import Any
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from app.core.config import config
-
 logger = logging.getLogger(__name__)
+
+# Default Korean-optimized sentence transformer model.
+# Replace this constant to upgrade the embedding model globally.
+_DEFAULT_MODEL = "jhgan/ko-sroberta-multitask"
 
 
 class EmbeddingService:
@@ -253,13 +255,7 @@ async def get_embedding_service() -> EmbeddingService:
     global _embedding_service
 
     if _embedding_service is None:
-        # Choose model based on environment
-        if config.APP_ENV == "prod":
-            model_name = "jhgan/ko-sroberta-multitask"  # Better quality for production
-        else:
-            model_name = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # Faster for dev
-
-        _embedding_service = EmbeddingService(model_name=model_name)
+        _embedding_service = EmbeddingService(model_name=_DEFAULT_MODEL)
         await _embedding_service.initialize()
 
     return _embedding_service
