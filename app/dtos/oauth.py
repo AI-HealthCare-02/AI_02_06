@@ -72,3 +72,9 @@ class TokenRefreshResponse(BaseModel):
 
     access_token: str = Field(description="New JWT Access Token")
     token_type: str = Field(default="Bearer", description="Token type")
+
+
+class AuthMeResponse(BaseModel):
+    """Authentication status check response."""
+
+    account_id: str = Field(description="Account ID")
