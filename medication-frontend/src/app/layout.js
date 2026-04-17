@@ -3,6 +3,7 @@ import { Toaster } from "react-hot-toast";
 import "./globals.css";
 import Navigation from '../components/Navigation'
 import BottomNav from '../components/BottomNav'
+import AuthGuard from '../components/AuthGuard'
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,8 +28,10 @@ export default function RootLayout({ children }) {
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">
-        <Navigation /> 
-        {children}
+        <Navigation />
+        <AuthGuard>
+          {children}
+        </AuthGuard>
         <BottomNav />
         <Toaster
           position="top-center"

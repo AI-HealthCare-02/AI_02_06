@@ -11,6 +11,7 @@ from app.core import config
 from app.core.config import Env
 from app.dependencies.security import get_current_account
 from app.dtos.oauth import (
+    AuthMeResponse,
     OAuthConfigResponse,
     OAuthErrorResponse,
     OAuthLoginResponse,
@@ -349,6 +350,22 @@ async def delete_account(
         samesite="lax",
     )
     return response
+
+
+@oauth_router.get(
+    "/me",
+    response_model=AuthMeResponse,
+    summary="인증 상태 확인",
+    description="현재 로그인 상태를 확인합니다. 유효한 access_token 쿠키가 있으면 200, 없으면 401을 반환합니다.",
+    responses={
+        200: {"description": "인증됨", "model": AuthMeResponse},
+        401: {"description": "미인증", "model": OAuthErrorResponse},
+    },
+)
+async def get_me(
+    current_account: Annotated[Account, Depends(get_current_account)],
+) -> AuthMeResponse:
+    return AuthMeResponse(account_id=str(current_account.id))
 
 
 @oauth_router.post(

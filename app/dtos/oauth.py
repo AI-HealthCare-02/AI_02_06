@@ -45,3 +45,9 @@ class TokenRefreshResponse(BaseModel):
 
     access_token: str = Field(description="새 JWT Access Token")
     token_type: str = Field(default="Bearer", description="토큰 타입")
+
+
+class AuthMeResponse(BaseModel):
+    """인증 확인 응답"""
+
+    account_id: str = Field(description="계정 ID")

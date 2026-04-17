@@ -15,7 +15,7 @@ export default function Navigation() {
   const [scrolled, setScrolled] = useState(false)
   const [profileId, setProfileId] = useState(null)
 
-  const isLanding = pathname === '/'
+  const isLanding = pathname === '/' || pathname === '/login'
   const isAuthPage = pathname === '/login' || pathname.startsWith('/auth/')
 
   // 프로필 ID 가져오기 (랜딩/로그인 페이지에서는 호출 안함)
