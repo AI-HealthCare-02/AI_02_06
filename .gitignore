@@ -23,7 +23,7 @@ envs/.prod.env
 .ruff_cache/
 .pytest_cache/
 .amazonq/
-.PLAN.md
+PLAN.md
 
 # 로그 및 임시 파일
 *.log
