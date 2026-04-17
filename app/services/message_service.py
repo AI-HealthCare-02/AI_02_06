@@ -8,11 +8,10 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 
-# TODO: Replace RAGGenerator with RAGPipeline after Task 2 implementation
-from ai_worker.utils.rag import RAGGenerator
 from app.models.messages import ChatMessage
 from app.repositories.chat_session_repository import ChatSessionRepository
 from app.repositories.message_repository import MessageRepository
+from app.services.rag import get_rag_pipeline
 
 
 class MessageService:
@@ -176,7 +175,7 @@ class MessageService:
         return await self.repository.create_assistant_message(session_id, content)
 
     async def ask_and_reply(self, session_id: UUID, content: str) -> tuple[ChatMessage, ChatMessage]:
-        """Save user message, generate pharmacist persona response, and return both messages.
+        """Save user message, generate RAG-based response, and return both messages.
 
         Args:
             session_id: Session UUID.
@@ -197,27 +196,11 @@ class MessageService:
             if m.id != user_msg.id
         ]
 
-        # Apply "friendly personal pharmacist" persona
-        system_prompt = (
-            "You are a kind and friendly 'Personal Pharmacist'. "
-            "Please answer users' medication-related questions in warm and easy-to-understand language. "
-            "Always use gentle conversational tone like '~해요', '~일까요?' in Korean. "
-            "Focus on questions related to core service functions such as medication, "
-            "supplement recommendations, and health information. "
-            "If you receive questions unrelated to medication such as weather, politics, or entertainment, "
-            "politely decline and guide them like 'I'm a pharmacist who provides guidance on "
-            "medication and health information, so I can help you better if you ask about "
-            "supplement recommendations or medication-related questions.' "
-            "Always maintain a positive and comfortable atmosphere in conversations with users."
-        )
-
         try:
-            rag = RAGGenerator()
-            # 현재 사용자 메시지를 히스토리에 추가
-            messages = [*history, {"role": "user", "content": content}]
-            reply = await rag.generate_chat_response(messages, system_prompt=system_prompt)
+            pipeline = get_rag_pipeline()
+            rag_response = await pipeline.ask(question=content, history=history)
+            reply = rag_response.answer
         except (ValueError, RuntimeError) as e:
-            # Clean up saved user message on failure and surface the error
             await self.repository.soft_delete(user_msg)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
