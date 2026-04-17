@@ -38,10 +38,10 @@ class TestHybridRetriever:
 
     @pytest.mark.asyncio
     async def test_retrieve_returns_list(self) -> None:
-        """Retrieve must return a list."""
+        """Retrieve must return a list (DB mocked)."""
         mock_provider = MagicMock()
-        mock_provider.encode_single = AsyncMock(return_value=[0.1] * 768)
         retriever = HybridRetriever(embedding_provider=mock_provider)
+        retriever._vector_search = AsyncMock(return_value=[])  # noqa: SLF001
 
         result = await retriever.retrieve(
             query="타이레놀 부작용",
@@ -53,10 +53,10 @@ class TestHybridRetriever:
 
     @pytest.mark.asyncio
     async def test_retrieve_results_are_search_result_instances(self) -> None:
-        """Retrieve results must be SearchResult instances."""
+        """Retrieve results must be SearchResult instances (DB mocked)."""
         mock_provider = MagicMock()
-        mock_provider.encode_single = AsyncMock(return_value=[0.1] * 768)
         retriever = HybridRetriever(embedding_provider=mock_provider)
+        retriever._vector_search = AsyncMock(return_value=[])  # noqa: SLF001
 
         result = await retriever.retrieve(
             query="test",
@@ -69,10 +69,10 @@ class TestHybridRetriever:
 
     @pytest.mark.asyncio
     async def test_retrieve_respects_limit(self) -> None:
-        """Retrieve must not return more results than limit."""
+        """Retrieve must not return more results than limit (DB mocked)."""
         mock_provider = MagicMock()
-        mock_provider.encode_single = AsyncMock(return_value=[0.1] * 768)
         retriever = HybridRetriever(embedding_provider=mock_provider)
+        retriever._vector_search = AsyncMock(return_value=[])  # noqa: SLF001
 
         result = await retriever.retrieve(
             query="test",
