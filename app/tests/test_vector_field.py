@@ -162,7 +162,7 @@ class TestVectorQueryMixin:
 
         # Cosine distance: 1 - similarity
         cosine_threshold = 1 - similarity_threshold
-        assert cosine_threshold == 0.3
+        assert cosine_threshold == pytest.approx(0.3)
 
         # L2 and inner product: use threshold directly
         l2_threshold = similarity_threshold

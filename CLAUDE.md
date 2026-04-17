@@ -131,7 +131,23 @@ class AuthManager:
 - **MyPy**: 타입 체킹
 - **Pre-commit**: 자동 검사 훅
 
-상세한 가이드는 `.amazonq/rules/python_style_guide.md` 참조.
+#### Ruff 의무 검사 규칙 (CRITICAL):
+
+**모든 Python 파일 작성/수정 후 반드시 아래 검사를 통과해야 커밋 가능:**
+
+```bash
+# 자동 수정 먼저 적용
+uv run ruff check --fix app/ ai_worker/
+uv run ruff format app/ ai_worker/
+
+# 검사 통과 확인 (에러 0건이어야 함)
+uv run ruff check app/ ai_worker/
+uv run ruff format --check app/ ai_worker/
+```
+
+- AI 에이전트는 코드 수정 후 반드시 Ruff 검사를 실행해야 함
+- Ruff 오류가 있으면 수정 완료 전까지 다음 단계로 진행 불가
+- 커밋 추천 시 반드시 Ruff 검사 결과(PASS/FAIL)를 포함해야 함
 
 ## 8. 시각화 및 설계 문서 (Visualization)
 - **도구**: [dbdiagram.io](https://dbdiagram.io)를 사용하여 ERD를 관리함.

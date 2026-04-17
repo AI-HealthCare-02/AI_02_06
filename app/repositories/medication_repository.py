@@ -4,7 +4,7 @@ This module provides data access layer for the medications table,
 handling prescription medication management operations.
 """
 
-from datetime import date
+from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
 from tortoise.expressions import Q
@@ -68,25 +68,31 @@ class MedicationRepository:
         Returns:
             list[Medication]: List of active medications.
         """
-        today = date.today()
-        
-        return await Medication.filter(
-            profile_id=profile_id,
-            is_active=True,
-            deleted_at__isnull=True,
-        ).filter(
-            Q(end_date__isnull=True) | Q(end_date__gte=today)
-        ).all()
+        today = datetime.now(tz=UTC).date()
+
+        return (
+            await Medication
+            .filter(
+                profile_id=profile_id,
+                is_active=True,
+                deleted_at__isnull=True,
+            )
+            .filter(Q(end_date__isnull=True) | Q(end_date__gte=today))
+            .all()
+        )
 
     async def get_inactive_by_profile(self, profile_id: UUID) -> list[Medication]:
         """프로필의 복용 완료된 약품 조회 (수동 완료 처리 or end_date 경과)"""
-        today = date.today()
-        return await Medication.filter(
-            profile_id=profile_id,
-            deleted_at__isnull=True,
-        ).filter(
-            Q(is_active=False) | Q(end_date__lt=today, end_date__isnull=False)
-        ).all()
+        today = datetime.now(tz=UTC).date()
+        return (
+            await Medication
+            .filter(
+                profile_id=profile_id,
+                deleted_at__isnull=True,
+            )
+            .filter(Q(is_active=False) | Q(end_date__lt=today, end_date__isnull=False))
+            .all()
+        )
 
     async def create(
         self,
@@ -161,8 +167,6 @@ class MedicationRepository:
         Returns:
             Medication: Soft deleted medication.
         """
-        from datetime import datetime
-
         from app.core import config
 
         medication.deleted_at = datetime.now(tz=config.TIMEZONE)

@@ -176,3 +176,59 @@ When user requests a feature implementation:
 - [ ] Clear naming?
 - [ ] Modern type hints? (See Section 4.2)
 - [ ] Early return pattern applicable?
+
+---
+
+## 8. Mandatory Ruff Validation
+
+**CRITICAL: All code changes MUST pass Ruff checks before committing.**
+
+### 8.1. Required Checks Before Every Commit
+
+Run the following commands and ensure all pass with zero errors:
+
+```bash
+# 1. Ruff lint check (must pass)
+uv run ruff check app/ ai_worker/
+
+# 2. Ruff format check (must pass)
+uv run ruff format --check app/ ai_worker/
+```
+
+Or run the integrated script:
+
+```bash
+./scripts/ci/code_fommatting.sh
+```
+
+### 8.2. Auto-fix Before Checking
+
+Before running checks, apply auto-fixes:
+
+```bash
+uv run ruff check --fix app/ ai_worker/
+uv run ruff format app/ ai_worker/
+```
+
+### 8.3. Agent Behavior Rule
+
+* After writing or modifying ANY Python file, the agent MUST run Ruff checks.
+* If Ruff reports errors, fix them BEFORE proceeding to the next step.
+* NEVER commit code that fails Ruff lint or format checks.
+* Include Ruff check results in the commit recommendation output.
+
+### 8.4. Commit Recommendation Format
+
+When recommending a commit, always include Ruff validation status:
+
+```
+[Ruff 검사 결과]
+- ruff check: PASS
+- ruff format: PASS
+
+[Git Add 대상 파일]
+- app/services/example_service.py
+
+[커밋 제목]
+feat: 예시 서비스 구현
+```

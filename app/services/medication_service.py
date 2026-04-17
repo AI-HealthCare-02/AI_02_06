@@ -4,10 +4,10 @@ This module provides business logic for medication management operations
 including creation, updates, and ownership verification.
 """
 
+from datetime import UTC, timedelta
 import hashlib
 import json
 import os
-from datetime import timedelta
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -291,7 +291,7 @@ class MedicationService:
 
     async def _get_drug_info(self, medicine_name: str) -> DrugInfoResponse:
         """약품명 기반 LLM 호출. 캐시 히트 시 DB에서 반환, 미스 시 LLM 호출 후 30일 캐시 저장."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         prompt_key = f"drug_info_v1:{medicine_name}"
         prompt_hash = hashlib.sha256(prompt_key.encode()).hexdigest()
@@ -299,7 +299,7 @@ class MedicationService:
         # 캐시 조회
         cached = await LLMResponseCache.filter(
             prompt_hash=prompt_hash,
-            expires_at__gte=datetime.now(tz=timezone.utc),
+            expires_at__gte=datetime.now(tz=UTC),
         ).first()
         if cached:
             await LLMResponseCache.filter(id=cached.id).update(hit_count=cached.hit_count + 1)
@@ -345,13 +345,15 @@ class MedicationService:
                 warnings=data.get("warnings", []),
                 side_effects=data.get("side_effects", []),
                 interactions=[DrugInteraction(**i) for i in data.get("interactions", [])],
-                severe_reaction_advice=data.get("severe_reaction_advice", "심한 부작용이 나타나면 즉시 복용을 중단하고 의사와 상담하세요."),
+                severe_reaction_advice=data.get(
+                    "severe_reaction_advice", "심한 부작용이 나타나면 즉시 복용을 중단하고 의사와 상담하세요."
+                ),
             )
         except (OpenAIError, json.JSONDecodeError) as e:
             raise HTTPException(status_code=502, detail=f"약품 정보를 가져오는 데 실패했습니다: {e}") from e
 
         # 30일 캐시 저장
-        expires_at = datetime.now(tz=timezone.utc) + timedelta(days=30)
+        expires_at = datetime.now(tz=UTC) + timedelta(days=30)
         await LLMResponseCache.create(
             prompt_hash=prompt_hash,
             prompt_text=prompt_key,

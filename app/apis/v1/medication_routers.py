@@ -76,6 +76,7 @@ async def list_medications(
         service: Medication service instance.
         profile_id: Optional profile ID to filter by.
         active_only: Whether to return only active medications.
+        inactive_only: Whether to return only inactive medications.
 
     Returns:
         List[MedicationResponse]: List of medications.
@@ -153,7 +154,7 @@ async def get_drug_info(
     medication_id: UUID,
     current_account: CurrentAccount,
     service: MedicationServiceDep,
-):
+) -> DrugInfoResponse:
     """LLM 기반 약품 상세 정보(주의사항, 부작용, 상호작용)를 반환합니다. 결과는 30일간 캐시됩니다."""
     return await service.get_drug_info_with_owner_check(medication_id, current_account.id)
 

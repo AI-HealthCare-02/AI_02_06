@@ -1,11 +1,12 @@
 import json
+from pathlib import Path
 import time
 import uuid
-import redis
-from pathlib import Path
-import requests
+
 from openai import OpenAI
 from pydantic import BaseModel
+import redis
+import requests
 
 from ai_worker.core.config import config
 from ai_worker.core.logger import get_logger
@@ -13,30 +14,32 @@ from app.dtos.ocr import ExtractedMedicine, OcrExtractResponse
 
 logger = get_logger(__name__)
 
+
 # LLM 파싱용 내부 모델
 class LlmExtractionResult(BaseModel):
     medicines: list[ExtractedMedicine]
+
 
 def _call_clova_ocr(image_path: str) -> str:
     """Clova OCR API 호출 (워커 내부용)"""
     invoke_url = config.CLOVA_OCR_URL
     secret_key = config.CLOVA_OCR_SECRET
-    
+
     if not invoke_url or not secret_key:
         raise ValueError("OCR 처리 실패: CLOVA_OCR 설정이 누락되었습니다.")
 
     path = Path(image_path)
     ext = path.suffix.lstrip(".").lower()
-    
+
     request_json = {
         "images": [{"format": ext, "name": path.stem}],
         "requestId": str(uuid.uuid4()),
         "version": "V2",
-        "timestamp": int(round(time.time() * 1000)),
+        "timestamp": round(time.time() * 1000),
     }
-    
+
     try:
-        with open(path, "rb") as f:
+        with path.open("rb") as f:
             response = requests.post(
                 invoke_url,
                 headers={"X-OCR-SECRET": secret_key},
@@ -50,6 +53,7 @@ def _call_clova_ocr(image_path: str) -> str:
     except Exception as e:
         logger.error(f"Clova OCR Error: {e}")
         raise
+
 
 def _parse_text_with_llm(text: str, client: OpenAI) -> LlmExtractionResult:
     """LLM을 이용한 구조화 데이터 파싱 (워커 내부용)"""
@@ -77,38 +81,29 @@ def _parse_text_with_llm(text: str, client: OpenAI) -> LlmExtractionResult:
         logger.error(f"LLM Parsing Error: {e}")
         raise
 
+
 def process_ocr_task(image_path: str, draft_id: str) -> bool:
-    """
-    [RQ Task] OCR 추출 및 파싱 전체 프로세스
-    결과를 Redis의 'ocr_draft:{draft_id}' 키에 저장합니다.
-    """
+    """[RQ Task] OCR 추출 및 파싱 전체 프로세스. 결과를 Redis의 'ocr_draft:{draft_id}' 키에 저장합니다."""
     logger.info(f"Starting OCR task: {image_path} (Draft ID: {draft_id})")
-    
+
     # Redis 연결 (동기 방식)
     redis_conn = redis.from_url(config.REDIS_URL, decode_responses=True)
-    
+
     try:
         # 1. OCR 호출
         raw_text = _call_clova_ocr(image_path)
         if not raw_text.strip():
-            raise ValueError("No text extracted from image")
+            raise ValueError("No text extracted from image")  # noqa: TRY301
 
         # 2. LLM 파싱
         client = OpenAI(api_key=config.OPENAI_API_KEY)
         parsed_data = _parse_text_with_llm(raw_text, client)
 
         # 3. 결과 저장 (10분 만료)
-        response_obj = OcrExtractResponse(
-            draft_id=draft_id,
-            medicines=parsed_data.medicines
-        )
-        
-        redis_conn.setex(
-            f"ocr_draft:{draft_id}",
-            600,
-            response_obj.model_dump_json()
-        )
-        
+        response_obj = OcrExtractResponse(draft_id=draft_id, medicines=parsed_data.medicines)
+
+        redis_conn.setex(f"ocr_draft:{draft_id}", 600, response_obj.model_dump_json())
+
         logger.info(f"Successfully processed OCR task for {draft_id}")
         return True
 
@@ -121,17 +116,18 @@ def process_ocr_task(image_path: str, draft_id: str) -> bool:
         # 임시 이미지 삭제
         Path(image_path).unlink(missing_ok=True)
 
+
 def generate_guide_task(medicines_json: str, profile_id: str, job_id: str) -> bool:
-    """
-    [RQ Task] 최종 복약 가이드 생성 (비동기)
-    """
+    """[RQ Task] 최종 복약 가이드 생성 (비동기)."""
     logger.info(f"Starting Guide Generation task for Profile: {profile_id}")
-    
+
     redis_conn = redis.from_url(config.REDIS_URL, decode_responses=True)
     medicines = json.loads(medicines_json)
-    
+
     medicines_text = "\n".join(
-        f"- {m['medicine_name']} (1회 {m.get('dose_per_intake') or '적정량'}, {m.get('intake_instruction') or '지시대로 복용'})"
+        f"- {m['medicine_name']} "
+        f"(1회 {m.get('dose_per_intake') or '적정량'}, "
+        f"{m.get('intake_instruction') or '지시대로 복용'})"
         for m in medicines
     )
 
@@ -148,7 +144,7 @@ def generate_guide_task(medicines_json: str, profile_id: str, job_id: str) -> bo
     4. 마지막에 반드시 다음 면책 문구를 포함하세요:
        "⚠️ 이 안내는 참고용이며, 정확한 진단과 처방은 반드시 전문 의료인과 상의하십시오."
     """
-    
+
     try:
         client = OpenAI(api_key=config.OPENAI_API_KEY)
         response = client.chat.completions.create(
@@ -157,7 +153,7 @@ def generate_guide_task(medicines_json: str, profile_id: str, job_id: str) -> bo
             temperature=0.3,
         )
         guide = response.choices[0].message.content or "가이드를 생성할 수 없습니다."
-        
+
         # 가이드 결과를 Redis에 저장 (사용자가 폴링해서 가져감)
         redis_conn.setex(f"ocr_guide:{job_id}", 600, guide)
         logger.info(f"Successfully generated guide for {job_id}")

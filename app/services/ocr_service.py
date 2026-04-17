@@ -14,21 +14,15 @@ import time
 from typing import Any
 import uuid
 
-import httpx
-import redis.asyncio as redis
 from fastapi import BackgroundTasks, UploadFile
+import httpx
 from openai import AsyncOpenAI, OpenAIError
 from pydantic import BaseModel
-import redis.asyncio as redis  # Async Redis client
-import requests
+import redis.asyncio as redis
 
-from app.core import config
+from app.core.config import config
 from app.dtos.ocr import ConfirmMedicationRequest, ExtractedMedicine, OcrExtractResponse
 from app.models.medication import Medication
-from app.core.config import config
-
-# DTO path reflection
-from app.models.medication import Medication  # DB model import
 
 # 공유 볼륨 경로 (Docker Compose의 ai-worker와 공유되어야 함)
 _UPLOAD_DIR = Path(os.environ.get("ALLOWED_IMAGE_DIR", tempfile.gettempdir())) / "ocr_images"
@@ -59,7 +53,7 @@ async def _call_clova_ocr(image_path: Path) -> str:
         "version": "V2",
         "timestamp": round(time.time() * 1000),
     }
-    with open(image_path, "rb") as f:
+    with image_path.open("rb") as f:
         image_data = f.read()
 
     async with httpx.AsyncClient(timeout=30) as client:
@@ -162,7 +156,9 @@ class OCRService:
             return OcrExtractResponse.model_validate_json(data_json)
         return None
 
-    async def confirm_and_save(self, request: ConfirmMedicationRequest, profile_id: str, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    async def confirm_and_save(
+        self, request: ConfirmMedicationRequest, profile_id: str, background_tasks: BackgroundTasks
+    ) -> dict[str, Any]:
         """최종 데이터를 DB에 저장하고, 가이드를 생성한 뒤 Redis를 정리합니다."""
         saved_meds = []
 

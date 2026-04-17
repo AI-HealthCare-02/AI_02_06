@@ -9,8 +9,8 @@ import logging
 
 from openai import AsyncOpenAI
 from tortoise import Tortoise
+
 from app.core.config import config
-from ai_worker.core.logger import get_logger
 
 # 현재 모듈의 이름(__name__)으로 로거 생성
 logger = logging.getLogger(__name__)
@@ -22,6 +22,7 @@ class RAGGenerator:
     This class generates responses from a friendly pharmacist character 'Dayak'
     using Retrieval-Augmented Generation techniques with modern async patterns.
     """
+
     def __init__(self) -> None:
         """Initialize RAG generator with OpenAI client.
 
@@ -36,11 +37,11 @@ class RAGGenerator:
     async def get_relevant_documents(self, query: str, limit: int = 3) -> str:
         """Get relevant documents for the given query.
 
-        TODO: Implement actual vector DB (Pinecone, Chroma, etc.) search logic.
-        Currently returns mock data or empty string for project structure.
+        TODO: Implement actual vector DB search logic.
 
         Args:
-            _query: User query to search for relevant documents (unused in mock).
+            query: User query to search for relevant documents.
+            limit: Maximum number of documents to retrieve.
 
         Returns:
             str: Retrieved context information.
@@ -51,10 +52,7 @@ class RAGGenerator:
 
         try:
             # 1. 쿼리 임베딩 생성
-            response = await self.client.embeddings.create(
-                input=query,
-                model=self.embedding_model
-            )
+            response = await self.client.embeddings.create(input=query, model=self.embedding_model)
             query_vector = response.data[0].embedding
 
             # 2. pgvector 코사인 유사도 검색 (Raw SQL)
@@ -72,15 +70,14 @@ class RAGGenerator:
                 return "관련된 약학 정보를 찾지 못했습니다."
 
             # 3. 검색된 결과를 텍스트 컨텍스트로 변환
-            context_list = []
-            for res in results:
-                context_list.append(
-                    f"[약품명: {res['medicine_name']}]\n"
-                    f"- 분류: {res['category']}\n"
-                    f"- 효능: {res['efficacy']}\n"
-                    f"- 부작용 및 주의사항: {res['side_effects']}, {res['precautions']}"
-                )
-            
+            context_list = [
+                f"[약품명: {res['medicine_name']}]\n"
+                f"- 분류: {res['category']}\n"
+                f"- 효능: {res['efficacy']}\n"
+                f"- 부작용 및 주의사항: {res['side_effects']}, {res['precautions']}"
+                for res in results
+            ]
+
             return "\n\n".join(context_list)
 
         except Exception as e:
@@ -103,9 +100,7 @@ class RAGGenerator:
         """
         try:
             if self.client is None:
-                return (
-                    "현재 AI 응답을 생성할 수 있는 설정이 준비되지 않았어요."
-                )
+                return "현재 AI 응답을 생성할 수 있는 설정이 준비되지 않았어요."
 
             # 1. Get context (based on most recent message)
             user_query = messages[-1]["content"] if messages else ""
@@ -115,9 +110,13 @@ class RAGGenerator:
             # Use \n instead of actual line breaks to prevent SyntaxError
             default_system = (
                 "You are 'Dayak,' a professional and warm-hearted pharmacist.\n"
-                "Please answer the user's questions based on the actual pharmaceutical information provided in the [Context].\n"
-                "If the [Context] does not contain information related to the question, answer based on general medical knowledge but strictly advise the user to consult with a professional.\n"
-                "Maintain a kind and warm tone (using the 'Haeyo-che' style) throughout your response."
+                "Please answer the user's questions based on the actual "
+                "pharmaceutical information provided in the [Context].\n"
+                "If the [Context] does not contain information related to the question, "
+                "answer based on general medical knowledge but strictly advise "
+                "the user to consult with a professional.\n"
+                "Maintain a kind and warm tone (using the 'Haeyo-che' style) "
+                "throughout your response."
             )
 
             instruction = system_prompt or default_system
@@ -141,10 +140,7 @@ class RAGGenerator:
             # TODO: Replace with proper logging when logger is available
             logger.exception("[RAG_ERROR] Response generation failed")
 
-            return (
-                "죄송합니다. 답변을 생성하는 중에 문제가 생겼어요."
-                "잠시 후 다시 한번 말씀해 주시겠어요?"
-            )
+            return "죄송합니다. 답변을 생성하는 중에 문제가 생겼어요.잠시 후 다시 한번 말씀해 주시겠어요?"
 
 
 # Global RAG generator instance (singleton pattern for memory efficiency and state management)
