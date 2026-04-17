@@ -23,6 +23,7 @@ envs/.prod.env
 .ruff_cache/
 .pytest_cache/
 .amazonq/
+.PLAN.md
 
 # 로그 및 임시 파일
 *.log
@@ -32,7 +33,7 @@ nul
 *.pem
 
 # 로컬 전용 문서 (개인/민감 정보)
-docs-local/
+docs-private/
 
 # SQL문서
 *.sql

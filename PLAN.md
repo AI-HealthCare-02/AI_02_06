@@ -1,431 +1,317 @@
-# Security Enhancement Plan
+# RAG Vector Database System Implementation Plan
 
-## 1. RTR (Refresh Token Rotation) + Grace Period
+## 1. 시스템 개요
 
-### 개념
-- **RTR**: Refresh Token 사용 시 새 토큰 발급 + 기존 토큰 무효화
-- **Grace Period**: 동시 요청 시 구 토큰도 잠시 유효하게 유지
+### 목표
+- pgvector를 활용한 Vector Database 구축
+- 한국어 약학/의학 정보에 최적화된 RAG 시스템 구현
+- Tortoise ORM과 pgvector 통합
+- 하이브리드 검색 (벡터 + 키워드) 지원
 
-### Grace Period 적정값 분석
+### 핵심 요구사항
+1. 로컬 PostgreSQL + pgvector 사용
+2. Tortoise ORM 기반 Vector 필드 구현
+3. 처방전/약품 정보 한국어 임베딩 최적화
+4. 메타데이터 필터링 및 하이브리드 검색
+5. 사용자 프로필 기반 개인화 검색
 
-| 값 | 장점 | 단점 |
-|----|------|------|
-| 0.01초 (10ms) | 보안 극대화 | 네트워크 지연 시 실패 (RTT 50-200ms) |
-| 1-2초 | 대부분 동시 요청 커버 | 짧은 공격 윈도우 |
-| 5초 | 모바일/느린 네트워크 대응 | 탈취 시 악용 가능 |
-| 30초 | 안정성 최대 | 보안 약화 |
+## 2. 아키텍처 설계
 
-**권장: 2초**
-- 일반적인 네트워크 지연(RTT 200ms) + 서버 처리 시간 고려
-- 다중 탭/요청 동시 발생 대응
-- 공격자가 2초 내 재사용해야 하므로 실질적 위험 낮음
+### 2.1 데이터 플로우
 
-### DB 스키마 변경
+```mermaid
+flowchart TD
+    A[원본 문서] --> B[문서 전처리]
+    B --> C[청킹 처리]
+    C --> D[임베딩 생성]
+    D --> E[Vector DB 저장]
+
+    F[사용자 쿼리] --> G[쿼리 임베딩]
+    G --> H[하이브리드 검색]
+    H --> I[메타데이터 필터링]
+    I --> J[유사도 계산]
+    J --> K[결과 랭킹]
+    K --> L[RAG 응답 생성]
+
+    E --> H
+    M[사용자 프로필] --> I
+```
+
+### 2.2 시스템 컴포넌트
+
+```mermaid
+graph TB
+    subgraph "Database Layer"
+        PG[PostgreSQL + pgvector]
+        VF[VectorField]
+        VM[Vector Models]
+    end
+
+    subgraph "Embedding Layer"
+        EM[Embedding Service]
+        KE[Korean Embedding Model]
+        CH[Chunking Service]
+    end
+
+    subgraph "Search Layer"
+        VS[Vector Search]
+        KS[Keyword Search]
+        HS[Hybrid Search]
+        MF[Metadata Filter]
+    end
+
+    subgraph "RAG Layer"
+        RT[Retriever]
+        RK[Reranker]
+        GN[Generator]
+    end
+
+    EM --> PG
+    VS --> PG
+    KS --> PG
+    HS --> VS
+    HS --> KS
+    RT --> HS
+    RT --> MF
+```
+
+## 3. 구현 단계별 계획
+
+### Phase 1: 기반 인프라 구축
+1. **VectorField 구현**
+   - Tortoise ORM 커스텀 필드 정의
+   - pgvector 연산자 지원 (<=>, <->, <#>)
+   - 벡터 정규화 및 인덱싱 지원
+
+2. **Vector Models 정의**
+   - PharmaceuticalDocument: 원본 문서
+   - DocumentChunk: 청크 단위 저장
+   - SearchQuery: 검색 로그
+   - EmbeddingModel: 모델 메타데이터
+
+### Phase 2: 임베딩 시스템 구축
+1. **한국어 임베딩 모델 선택**
+   - 후보: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+   - 후보: jhgan/ko-sroberta-multitask
+   - 후보: BM-K/KoSimCSE-roberta-multitask
+   - 약학/의학 도메인 특화 평가 필요
+
+2. **청킹 전략**
+   - 구조화된 청킹: [효능,효과], [용법,용량], [주의사항] 기준
+   - 의미적 청킹: 문장 경계 고려
+   - 오버랩 청킹: 컨텍스트 보존
+
+### Phase 3: 검색 시스템 구현
+1. **Vector Search**
+   - 코사인 유사도 기반 검색
+   - HNSW 인덱스 최적화
+   - 벡터 정규화 및 내적 활용
+
+2. **Hybrid Search**
+   - 벡터 검색 + 키워드 검색 결합
+   - 가중치 기반 점수 계산
+   - 메타데이터 필터링 통합
+
+### Phase 4: RAG 시스템 완성
+1. **Retriever 구현**
+   - 다단계 검색 파이프라인
+   - 사용자 프로필 기반 필터링
+   - 결과 리랭킹
+
+2. **Generator 최적화**
+   - 프롬프트 엔지니어링
+   - 응답 품질 제어
+   - 안전성 검증
+
+## 4. 데이터베이스 스키마 설계
+
+### 4.1 핵심 테이블
+
 ```sql
--- refresh_tokens 테이블에 추가
-rotated_at TIMESTAMP NULL,  -- 교체된 시점 (grace period 계산용)
-replaced_by BIGINT NULL,    -- 새 토큰 ID (추적용)
+-- 문서 테이블
+CREATE TABLE pharmaceutical_documents (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(500) NOT NULL,
+    document_type VARCHAR(50) NOT NULL,
+    content TEXT NOT NULL,
+    content_hash VARCHAR(64) UNIQUE NOT NULL,
+    medicine_names JSONB DEFAULT '[]',
+    target_conditions JSONB DEFAULT '[]',
+    document_embedding vector(1536),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- 청크 테이블
+CREATE TABLE document_chunks (
+    id SERIAL PRIMARY KEY,
+    document_id INTEGER REFERENCES pharmaceutical_documents(id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL,
+    chunk_type VARCHAR(50) NOT NULL,
+    content TEXT NOT NULL,
+    content_hash VARCHAR(64) NOT NULL,
+    section_title VARCHAR(200),
+    keywords JSONB DEFAULT '[]',
+    medicine_names JSONB DEFAULT '[]',
+    target_conditions JSONB DEFAULT '[]',
+    embedding vector(1536) NOT NULL,
+    embedding_normalized BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(document_id, chunk_index)
+);
+
+-- HNSW 인덱스 생성
+CREATE INDEX ON document_chunks USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX ON document_chunks USING gin (medicine_names);
+CREATE INDEX ON document_chunks USING gin (keywords);
 ```
 
-### 토큰 검증 로직
+### 4.2 인덱싱 전략
+
+1. **Vector 인덱스**: HNSW (Hierarchical Navigable Small World)
+   - 코사인 유사도 최적화
+   - 메모리 효율적 근사 검색
+
+2. **JSON 인덱스**: GIN (Generalized Inverted Index)
+   - 약품명, 키워드 배열 검색 최적화
+   - 메타데이터 필터링 성능 향상
+
+## 5. 임베딩 모델 평가 계획
+
+### 5.1 평가 데이터셋
+- 약품 정보 문서 100개
+- 의학 용어 사전
+- 처방전 샘플 데이터
+- 사용자 질의 시나리오
+
+### 5.2 평가 메트릭
+- **의미적 유사도**: 약품명 유사 검색 정확도
+- **도메인 특화성**: 의학 용어 이해도
+- **다국어 지원**: 한국어-영어 혼재 텍스트 처리
+- **성능**: 임베딩 생성 속도
+
+### 5.3 후보 모델
+
+| 모델 | 차원 | 언어 | 특징 |
+|------|------|------|------|
+| paraphrase-multilingual-MiniLM-L12-v2 | 384 | 다국어 | 경량, 빠른 속도 |
+| jhgan/ko-sroberta-multitask | 768 | 한국어 | 한국어 특화 |
+| BM-K/KoSimCSE-roberta-multitask | 768 | 한국어 | 문장 유사도 특화 |
+| OpenAI text-embedding-3-small | 1536 | 다국어 | 고성능, API 기반 |
+
+## 6. 하이브리드 검색 설계
+
+### 6.1 검색 파이프라인
+
+```mermaid
+flowchart LR
+    A[사용자 쿼리] --> B[쿼리 분석]
+    B --> C[벡터 검색]
+    B --> D[키워드 검색]
+    C --> E[점수 정규화]
+    D --> E
+    E --> F[가중치 결합]
+    F --> G[메타데이터 필터]
+    G --> H[최종 랭킹]
 ```
-1. token_hash로 조회
-2. is_revoked = True?
-   - rotated_at이 있고, 현재시간 - rotated_at < 2초 → 유효 (grace)
-   - 그 외 → 무효
-3. is_revoked = False?
-   - expires_at 확인 → 유효/만료
+
+### 6.2 점수 계산 공식
+
 ```
+final_score = α × vector_score + β × keyword_score + γ × metadata_score
+
+where:
+- α = 0.6 (벡터 유사도 가중치)
+- β = 0.3 (키워드 매칭 가중치)
+- γ = 0.1 (메타데이터 일치 가중치)
+```
+
+### 6.3 메타데이터 필터링
+
+1. **사용자 조건 기반**
+   - 임부, 수유부, 노인, 소아
+   - 기저질환 (당뇨, 고혈압, 신장질환 등)
+   - 알레르기 정보
+
+2. **시간 기반**
+   - 최신 정보 우선순위
+   - 업데이트 날짜 고려
+
+3. **약물 상호작용**
+   - 복용 중인 약물과의 상호작용
+   - 금기사항 확인
+
+## 7. 성능 최적화 전략
+
+### 7.1 벡터 검색 최적화
+- **벡터 정규화**: L2 정규화로 내적 연산 활용
+- **배치 처리**: 다중 쿼리 동시 처리
+- **캐싱**: 자주 검색되는 벡터 결과 캐시
+
+### 7.2 인덱스 최적화
+- **HNSW 파라미터 튜닝**
+  - m: 16 (연결 수)
+  - ef_construction: 64 (구축 시 탐색 범위)
+  - ef_search: 40 (검색 시 탐색 범위)
+
+### 7.3 메모리 관리
+- **벡터 압축**: PQ (Product Quantization) 고려
+- **배치 로딩**: 대용량 문서 처리 시 메모리 효율화
+
+## 8. 에러 처리 및 엣지 케이스
+
+### 8.1 데이터 품질 이슈
+- **중복 문서 처리**: content_hash 기반 중복 제거
+- **불완전한 문서**: 최소 길이 검증
+- **인코딩 오류**: UTF-8 정규화
+
+### 8.2 검색 실패 케이스
+- **빈 결과**: 유사도 임계값 동적 조정
+- **성능 저하**: 타임아웃 및 폴백 전략
+- **모델 오류**: 임베딩 생성 실패 시 키워드 검색으로 폴백
+
+### 8.3 확장성 고려사항
+- **샤딩**: 문서 타입별 테이블 분할
+- **읽기 복제본**: 검색 성능 향상
+- **비동기 처리**: 임베딩 생성 큐 시스템
+
+## 9. 테스트 전략
+
+### 9.1 단위 테스트
+- VectorField 직렬화/역직렬화
+- 유사도 계산 정확성
+- 메타데이터 필터링 로직
+
+### 9.2 통합 테스트
+- 전체 검색 파이프라인
+- 데이터베이스 연동
+- 성능 벤치마크
+
+### 9.3 사용자 테스트
+- 실제 약학 질의 시나리오
+- 검색 결과 품질 평가
+- 응답 시간 측정
+
+## 10. 배포 및 모니터링
+
+### 10.1 배포 전략
+- **단계적 배포**: 기존 시스템과 병렬 운영
+- **A/B 테스트**: 검색 품질 비교
+- **롤백 계획**: 문제 발생 시 즉시 복구
+
+### 10.2 모니터링 지표
+- **검색 성능**: 평균 응답 시간, 처리량
+- **검색 품질**: 클릭률, 만족도 점수
+- **시스템 리소스**: CPU, 메모리, 디스크 사용량
 
 ---
 
-## 2. Request Deduplication (FE)
-
-### 문제점
-| 문제 | 설명 |
-|------|------|
-| 죽음의 무한루프 | 401 → refresh → 401 → refresh... |
-| 약속의 실종 | refresh 중 다른 요청이 새 토큰 못 받음 |
-| 잘못된 합치기 | 여러 refresh 요청이 각각 토큰 발급 |
-| 레이스 컨디션 | 동시 요청이 서로 다른 토큰 사용 |
-
-### 해결: Token Refresh Queue
-
-```javascript
-// tokenManager.js
-let isRefreshing = false;
-let refreshSubscribers = [];
-
-function subscribeTokenRefresh(callback) {
-  refreshSubscribers.push(callback);
-}
-
-function onRefreshed(newToken) {
-  refreshSubscribers.forEach(cb => cb(newToken));
-  refreshSubscribers = [];
-}
-
-async function refreshToken() {
-  if (isRefreshing) {
-    // 이미 갱신 중이면 대기
-    return new Promise(resolve => subscribeTokenRefresh(resolve));
-  }
-
-  isRefreshing = true;
-  try {
-    const { data } = await api.post('/api/v1/auth/refresh');
-    localStorage.setItem('access_token', data.access_token);
-    onRefreshed(data.access_token);
-    return data.access_token;
-  } finally {
-    isRefreshing = false;
-  }
-}
-```
-
-### Axios Interceptor 흐름
-```
-요청 실패 (401)
-  ↓
-isRefreshing 체크
-  ├─ false → refreshToken() 호출, isRefreshing = true
-  │           ↓
-  │         성공 → 대기 중인 요청들에 새 토큰 전달
-  │         실패 → 로그아웃 처리
-  │
-  └─ true → Promise 반환, refreshSubscribers에 등록
-            (토큰 갱신 완료 시 자동 재시도)
-```
-
----
-
-## 3. 입력값 검증 (BE Middleware)
-
-### 검증 대상
-| 패턴 | 공격 유형 | 처리 |
-|------|----------|------|
-| `<script>`, `javascript:`, `on\w+=` | XSS | 차단 |
-| `' OR`, `" OR`, `; DROP`, `UNION SELECT` | SQL Injection | 차단 |
-| `{{`, `${`, `#{` | Template Injection | 차단 |
-| `../`, `..\\` | Path Traversal | 차단 |
-
-### 미들웨어 구조
-```python
-# app/middlewares/security.py
-
-DANGEROUS_PATTERNS = [
-    r'<script',
-    r'javascript:',
-    r'on\w+\s*=',
-    r"('\s*OR|\"\s*OR)",
-    r'(UNION\s+SELECT|DROP\s+TABLE)',
-    r'\{\{|\$\{|#\{',
-    r'\.\.[/\\]',
-]
-
-async def validate_input_middleware(request, call_next):
-    # Body, Query, Path 파라미터 검사
-    # 위험 패턴 발견 시 400 Bad Request
-```
-
-### 주의사항
-- 정규표현식은 case-insensitive로
-- JSON body의 모든 string 필드 재귀 검사
-- 로깅하되 민감 정보는 마스킹
-
----
-
-## 4. CSP (Content Security Policy)
-
-### 헤더 설정
-```python
-# app/middlewares/security.py
-
-CSP_POLICY = {
-    "default-src": "'self'",
-    "script-src": "'self'",  # unsafe-inline 불허
-    "style-src": "'self' 'unsafe-inline'",  # Tailwind 등 인라인 스타일 허용 (필요시)
-    "img-src": "'self' https://k.kakaocdn.net data:",  # 카카오 프로필 이미지
-    "connect-src": "'self' https://kauth.kakao.com https://kapi.kakao.com",
-    "frame-ancestors": "'none'",
-    "form-action": "'self'",
-}
-
-async def add_security_headers(request, call_next):
-    response = await call_next(request)
-    response.headers["Content-Security-Policy"] = build_csp(CSP_POLICY)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    return response
-```
-
-### Next.js (FE)
-```javascript
-// next.config.mjs
-const securityHeaders = [
-  { key: 'Content-Security-Policy', value: "..." }
-];
-```
-
----
-
-## 5. 즉시 차단 / 즉시 알림 / 간편 복구
-
-### 즉시 차단
-- **BE**: 토큰 탈취 감지 시 `revoke_all_for_account()` 호출
-- **탈취 감지 조건**:
-  - Grace period 이후 구 토큰 재사용 시도
-  - 동일 토큰이 다른 IP/User-Agent에서 사용
-
-### 즉시 알림
-- **FE**: 403 응답 시 Toast + 모달로 안내
-  - "다른 기기에서 로그인되어 현재 세션이 종료되었습니다"
-- **BE**: (선택) 이메일/푸시 알림
-
-### 간편 복구
-- **FE**: 로그아웃 처리 후 로그인 페이지로 리다이렉트
-- 재로그인만으로 새 세션 시작 (별도 복구 절차 없음)
-
-```javascript
-// errors.js 확장
-if (parsed.code === 'token_compromised') {
-  showError('보안을 위해 로그아웃되었습니다. 다시 로그인해주세요.');
-  localStorage.removeItem('access_token');
-  window.location.href = '/login';
-}
-```
-
----
-
-## 6. 구현 순서 (커밋 단위)
-
-### Phase 1: Backend 기반
-1. **refresh_tokens 모델 확장** (rotated_at, replaced_by)
-2. **RTR 엔드포인트 추가** (POST /auth/refresh)
-3. **Grace Period 로직** (repository 수정)
-
-### Phase 2: Security Middleware
-4. **입력값 검증 미들웨어**
-5. **CSP 헤더 미들웨어**
-6. **탈취 감지 로직** (이상 사용 감지)
-
-### Phase 3: Frontend
-7. **tokenManager.js** (Request Deduplication)
-8. **api.js 인터셉터 개선** (401 처리 큐)
-9. **에러 처리 확장** (token_compromised)
-
-### Phase 4: Integration
-10. **E2E 테스트** (시나리오별 검증)
-
----
-
-## 7. 예상 파일 변경
-
-| 파일 | 변경 내용 |
-|------|----------|
-| `app/models/refresh_tokens.py` | rotated_at, replaced_by 필드 추가 |
-| `app/repositories/refresh_token_repository.py` | rotate(), validate_with_grace() |
-| `app/services/oauth.py` | refresh_access_token() 메서드 |
-| `app/apis/v1/oauth_routers.py` | POST /auth/refresh 엔드포인트 |
-| `app/middlewares/__init__.py` | 신규 |
-| `app/middlewares/security.py` | 입력값 검증 + CSP |
-| `app/main.py` | 미들웨어 등록 |
-| `medication-frontend/src/lib/tokenManager.js` | 신규 |
-| `medication-frontend/src/lib/api.js` | 인터셉터 개선 |
-| `medication-frontend/src/lib/errors.js` | 에러 코드 추가 |
-
----
-
-## 8. 결정 완료
-
-| 항목 | 결정 |
-|------|------|
-| Grace Period | **2초** |
-| CSP style-src | **nonce 기반** (unsafe-inline 불허) |
-| 탈취 감지 시 | **해당 토큰만 종료** |
-| 입력값 검증 실패 | **400 Bad Request** |
-| 입력값 검증 방식 | **Middleware(1차) + Pydantic+Bleach(2차)** |
-
----
-
-# Survey Popup 자동 표시 기능
-
-## 목표
-- **Dev 사용자**: main 페이지 진입 시 항상 설문 팝업 표시
-- **Kakao 로그인 사용자**: 신규 가입자(최초 생성)만 설문 팝업 표시
-
----
-
-## 현재 상태 분석
-
-### 1. 기존 흐름
-```
-[로그인] --> {is_new_user?}
-           |
-           |--(Yes)--> /survey 페이지로 리다이렉트
-           |
-           |--(No)--> /main 페이지로 이동
-                        |
-                        --> SurveyModal 있지만 수동 트리거만 가능
-```
-
-### 2. 관련 파일
-| 파일 | 현재 역할 |
-|------|----------|
-| `auth/kakao/callback/page.jsx` | `is_new_user` 확인 후 `/survey` 리다이렉트 |
-| `main/page.jsx` | SurveyModal 컴포넌트 존재, 수동 트리거만 |
-| `login/page.jsx` | Dev 로그인 시 `code=dev_test_login` 사용 |
-
-### 3. 문제점
-- 신규 유저가 `/survey`로 리다이렉트되면 main 페이지 경험 없음
-- Dev 사용자 구분 로직 없음
-- main 페이지에서 자동 팝업 트리거 없음
-
----
-
-## 수정 계획
-
-### Phase 1: 백엔드 수정 (is_dev_user 플래그 추가)
-
-**파일**: `app/apis/v1/oauth_routers.py`
-
-- Dev 로그인 응답에 `is_dev_user: true` 플래그 추가
-- 기존 `is_new_user` 플래그 유지
-
-```python
-# 예시: callback 응답
-{
-    "access_token": "...",
-    "is_new_user": true,
-    "is_dev_user": true  # Dev 로그인인 경우만
-}
-```
-
-### Phase 2: 프론트엔드 콜백 수정
-
-**파일**: `medication-frontend/src/app/auth/kakao/callback/page.jsx`
-
-- 기존: `is_new_user`면 `/survey`로 리다이렉트
-- 변경: `/main`으로 이동하면서 쿼리 파라미터로 상태 전달
-
-```javascript
-// Before
-if (is_new_user) {
-  router.replace('/survey')
-} else {
-  router.replace('/main')
-}
-
-// After
-if (is_new_user || is_dev_user) {
-  router.replace('/main?showSurvey=true')
-} else {
-  router.replace('/main')
-}
-```
-
-### Phase 3: main 페이지 수정
-
-**파일**: `medication-frontend/src/app/main/page.jsx`
-
-- URL 쿼리 파라미터 `showSurvey=true` 감지
-- 감지 시 자동으로 SurveyModal 표시
-- 표시 후 URL에서 파라미터 제거 (clean URL)
-
-```javascript
-'use client'
-import { useSearchParams, useRouter } from 'next/navigation'
-
-// 컴포넌트 내부
-const searchParams = useSearchParams()
-const router = useRouter()
-
-useEffect(() => {
-  if (searchParams.get('showSurvey') === 'true') {
-    setShowSurvey(true)
-    // Clean URL
-    router.replace('/main', { scroll: false })
-  }
-}, [searchParams])
-```
-
----
-
-## 데이터 플로우 (수정 후)
-
-```
-[로그인 시도] --> {로그인 타입?}
-                    |
-                    |--(Dev 로그인)--> Backend: is_dev_user=true 반환
-                    |                      |
-                    |                      v
-                    |--(Kakao 로그인)--> {신규 유저?}
-                                           |
-                                           |--(Yes)--> Backend: is_new_user=true 반환
-                                           |                 |
-                                           |                 v
-                                           |            Callback: /main?showSurvey=true로 이동
-                                           |                 |
-                                           |                 v
-                                           |            Main: showSurvey 파라미터 감지
-                                           |                 |
-                                           |                 v
-                                           |            SurveyModal 자동 표시
-                                           |                 |
-                                           |                 v
-                                           |            URL 파라미터 제거
-                                           |
-                                           |--(No)--> Backend: is_new_user=false 반환
-                                                          |
-                                                          v
-                                                     Callback: /main으로 이동
-                                                          |
-                                                          v
-                                                     Main: 일반 화면 표시
-```
-
----
-
-## 체크리스트
-
-### Phase 1: Backend
-- [x] `oauth_routers.py`에서 dev 로그인 또는 신규 유저일 때 `?showSurvey=true` 쿼리 파라미터 추가
-- [ ] 기존 테스트 통과 확인
-
-### Phase 2: Frontend Callback
-- [x] 백엔드에서 직접 리다이렉트하므로 프론트엔드 콜백 수정 불필요
-
-### Phase 3: Frontend Main
-- [x] `main/page.jsx`에 useSearchParams 훅 추가
-- [x] showSurvey 파라미터 감지 로직 추가
-- [x] URL 클린업 로직 추가
-- [x] Suspense boundary 추가 (useSearchParams 필수 요구사항)
-
-### Phase 4: 테스트
-- [ ] Dev 로그인 -> 설문 팝업 표시 확인
-- [ ] 신규 Kakao 유저 -> 설문 팝업 표시 확인
-- [ ] 기존 Kakao 유저 -> 설문 팝업 미표시 확인
-
----
-
-## 대안 검토
-
-### 대안 A: localStorage 사용 (선택하지 않음)
-- 장점: URL이 깔끔함
-- 단점: 브라우저 간 동기화 불가, 개발자 도구로 조작 가능
-
-### 대안 B: 쿼리 파라미터 사용 (선택)
-- 장점: 상태 명확, SSR 호환, 디버깅 용이
-- 단점: URL에 잠시 파라미터 노출 (바로 제거됨)
-
----
-
-## 예상 변경 파일
-
-| 파일 | 변경 내용 |
-|------|----------|
-| `app/apis/v1/oauth_routers.py` | is_dev_user 플래그 추가 |
-| `medication-frontend/src/app/auth/kakao/callback/page.jsx` | 리다이렉트 로직 수정 |
-| `medication-frontend/src/app/main/page.jsx` | useSearchParams로 자동 팝업 |
-
+## 다음 단계
+
+이 계획서를 검토해주시고, **`go`** 명령을 주시면 구현을 시작하겠습니다.
+
+특히 다음 사항들에 대한 피드백을 부탁드립니다:
+1. 임베딩 모델 선택 방향성
+2. 하이브리드 검색 가중치 설정
+3. 메타데이터 필터링 우선순위
+4. 성능 목표 수치 (응답시간, 처리량 등)
