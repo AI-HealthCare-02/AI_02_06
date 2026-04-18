@@ -4,7 +4,6 @@ import { useRouter } from 'next/navigation'
 import { Pill, ChevronRight, Plus, Building2, Pencil, Trash2 } from 'lucide-react'
 import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
-import { useProfile } from '@/contexts/ProfileContext'
 
 function MedicationListSkeleton() {
   return (
@@ -163,9 +162,22 @@ export default function MedicationListPage() {
   const [deleteTargetItems, setDeleteTargetItems] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
-  const { selectedProfileId: profileId } = useProfile()
+  const [profileId, setProfileId] = useState(null)
   const isInitialLoad = useRef(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const profileRes = await api.get('/api/v1/profiles')
+        const self = profileRes.data?.find(p => p.relation_type === 'SELF')
+        if (self) setProfileId(self.id)
+      } catch (err) {
+        console.error(err)
+      }
+    }
+    fetchProfile()
+  }, [])
 
   const fetchMedications = async (isInitial = false) => {
     if (isInitial || isInitialLoad.current) {
