@@ -10,11 +10,16 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+# DTO 경계에서 naive datetime 유입을 차단하기 위한 KST 타임존 상수
 _KST = zoneinfo.ZoneInfo("Asia/Seoul")
 
 
 def _make_aware(v: datetime | None) -> datetime | None:
-    """Return timezone-aware datetime; assume KST if tzinfo is missing."""
+    """Return timezone-aware datetime; assume KST if tzinfo is missing.
+
+    tzinfo가 없는 naive datetime은 KST로 간주하여 aware datetime으로 변환합니다.
+    이미 aware datetime이면 그대로 반환합니다.
+    """
     if v is None:
         return v
     return v if v.tzinfo is not None else v.replace(tzinfo=_KST)

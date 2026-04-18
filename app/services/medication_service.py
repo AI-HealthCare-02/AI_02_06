@@ -281,6 +281,9 @@ class MedicationService:
     async def decrement_and_deactivate_if_exhausted(self, medication: Medication) -> Medication:
         """Decrement remaining intake count and deactivate medication if exhausted.
 
+        복용 완료 시 잔여 횟수를 1 감소시키고, 0이 되면 is_active=False로 자동 비활성화합니다.
+        처방전 만료와는 별개로, 복용 횟수 소진 기준의 자동 종료 로직입니다.
+
         Args:
             medication: Medication to update.
 
@@ -288,6 +291,7 @@ class MedicationService:
             Medication: Updated medication. Deactivated if remaining count reaches zero.
         """
         medication = await self.repository.decrement_remaining_count(medication)
+        # 잔여 횟수 0 도달 시 해당 처방전 비활성화 (더 이상 복용 기록 생성 안 됨)
         if medication.remaining_intake_count == 0:
             medication = await self.repository.update(medication, is_active=False)
         return medication

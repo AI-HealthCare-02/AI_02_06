@@ -257,7 +257,18 @@ class IntakeLogService:
         return dt if dt.tzinfo is not None else dt.replace(tzinfo=config.TIMEZONE)
 
     async def mark_as_taken(self, intake_log_id: UUID, taken_at: datetime | None = None) -> IntakeLog:
-        """복용 완료 처리"""
+        """Mark intake log as taken.
+
+        Args:
+            intake_log_id: Intake log UUID.
+            taken_at: Actual intake time. Defaults to now if None.
+
+        Returns:
+            IntakeLog: Updated intake log.
+
+        Raises:
+            HTTPException: If intake log already processed.
+        """
         intake_log = await self.get_intake_log(intake_log_id)
 
         if intake_log.intake_status != "SCHEDULED":
@@ -266,12 +277,28 @@ class IntakeLogService:
                 detail="이미 처리된 복용 기록입니다.",
             )
 
+        # _ensure_aware: naive datetime이 들어올 경우 KST로 보정 (DB timezone 오염 방지)
         return await self.repository.mark_as_taken(intake_log, self._ensure_aware(taken_at))
 
     async def mark_as_taken_with_owner_check(
         self, intake_log_id: UUID, account_id: UUID, taken_at: datetime | None = None
     ) -> IntakeLog:
-        """소유권 검증 후 복용 완료 처리 및 복약 잔여 횟수 감소."""
+        """Mark intake log as taken with ownership verification.
+
+        복용 완료 처리 후 해당 약의 잔여 복용 횟수를 1 감소시키고,
+        잔여 횟수가 0이 되면 약을 자동으로 비활성화합니다.
+
+        Args:
+            intake_log_id: Intake log UUID.
+            account_id: Account UUID for ownership check.
+            taken_at: Actual intake time. Defaults to now if None.
+
+        Returns:
+            IntakeLog: Updated intake log if owned by account.
+
+        Raises:
+            HTTPException: If intake log already processed or access denied.
+        """
         intake_log = await self.get_intake_log_with_owner_check(intake_log_id, account_id)
 
         if intake_log.intake_status != "SCHEDULED":
@@ -280,7 +307,9 @@ class IntakeLogService:
                 detail="이미 처리된 복용 기록입니다.",
             )
 
+        # 복용 완료 기록 저장 (taken_at naive → KST aware 보정)
         result = await self.repository.mark_as_taken(intake_log, self._ensure_aware(taken_at))
+        # 해당 약 잔여 횟수 감소 → 0이 되면 is_active=False 자동 처리
         medication = await self.medication_service.get_medication(intake_log.medication_id)
         await self.medication_service.decrement_and_deactivate_if_exhausted(medication)
         return result
