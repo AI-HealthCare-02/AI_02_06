@@ -145,6 +145,7 @@ export default function MedicationDetailPage() {
 
   return (
     <main className="min-h-screen bg-gray-50 pb-24">
+      <div className="max-w-2xl mx-auto">
       {/* 헤더 */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-4">
         <button onClick={() => router.back()} className="text-gray-400 hover:text-black cursor-pointer text-xl">←</button>
@@ -160,7 +161,7 @@ export default function MedicationDetailPage() {
         </button>
       </div>
 
-      <div className="max-w-3xl mx-auto px-6 py-6 space-y-4">
+      <div className="px-6 py-6 space-y-4">
         {/* 약품명 카드 */}
         <div className="bg-gray-900 rounded-2xl p-6 text-white">
           <div className="flex items-start justify-between gap-4">
@@ -307,6 +308,7 @@ export default function MedicationDetailPage() {
         <p className="text-xs text-gray-300 text-center leading-relaxed px-2">
           이 정보는 AI가 생성한 참고용 정보입니다. 정확한 복약 지도는 반드시 전문 의료인과 상의하십시오.
         </p>
+      </div>
       </div>
 
       {/* 삭제 확인 모달 */}
