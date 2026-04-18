@@ -89,10 +89,13 @@ export default function MedicationDetailPage() {
     fetchMedication()
   }, [id, router])
 
-  // 주의사항/부작용/상호작용 탭 선택 시 drug-info API 호출
+  // 주의사항/부작용/상호작용 탭 선택 시 drug-info API 호출 (lazy loading)
+  // - '용법' 탭에서는 호출하지 않음 (LLM 비용 절감)
+  // - drugInfo가 이미 있으면 재호출 생략 (컴포넌트 생명주기 내 1회 캐싱)
+  // - 백엔드에서도 30일 DB 캐시(LLMResponseCache)로 중복 LLM 호출 방지
   useEffect(() => {
     if (!med || activeTab === '용법') return
-    if (drugInfo) return // 이미 불러왔으면 재호출 안 함
+    if (drugInfo) return
 
     const fetchDrugInfo = async () => {
       setIsDrugInfoLoading(true)
@@ -121,9 +124,12 @@ export default function MedicationDetailPage() {
     }
   }
 
+  // 복용 완료 처리: 삭제와 달리 is_active=false로만 변경 (soft 처리)
+  // 완료된 약품은 '완료' 탭에서 계속 조회 가능
   const handleDeactivate = async () => {
     try {
       await api.patch(`/api/v1/medications/${id}`, { is_active: false })
+      // API 재호출 없이 로컬 상태만 업데이트하여 즉각적인 UI 반영
       setMed(prev => ({ ...prev, is_active: false }))
     } catch (err) {
       console.error(err)
@@ -134,6 +140,7 @@ export default function MedicationDetailPage() {
   if (isLoading) return <DetailSkeleton />
   if (!med) return null
 
+  // 값이 없는 항목은 filter로 제외 — 빈 필드가 카드에 표시되지 않도록 처리
   const dosageItems = [
     { icon: Pill, label: '1회 복용량', value: med.dose_per_intake },
     { icon: Clock, label: '1일 복용 횟수', value: med.daily_intake_count ? `${med.daily_intake_count}회` : null },
