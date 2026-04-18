@@ -13,14 +13,16 @@ from app.core import config
 from app.models.intake_log import IntakeLog
 from app.repositories.intake_log_repository import IntakeLogRepository
 from app.repositories.profile_repository import ProfileRepository
+from app.services.medication_service import MedicationService
 
 
 class IntakeLogService:
     """Intake log business logic service for medication tracking."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.repository = IntakeLogRepository()
         self.profile_repository = ProfileRepository()
+        self.medication_service = MedicationService()
 
     async def _verify_profile_ownership(self, profile_id: UUID, account_id: UUID) -> None:
         """Verify profile ownership.
@@ -255,7 +257,7 @@ class IntakeLogService:
     async def mark_as_taken_with_owner_check(
         self, intake_log_id: UUID, account_id: UUID, taken_at: datetime | None = None
     ) -> IntakeLog:
-        """소유권 검증 후 복용 완료 처리"""
+        """소유권 검증 후 복용 완료 처리 및 복약 잔여 횟수 감소."""
         intake_log = await self.get_intake_log_with_owner_check(intake_log_id, account_id)
 
         if intake_log.intake_status != "SCHEDULED":
@@ -264,7 +266,10 @@ class IntakeLogService:
                 detail="이미 처리된 복용 기록입니다.",
             )
 
-        return await self.repository.mark_as_taken(intake_log, taken_at)
+        result = await self.repository.mark_as_taken(intake_log, taken_at)
+        medication = await self.medication_service.get_medication(intake_log.medication_id)
+        await self.medication_service.decrement_and_deactivate_if_exhausted(medication)
+        return result
 
     async def mark_as_skipped(self, intake_log_id: UUID) -> IntakeLog:
         """Mark intake log as skipped.
