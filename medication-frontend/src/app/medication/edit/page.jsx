@@ -25,10 +25,13 @@ function EditSkeleton() {
 function MedicationEditContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  // URL 쿼리 ?ids=id1,id2,... 로 처방전 그룹 내 약품 ID 목록 전달받음
+  // medication/page.jsx의 onEditGroup에서 ids=items.map(m=>m.id).join(',') 형태로 생성
   const ids = searchParams.get('ids')?.split(',').filter(Boolean) ?? []
 
   const [isLoading, setIsLoading] = useState(true)
   const [meds, setMeds] = useState([])
+  // prescriptionDate: 그룹 내 모든 약품에 공통 적용되는 처방일 (dispensed_date)
   const [prescriptionDate, setPrescriptionDate] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -40,9 +43,11 @@ function MedicationEditContent() {
 
     const fetchMedications = async () => {
       try {
+        // 그룹 내 여러 약품을 병렬 조회 (순차 요청 대비 응답 속도 개선)
         const results = await Promise.all(ids.map(id => api.get(`/api/v1/medications/${id}`)))
         const fetched = results.map(r => r.data)
         setMeds(fetched)
+        // 처방일 초기값: 첫 번째 약품의 dispensed_date 우선, 없으면 start_date
         const firstDate = fetched[0]?.dispensed_date || fetched[0]?.start_date || ''
         setPrescriptionDate(firstDate)
       } catch {
@@ -78,6 +83,7 @@ function MedicationEditContent() {
 
     setIsSubmitting(true)
     try {
+      // 그룹 내 모든 약품을 병렬 PATCH — 처방일(dispensed_date)은 공통값으로 일괄 적용
       await Promise.all(
         meds.map(med =>
           api.patch(`/api/v1/medications/${med.id}`, {

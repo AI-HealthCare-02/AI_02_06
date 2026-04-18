@@ -29,22 +29,34 @@ function MedicationListSkeleton() {
   )
 }
 
-/** dispensed_date(없으면 start_date) + department 기준으로 처방전 그룹핑 */
+/**
+ * 약품 목록을 처방전 단위로 그룹핑
+ * - 기준 키: dispensed_date(조제일) 우선, 없으면 start_date(복용 시작일) 사용
+ * - 같은 날짜 + 같은 진료과(department)를 하나의 처방전 그룹으로 묶음
+ * - 최신 처방 순(내림차순)으로 정렬하여 반환
+ */
 function groupByPrescription(medications) {
   const groups = {}
   for (const med of medications) {
+    // 조제일 없을 경우 복용 시작일로 fallback, 둘 다 없으면 '날짜 미상'
     const dateKey = med.dispensed_date || med.start_date || '날짜 미상'
     const deptKey = med.department || '기타'
+    // dateKey + deptKey 조합으로 고유 처방전 식별 (같은 날 같은 과 = 동일 처방)
     const key = `${dateKey}__${deptKey}`
     if (!groups[key]) {
       groups[key] = { dateKey, deptKey, items: [] }
     }
     groups[key].items.push(med)
   }
+  // 최신 처방이 위로 오도록 내림차순 정렬
   return Object.values(groups).sort((a, b) => (a.dateKey < b.dateKey ? 1 : -1))
 }
 
-/** allGroups에서 고유 처방 날짜 목록 추출 (내림차순 유지) */
+/**
+ * 전체 그룹 목록에서 중복 없는 처방 날짜 목록 추출
+ * - Set으로 중복 제거 후 allGroups 순서(내림차순) 유지
+ * - 좌측 사이드바 날짜 네비게이션 및 모바일 날짜 필터 칩에 사용됨
+ */
 function extractUniqueDates(allGroups) {
   const seen = new Set()
   const result = []
@@ -162,11 +174,14 @@ export default function MedicationListPage() {
   const [deleteTargetItems, setDeleteTargetItems] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
+  // TODO: ProfileContext가 연동되면 여기서 직접 API 호출 대신 Context에서 profileId를 받도록 교체 필요
   const [profileId, setProfileId] = useState(null)
   const isInitialLoad = useRef(true)
+  // isRefreshing: 탭/날짜 전환 시 전체 스켈레톤 대신 투명도 처리로 UX 개선
   const [isRefreshing, setIsRefreshing] = useState(false)
 
   useEffect(() => {
+    // 마운트 시 1회: SELF 관계 프로필의 ID를 가져와 이후 약품 조회에 사용
     const fetchProfile = async () => {
       try {
         const profileRes = await api.get('/api/v1/profiles')
@@ -214,8 +229,10 @@ export default function MedicationListPage() {
     if (!deleteTargetItems || isDeleting) return
     setIsDeleting(true)
     try {
+      // 그룹 내 모든 약품을 병렬 삭제 (순차 삭제 대비 응답 속도 개선)
       await Promise.all(deleteTargetItems.map(med => api.delete(`/api/v1/medications/${med.id}`)))
       setDeleteTargetItems(null)
+      // 삭제 완료 후 목록 새로고침으로 서버 상태와 동기화
       await fetchMedications()
     } catch (err) {
       console.error(err)
@@ -229,6 +246,8 @@ export default function MedicationListPage() {
 
   const allGroups = groupByPrescription(medications)
   const sidebarDates = extractUniqueDates(allGroups)
+  // selectedDate: 특정 날짜 선택 시 해당 그룹만 표시 (API 재호출 없이 클라이언트 필터)
+  // null이면 전체 그룹 표시
   const groups = selectedDate
     ? allGroups.filter(g => g.dateKey === selectedDate)
     : allGroups
@@ -295,11 +314,14 @@ export default function MedicationListPage() {
                 </span>
               </button>
 
-              {/* 연도별 그룹 + 날짜 목록 */}
+              {/* 연도별 구분선 + 날짜 목록 렌더링
+                  - IIFE(() => {...})() 패턴: map 내부에서 이전 연도(lastYear)를 추적하기 위해 사용
+                  - React 조건부 렌더링에서는 외부 상태를 직접 변경할 수 없어 IIFE로 클로저 생성 */}
               {(() => {
                 let lastYear = null
                 return sidebarDates.map((dateKey) => {
                   const year = formatYear(dateKey)
+                  // 연도가 바뀔 때만 구분선 표시 (e.g. "2024년" → "2025년")
                   const showYearDivider = year !== lastYear
                   lastYear = year
                   const groupCount = allGroups.filter(g => g.dateKey === dateKey).length
