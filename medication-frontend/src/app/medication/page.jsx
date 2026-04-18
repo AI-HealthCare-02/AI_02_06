@@ -1,9 +1,10 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Pill, ChevronRight, Plus, Building2 } from 'lucide-react'
 import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
+import { useProfile } from '@/contexts/ProfileContext'
 
 function MedicationListSkeleton() {
   return (
@@ -116,25 +117,19 @@ export default function MedicationListPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [medications, setMedications] = useState([])
   const [activeTab, setActiveTab] = useState('복용중')
-  const [profileId, setProfileId] = useState(null)
 
-  useEffect(() => {
-    const fetchProfile = async () => {
-      try {
-        const profileRes = await api.get('/api/v1/profiles')
-        const self = profileRes.data?.find(p => p.relation_type === 'SELF')
-        if (self) setProfileId(self.id)
-      } catch (err) {
-        console.error(err)
-      }
-    }
-    fetchProfile()
-  }, [])
+  const { selectedProfileId: profileId } = useProfile()
+  const isInitialLoad = useRef(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
   useEffect(() => {
     if (!profileId) return
     const fetchMedications = async () => {
-      setIsLoading(true)
+      if (isInitialLoad.current) {
+        setIsLoading(true)
+      } else {
+        setIsRefreshing(true)
+      }
       try {
         const tab = TABS.find(t => t.label === activeTab)
         const res = await api.get(`/api/v1/medications?profile_id=${profileId}&${tab.param}`)
@@ -143,6 +138,8 @@ export default function MedicationListPage() {
         console.error(err)
       } finally {
         setIsLoading(false)
+        setIsRefreshing(false)
+        isInitialLoad.current = false
       }
     }
     fetchMedications()
@@ -157,7 +154,7 @@ export default function MedicationListPage() {
     : { title: '완료된 처방 내역이 없어요', sub: '복용이 끝난 처방전은 여기에 표시됩니다' }
 
   return (
-    <main className="min-h-screen bg-gray-50 pb-24">
+    <main className={`min-h-screen bg-gray-50 pb-24 transition-opacity duration-200 ${isRefreshing ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
       {/* 헤더 */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <h1 className="font-bold text-gray-900 text-lg">내 처방 내역</h1>

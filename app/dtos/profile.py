@@ -47,6 +47,21 @@ class ProfileUpdate(BaseModel):
     health_survey: dict[str, Any] | None = Field(None, description="Health survey results")
 
 
+class ProfileSummaryResponse(BaseModel):
+    """Profile summary response model for list endpoints.
+
+    Lightweight response without health survey data.
+    Used for profile listing and switching UI where full health data is not needed.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID = Field(..., description="Profile unique ID")
+    account_id: UUID = Field(..., description="Connected account ID")
+    name: str = Field(..., description="Profile name")
+    relation_type: RelationType = Field(..., description="Relationship type")
+
+
 class ProfileResponse(BaseProfile):
     """Profile response model.
 

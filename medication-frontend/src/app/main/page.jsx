@@ -1,9 +1,11 @@
 'use client'
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import api, { showError } from '@/lib/api'
-import { Pill, Flame, X, Plus, MessageCircle } from 'lucide-react'
+import api from '@/lib/api'
+import { Pill, Flame, Plus, MessageCircle } from 'lucide-react'
 import ChatModal from '@/components/chat/ChatModal'
+import SurveyModal from '@/components/common/SurveyModal'
+import { useProfile } from '@/contexts/ProfileContext'
 
 // 스켈레톤은 main의 레이아웃을 따름
 function MainSkeleton() {
@@ -23,314 +25,69 @@ function MainSkeleton() {
   )
 }
 
-// 종합 설문 모달 (survey 페이지 내용 + 팝업 스타일)
-function SurveyModal({ onClose, userName }) {
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [existingProfile, setExistingProfile] = useState(null)
-  const [form, setForm] = useState({
-    age: '', gender: '', height: '', weight: '',
-    is_smoking: null, is_drinking: null,
-    conditions: [], allergies: []
-  })
-
-  // 기존 프로필 데이터 로드
-  useEffect(() => {
-    const fetchProfile = async () => {
-      try {
-        const res = await api.get('/api/v1/profiles')
-        const selfProfile = res.data?.find(p => p.relation_type === 'SELF')
-        if (selfProfile) {
-          setExistingProfile(selfProfile)
-          if (selfProfile.health_survey) {
-            const survey = selfProfile.health_survey
-            setForm({
-              age: survey.age?.toString() || '',
-              gender: survey.gender || '',
-              height: survey.height?.toString() || '',
-              weight: survey.weight?.toString() || '',
-              is_smoking: survey.is_smoking ?? null,
-              is_drinking: survey.is_drinking ?? null,
-              conditions: survey.conditions || [],
-              allergies: survey.allergies || []
-            })
-          }
-        }
-      } catch (err) { console.error(err) }
-    }
-    fetchProfile()
-  }, [])
-
-  const handleSkip = async () => {
-    if (!existingProfile) {
-      setIsSubmitting(true)
-      try {
-        await api.post('/api/v1/profiles', { relation_type: 'SELF', name: userName || '나', health_survey: null })
-      } catch (err) { console.error(err) }
-      setIsSubmitting(false)
-    }
-    onClose()
-  }
-
-  const handleSubmit = async () => {
-    if (!form.age || !form.gender) {
-      showError('나이와 성별은 필수 입력입니다.')
-      return
-    }
-    setIsSubmitting(true)
-    const healthSurvey = {
-      age: parseInt(form.age) || null,
-      gender: form.gender || null,
-      height: parseInt(form.height) || null,
-      weight: parseFloat(form.weight) || null,
-      is_smoking: form.is_smoking,
-      is_drinking: form.is_drinking,
-      conditions: form.conditions.length > 0 ? form.conditions : null,
-      allergies: form.allergies.length > 0 ? form.allergies : null
-    }
-    try {
-      if (existingProfile) {
-        await api.patch(`/api/v1/profiles/${existingProfile.id}`, { health_survey: healthSurvey })
-      } else {
-        await api.post('/api/v1/profiles', { relation_type: 'SELF', name: userName || '나', health_survey: healthSurvey })
-      }
-      onClose()
-    } catch (err) {
-      console.error(err)
-      showError(err.parsed?.message || '설문 저장에 실패했습니다.')
-    }
-    setIsSubmitting(false)
-  }
-
-  const selectedClass = 'bg-gray-900 text-white border-gray-900'
-  const unselectedClass = 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
-  const chipSelected = 'bg-gray-900 text-white border-gray-900'
-  const chipUnselected = 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
-
-  return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-      <div className="bg-white rounded-[32px] w-full max-w-lg max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
-        {/* 헤더 */}
-        <div className="p-6 border-b border-gray-100 flex justify-between items-center shrink-0">
-          <div>
-            <h2 className="font-black text-xl text-gray-900">건강 정보 입력</h2>
-            <p className="text-gray-400 text-sm mt-1">{userName} 님에게 딱 맞는 복약 가이드를 준비할게요</p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-            <X size={24} className="text-gray-400" />
-          </button>
-        </div>
-
-        {/* 스크롤 영역 */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* 기본 정보 */}
-          <div className="bg-gray-50 rounded-2xl p-5">
-            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-              <span className="w-1 h-4 bg-gray-900 rounded-full"></span>
-              기본 정보 <span className="text-red-400 text-xs">*필수</span>
-            </h3>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-gray-400 text-xs font-bold mb-1.5 block">나이 *</label>
-                <input type="number" placeholder="세" min={1} max={120}
-                  value={form.age}
-                  onChange={(e) => {
-                    const val = e.target.value
-                    if (val === '' || (parseInt(val) >= 1 && parseInt(val) <= 120)) setForm({...form, age: val})
-                  }}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none bg-white" />
-              </div>
-              <div>
-                <label className="text-gray-400 text-xs font-bold mb-1.5 block">성별 *</label>
-                <div className="flex gap-2">
-                  {['MALE', 'FEMALE'].map(g => (
-                    <button key={g} type="button" onClick={() => setForm({...form, gender: g})}
-                      className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all cursor-pointer ${form.gender === g ? selectedClass : unselectedClass}`}>
-                      {g === 'MALE' ? '남성' : '여성'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-gray-400 text-xs font-bold mb-1.5 block">키 (cm)</label>
-                <input type="number" placeholder="cm" min={50} max={250}
-                  value={form.height}
-                  onChange={(e) => {
-                    const val = e.target.value
-                    if (val === '' || (parseInt(val) >= 50 && parseInt(val) <= 250)) setForm({...form, height: val})
-                  }}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none bg-white" />
-              </div>
-              <div>
-                <label className="text-gray-400 text-xs font-bold mb-1.5 block">몸무게 (kg)</label>
-                <input type="number" placeholder="kg" min={1} max={300} step={0.1}
-                  value={form.weight}
-                  onChange={(e) => {
-                    const val = e.target.value
-                    if (val === '' || (parseFloat(val) >= 1 && parseFloat(val) <= 300)) setForm({...form, weight: val})
-                  }}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-gray-400 outline-none bg-white" />
-              </div>
-            </div>
-          </div>
-
-          {/* 생활 습관 */}
-          <div className="bg-gray-50 rounded-2xl p-5">
-            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-              <span className="w-1 h-4 bg-gray-900 rounded-full"></span>
-              생활 습관
-            </h3>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-gray-400 text-xs font-bold mb-1.5 block">흡연 여부</label>
-                <div className="flex gap-2">
-                  {[true, false].map(v => (
-                    <button key={String(v)} type="button" onClick={() => setForm({...form, is_smoking: v})}
-                      className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all cursor-pointer ${form.is_smoking === v ? selectedClass : unselectedClass}`}>
-                      {v ? '예' : '아니오'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-gray-400 text-xs font-bold mb-1.5 block">음주 여부</label>
-                <div className="flex gap-2">
-                  {[true, false].map(v => (
-                    <button key={String(v)} type="button" onClick={() => setForm({...form, is_drinking: v})}
-                      className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all cursor-pointer ${form.is_drinking === v ? selectedClass : unselectedClass}`}>
-                      {v ? '예' : '아니오'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* 질환 및 알레르기 */}
-          <div className="bg-gray-50 rounded-2xl p-5">
-            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-              <span className="w-1 h-4 bg-gray-900 rounded-full"></span>
-              질환 및 알레르기
-            </h3>
-            <div className="space-y-4">
-              <div>
-                <label className="text-gray-400 text-xs font-bold mb-2 block">기저질환 (중복 선택)</label>
-                <div className="flex flex-wrap gap-2">
-                  {['고혈압', '당뇨', '고지혈증', '심장질환', '뇌졸중', '천식', '신장질환', '갑상선질환', '없음'].map(item => (
-                    <button key={item} type="button"
-                      onClick={() => {
-                        let updated
-                        if (item === '없음') {
-                          updated = form.conditions.includes(item) ? [] : ['없음']
-                        } else {
-                          const withoutNone = form.conditions.filter(c => c !== '없음')
-                          updated = withoutNone.includes(item) ? withoutNone.filter(c => c !== item) : [...withoutNone, item]
-                        }
-                        setForm({...form, conditions: updated})
-                      }}
-                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${form.conditions.includes(item) ? chipSelected : chipUnselected}`}>
-                      {item}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-gray-400 text-xs font-bold mb-2 block">알레르기 (중복 선택)</label>
-                <div className="flex flex-wrap gap-2">
-                  {['페니실린', '아스피린', '항생제', '소염제', '없음'].map(item => (
-                    <button key={item} type="button"
-                      onClick={() => {
-                        let updated
-                        if (item === '없음') {
-                          updated = form.allergies.includes(item) ? [] : ['없음']
-                        } else {
-                          const withoutNone = form.allergies.filter(a => a !== '없음')
-                          updated = withoutNone.includes(item) ? withoutNone.filter(a => a !== item) : [...withoutNone, item]
-                        }
-                        setForm({...form, allergies: updated})
-                      }}
-                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${form.allergies.includes(item) ? chipSelected : chipUnselected}`}>
-                      {item}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 하단 버튼 */}
-        <div className="p-6 pt-4 border-t border-gray-100 flex gap-3 shrink-0">
-          <button onClick={handleSkip} disabled={isSubmitting}
-            className="flex-1 py-4 rounded-2xl bg-gray-100 text-gray-500 font-bold hover:bg-gray-200 transition-all disabled:opacity-50">
-            건너뛰기
-          </button>
-          <button onClick={handleSubmit} disabled={isSubmitting}
-            className="flex-1 py-4 rounded-2xl bg-gray-900 text-white font-black hover:bg-gray-800 transition-all shadow-lg disabled:opacity-50">
-            {isSubmitting ? '저장 중...' : '저장하기'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function MainPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [isLoading, setIsLoading] = useState(true)
   const [showSurvey, setShowSurvey] = useState(false)
   const [showChat, setShowChat] = useState(false)
-  const [userName, setUserName] = useState('사용자')
-  const [profileId, setProfileId] = useState(null)
   const [medications, setMedications] = useState([])
   const [activeChallenge, setActiveChallenge] = useState(null)
   const [greeting, setGreeting] = useState({ msg: '반가워요', sub: '오늘 하루도 건강하게 시작해봐요' })
+
+  const { selectedProfileId, selectedProfile } = useProfile()
+  const userName = selectedProfile?.name?.split('(')[0] || '사용자'
+  const isInitialLoad = useRef(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
   // 설문 팝업 쿼리 파라미터 감지
   useEffect(() => {
     if (searchParams.get('showSurvey') === 'true') {
       setShowSurvey(true)
-      // URL 클린업
       router.replace('/main', { scroll: false })
     }
   }, [searchParams, router])
 
   useEffect(() => {
+    if (!selectedProfileId) return
     const initPage = async () => {
       try {
-        setIsLoading(true)
-        const profileRes = await api.get('/api/v1/profiles')
-        if (profileRes.data?.length > 0) {
-          const self = profileRes.data.find(p => p.relation_type === 'SELF') || profileRes.data[0]
-          setUserName(self.name.split('(')[0])
-          setProfileId(self.id)
-
-          const [medRes, challengeRes] = await Promise.all([
-            api.get(`/api/v1/medications?profile_id=${self.id}&active_only=true`),
-            api.get('/api/v1/challenges').catch(() => ({ data: [] })),
-          ])
-          setMedications(medRes.data || [])
-          const inProgress = (challengeRes.data || []).filter(c => c.challenge_status === 'IN_PROGRESS')
-          if (inProgress.length > 0) {
-            const random = inProgress[Math.floor(Math.random() * inProgress.length)]
-            setActiveChallenge(random)
-          }
+        if (isInitialLoad.current) {
+          setIsLoading(true)
+        } else {
+          setIsRefreshing(true)
+        }
+        const [medRes, challengeRes] = await Promise.all([
+          api.get(`/api/v1/medications?profile_id=${selectedProfileId}&active_only=true`),
+          api.get(`/api/v1/challenges?profile_id=${selectedProfileId}`).catch(() => ({ data: [] })),
+        ])
+        setMedications(medRes.data || [])
+        const inProgress = (challengeRes.data || []).filter(c => c.challenge_status === 'IN_PROGRESS')
+        if (inProgress.length > 0) {
+          const random = inProgress[Math.floor(Math.random() * inProgress.length)]
+          setActiveChallenge(random)
+        } else {
+          setActiveChallenge(null)
         }
         const hour = new Date().getHours()
         if (hour < 12) setGreeting({ msg: '좋은 아침이에요', sub: '오늘 하루도 건강하게 시작해봐요' })
         else if (hour < 17) setGreeting({ msg: '좋은 오후예요', sub: '점심 식사 후 약 챙기셨나요?' })
         else setGreeting({ msg: '좋은 저녁이에요', sub: '저녁 복약 시간을 확인해보세요' })
-      } catch (err) { console.error(err) } finally { setIsLoading(false) }
+      } catch (err) { console.error(err) } finally {
+        setIsLoading(false)
+        setIsRefreshing(false)
+        isInitialLoad.current = false
+      }
     }
     initPage()
-  }, [])
+  }, [selectedProfileId])
 
   if (isLoading) return <MainSkeleton />
 
   return (
-    <>
-      {showSurvey && <SurveyModal onClose={() => setShowSurvey(false)} userName={userName} />}
-      {showChat && <ChatModal onClose={() => setShowChat(false)} profileId={profileId} />}
+    <div className={`transition-opacity duration-200 ${isRefreshing ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
+      {showSurvey && <SurveyModal onClose={() => setShowSurvey(false)} userName={userName} profileId={selectedProfileId} />}
+      {showChat && <ChatModal onClose={() => setShowChat(false)} profileId={selectedProfileId} />}
 
       {/* ── 히어로 섹션 (main의 다크 테마 + donghoon의 이름 데이터) ── */}
       <section className="relative w-full min-h-[540px] flex items-center justify-center overflow-hidden bg-black">
@@ -422,7 +179,7 @@ function MainPageContent() {
           </div>
         </div>
       </main>
-    </>
+    </div>
   )
 }
 

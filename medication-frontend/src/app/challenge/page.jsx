@@ -1,10 +1,10 @@
 'use client'
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, useRef } from 'react'
 import Header from '@/components/layout/Header'
 import BottomNav from '@/components/layout/BottomNav'
 import EmptyState from '@/components/common/EmptyState'
 import api, { showError } from '@/lib/api'
+import { useProfile } from '@/contexts/ProfileContext'
 import toast from 'react-hot-toast'
 
 // SVG 아이콘 컴포넌트
@@ -268,14 +268,16 @@ const TEMPLATES = [
 ]
 
 export default function ChallengePage() {
-  const router = useRouter()
   const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('추천')
-  const [profileId, setProfileId] = useState(null)
   const [ongoing, setOngoing] = useState([])
   const [completed, setCompleted] = useState([])
   const [processingIds, setProcessingIds] = useState([])
   const [difficultyTarget, setDifficultyTarget] = useState(null) // 난이도 모달용
+
+  const { selectedProfileId: profileId } = useProfile()
+  const isInitialLoad = useRef(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
   const getIconByTitle = (title) => {
     if (title.includes('금연')) return <Icons.NoSmoking />
@@ -296,21 +298,15 @@ export default function ChallengePage() {
   }
 
   useEffect(() => {
+    if (!profileId) return
     const fetchData = async () => {
       try {
-        setIsLoading(true)
-        const profileRes = await api.get('/api/v1/profiles')
-        const profiles = profileRes.data
-
-        if (!profiles || profiles.length === 0) {
-          router.replace('/survey')
-          return
+        if (isInitialLoad.current) {
+          setIsLoading(true)
+        } else {
+          setIsRefreshing(true)
         }
-
-        const selfProfile = profiles.find((p) => p.relation_type === 'SELF') || profiles[0]
-        setProfileId(selfProfile.id)
-
-        const challengeRes = await api.get('/api/v1/challenges')
+        const challengeRes = await api.get(`/api/v1/challenges?profile_id=${profileId}`)
 
         const activeChallenges = challengeRes.data
           .filter((c) => c.challenge_status === 'IN_PROGRESS')
@@ -335,10 +331,12 @@ export default function ChallengePage() {
         }
       } finally {
         setIsLoading(false)
+        setIsRefreshing(false)
+        isInitialLoad.current = false
       }
     }
     fetchData()
-  }, [router])
+  }, [profileId])
 
   const handleAccept = (template) => {
     if (!profileId || processingIds.includes(template.id)) return
@@ -437,7 +435,7 @@ export default function ChallengePage() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-50 pb-24">
+    <main className={`min-h-screen bg-gray-50 pb-24 transition-opacity duration-200 ${isRefreshing ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
       <Header title="생활습관 챌린지" subtitle="건강한 습관을 만들어보세요" showBack={true} />
 
       {difficultyTarget && (

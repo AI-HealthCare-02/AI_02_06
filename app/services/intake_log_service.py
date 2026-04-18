@@ -4,7 +4,7 @@ This module provides business logic for medication intake tracking operations
 including creation, status updates, and ownership verification.
 """
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -159,6 +159,43 @@ class IntakeLogService:
         profiles = await self.profile_repository.get_all_by_account(account_id)
         profile_ids = [p.id for p in profiles]
         return await self.repository.get_by_profiles(profile_ids)
+
+    async def get_streak(self, profile_id: UUID) -> int:
+        """Calculate consecutive medication days for a profile.
+
+        A day counts if at least one intake log has TAKEN status.
+        If today has a TAKEN log, the streak includes today.
+        If today has no TAKEN logs, the streak is calculated from yesterday.
+
+        Args:
+            profile_id: Profile UUID.
+
+        Returns:
+            int: Number of consecutive days with at least one taken medication.
+        """
+        taken_dates = await self.repository.get_taken_dates_by_profile(profile_id)
+        today = datetime.now(tz=config.TIMEZONE).date()
+        start = today if today in taken_dates else today - timedelta(days=1)
+
+        streak = 0
+        current = start
+        while current in taken_dates:
+            streak += 1
+            current -= timedelta(days=1)
+        return streak
+
+    async def get_streak_with_owner_check(self, profile_id: UUID, account_id: UUID) -> int:
+        """Calculate consecutive medication days with ownership verification.
+
+        Args:
+            profile_id: Profile UUID.
+            account_id: Account UUID for ownership check.
+
+        Returns:
+            int: Number of consecutive days with at least one taken medication.
+        """
+        await self._verify_profile_ownership(profile_id, account_id)
+        return await self.get_streak(profile_id)
 
     async def get_pending_logs(self, profile_id: UUID) -> list[IntakeLog]:
         """Get pending intake logs for a profile.

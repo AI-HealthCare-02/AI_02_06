@@ -2,38 +2,22 @@
 import { useState, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { Home, FileText, Trophy, Pill, User, MessageCircle, X, LogOut } from 'lucide-react'
+import { Home, FileText, Trophy, Pill, User, MessageCircle, LogOut } from 'lucide-react'
 import LogoutModal, { useLogout } from '@/components/auth/LogoutModal'
 import ChatModal from '@/components/chat/ChatModal'
-import api from '@/lib/api'
+import ProfileSwitcher from '@/components/layout/ProfileSwitcher'
+import { useProfile } from '@/contexts/ProfileContext'
 
 export default function Navigation() {
   const router = useRouter()
   const pathname = usePathname()
-  const [isOpen, setIsOpen] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [scrolled, setScrolled] = useState(false)
-  const [profileId, setProfileId] = useState(null)
 
   const isLanding = pathname === '/' || pathname === '/login'
   const isAuthPage = pathname === '/login' || pathname.startsWith('/auth/')
 
-  // 프로필 ID 가져오기 (랜딩/로그인 페이지에서는 호출 안함)
-  useEffect(() => {
-    if (isLanding || isAuthPage) return
-    const fetchProfile = async () => {
-      try {
-        const res = await api.get('/api/v1/profiles')
-        if (res.data?.length > 0) {
-          const self = res.data.find(p => p.relation_type === 'SELF') || res.data[0]
-          setProfileId(self.id)
-        }
-      } catch (err) {
-        console.error('프로필 조회 실패:', err)
-      }
-    }
-    fetchProfile()
-  }, [isLanding, isAuthPage])
+  const { selectedProfileId } = useProfile()
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 10)
@@ -52,7 +36,7 @@ export default function Navigation() {
 
   return (
     <>
-      {showChat && <ChatModal onClose={() => setShowChat(false)} profileId={profileId} />}
+      {showChat && <ChatModal onClose={() => setShowChat(false)} profileId={selectedProfileId} />}
       {showLogoutModal && <LogoutModal onClose={() => setShowLogoutModal(false)} onConfirm={handleLogout} />}
 
       <nav className={`fixed top-0 w-full z-50 transition-all duration-200 border-b
@@ -105,11 +89,15 @@ export default function Navigation() {
                 </button>
               </>
             ) : (isAuthPage ? (<></>) : (
-              <button onClick={() => setShowLogoutModal(true)}
-              className="text-sm text-gray-500 hover:text-gray-900 transition-colors cursor-pointer px-3.5 py-1.5 hover:bg-gray-100 rounded-md flex items-center gap-1.5">
-                <LogOut size={15} />
-                로그아웃
-              </button>
+              <>
+                <ProfileSwitcher />
+                <div className="w-px h-4 bg-gray-200" />
+                <button onClick={() => setShowLogoutModal(true)}
+                className="text-sm text-gray-500 hover:text-gray-900 transition-colors cursor-pointer px-3.5 py-1.5 hover:bg-gray-100 rounded-md flex items-center gap-1.5">
+                  <LogOut size={15} />
+                  로그아웃
+                </button>
+              </>
             ))}
           </div>
 
