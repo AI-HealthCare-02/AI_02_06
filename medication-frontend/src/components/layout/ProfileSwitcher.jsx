@@ -1,10 +1,12 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { ChevronDown, Check, User } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { ChevronDown, Check, User, Plus } from 'lucide-react'
 import { useProfile } from '@/contexts/ProfileContext'
 
 export default function ProfileSwitcher() {
+  const router = useRouter()
   const { profiles, selectedProfile, selectedProfileId, setSelectedProfileId, RELATION_LABELS } = useProfile()
   const [isOpen, setIsOpen] = useState(false)
   const ref = useRef(null)
@@ -78,6 +80,15 @@ export default function ProfileSwitcher() {
               </li>
             ))}
           </ul>
+          <div className="px-3 py-2 border-t border-gray-100">
+            <button
+              onClick={() => { router.push('/mypage'); setIsOpen(false) }}
+              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 rounded-lg transition-colors text-left"
+            >
+              <Plus size={13} className="text-gray-400" />
+              <span className="text-[13px] text-gray-500">프로필 추가</span>
+            </button>
+          </div>
         </div>
       )}
     </div>
