@@ -4,10 +4,20 @@ This module contains data transfer objects for medication intake log operations
 including creation, updates, and response serialization.
 """
 
+import zoneinfo
 from datetime import date, datetime, time
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+_KST = zoneinfo.ZoneInfo("Asia/Seoul")
+
+
+def _make_aware(v: datetime | None) -> datetime | None:
+    """Return timezone-aware datetime; assume KST if tzinfo is missing."""
+    if v is None:
+        return v
+    return v if v.tzinfo is not None else v.replace(tzinfo=_KST)
 
 
 class BaseIntakeLog(BaseModel):
@@ -25,6 +35,12 @@ class BaseIntakeLog(BaseModel):
         description="Intake status (e.g., SCHEDULED, TAKEN, MISSED)",
     )
     taken_at: datetime | None = Field(None, description="Actual intake completion time")
+
+    @field_validator("taken_at", mode="before")
+    @classmethod
+    def ensure_aware_taken_at(cls, v: datetime | None) -> datetime | None:
+        """Reject naive datetime; assume KST when tzinfo is absent."""
+        return _make_aware(v)
 
 
 class IntakeLogCreate(BaseIntakeLog):
@@ -49,6 +65,12 @@ class IntakeLogUpdate(BaseModel):
     scheduled_time: time | None = Field(None, description="Scheduled intake time")
     intake_status: str | None = Field(None, max_length=16, description="Intake status")
     taken_at: datetime | None = Field(None, description="Actual intake completion time")
+
+    @field_validator("taken_at", mode="before")
+    @classmethod
+    def ensure_aware_taken_at(cls, v: datetime | None) -> datetime | None:
+        """Reject naive datetime; assume KST when tzinfo is absent."""
+        return _make_aware(v)
 
 
 class StreakResponse(BaseModel):

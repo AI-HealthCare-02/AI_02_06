@@ -242,6 +242,20 @@ class IntakeLogService:
             scheduled_time=scheduled_time,
         )
 
+    @staticmethod
+    def _ensure_aware(dt: datetime | None) -> datetime | None:
+        """Return timezone-aware datetime; assume KST if tzinfo is missing.
+
+        Args:
+            dt: Datetime to normalize.
+
+        Returns:
+            datetime | None: Timezone-aware datetime, or None.
+        """
+        if dt is None:
+            return dt
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=config.TIMEZONE)
+
     async def mark_as_taken(self, intake_log_id: UUID, taken_at: datetime | None = None) -> IntakeLog:
         """복용 완료 처리"""
         intake_log = await self.get_intake_log(intake_log_id)
@@ -252,7 +266,7 @@ class IntakeLogService:
                 detail="이미 처리된 복용 기록입니다.",
             )
 
-        return await self.repository.mark_as_taken(intake_log, taken_at)
+        return await self.repository.mark_as_taken(intake_log, self._ensure_aware(taken_at))
 
     async def mark_as_taken_with_owner_check(
         self, intake_log_id: UUID, account_id: UUID, taken_at: datetime | None = None
@@ -266,7 +280,7 @@ class IntakeLogService:
                 detail="이미 처리된 복용 기록입니다.",
             )
 
-        result = await self.repository.mark_as_taken(intake_log, taken_at)
+        result = await self.repository.mark_as_taken(intake_log, self._ensure_aware(taken_at))
         medication = await self.medication_service.get_medication(intake_log.medication_id)
         await self.medication_service.decrement_and_deactivate_if_exhausted(medication)
         return result
