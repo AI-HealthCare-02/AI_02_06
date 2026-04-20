@@ -102,6 +102,9 @@ async def list_profiles(
     Returns:
         List[ProfileSummaryResponse]: Summary list of profiles for the account.
     """
+    # ProfileSummaryResponse(경량 요약 DTO)를 제거하고 ProfileResponse로 통일.
+    # 프론트엔드에서 프로필 전환 UI(ProfileSwitcher 컴포넌트, ProfileContext)를 삭제하면서
+    # 경량 DTO를 별도로 유지할 필요가 없어졌기 때문.
     profiles = await service.get_profiles_by_account(current_account.id)
     return [ProfileSummaryResponse.model_validate(p) for p in profiles]
 
