@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { Pill, ChevronRight, Plus, Building2, Pencil, Trash2 } from 'lucide-react'
 import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
+import { useProfile } from '@/contexts/ProfileContext'
 
 function MedicationListSkeleton() {
   return (
@@ -174,25 +175,11 @@ export default function MedicationListPage() {
   const [deleteTargetItems, setDeleteTargetItems] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
-  // TODO: ProfileContext가 연동되면 여기서 직접 API 호출 대신 Context에서 profileId를 받도록 교체 필요
-  const [profileId, setProfileId] = useState(null)
+  // ProfileContext에서 현재 선택된 프로필 ID를 가져옴 (feat/profile-switcher 머지 이후)
+  const { selectedProfileId: profileId } = useProfile()
   const isInitialLoad = useRef(true)
   // isRefreshing: 탭/날짜 전환 시 전체 스켈레톤 대신 투명도 처리로 UX 개선
   const [isRefreshing, setIsRefreshing] = useState(false)
-
-  useEffect(() => {
-    // 마운트 시 1회: SELF 관계 프로필의 ID를 가져와 이후 약품 조회에 사용
-    const fetchProfile = async () => {
-      try {
-        const profileRes = await api.get('/api/v1/profiles')
-        const self = profileRes.data?.find(p => p.relation_type === 'SELF')
-        if (self) setProfileId(self.id)
-      } catch (err) {
-        console.error(err)
-      }
-    }
-    fetchProfile()
-  }, [])
 
   const fetchMedications = async (isInitial = false) => {
     if (isInitial || isInitialLoad.current) {
