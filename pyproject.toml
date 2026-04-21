@@ -271,15 +271,8 @@ ignore = [
 "app/tests/test_oauth.py" = [
     "ANN201",  # Missing return type in test functions (existing code)
 ]
-"app/services/vector_search_service.py" = [
-    "S608",    # pgvector raw SQL uses parameterized queries, not user input
-]
 "ai_worker/utils/rag.py" = [
     "T201",    # print for error logging (TODO: replace with proper logging)
-]
-"ai_worker/tasks/embedding_tasks.py" = [
-    "ASYNC240", # project does not use trio/anyio, standard pathlib is acceptable
-    "ASYNC230", # project does not use trio/anyio, standard open is acceptable
 ]
 "ai_worker/*" = [
     "T201",    # print statements allowed in AI worker modules
