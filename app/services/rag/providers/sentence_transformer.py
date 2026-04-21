@@ -73,7 +73,9 @@ class SentenceTransformerProvider:
             loop = asyncio.get_event_loop()
             self.model = await loop.run_in_executor(None, SentenceTransformer, self.model_name)
 
-            if hasattr(self.model, "get_sentence_embedding_dimension"):
+            if hasattr(self.model, "get_embedding_dimension"):
+                self._dimensions = self.model.get_embedding_dimension()
+            elif hasattr(self.model, "get_sentence_embedding_dimension"):
                 self._dimensions = self.model.get_sentence_embedding_dimension()
 
             logger.info("Embedding model loaded. Dimensions: %d", self._dimensions)
