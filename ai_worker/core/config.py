@@ -32,6 +32,13 @@ class Config(BaseSettings):
     # External API settings
     OPENAI_API_KEY: str | None = None
 
+    # CLOVA OCR settings
+    CLOVA_OCR_URL: str | None = None
+    CLOVA_OCR_SECRET: str | None = None
+
+    # Public data API settings
+    DATA_GO_KR_API_KEY: str | None = None
+
 
 # Global configuration instance
 config = Config()

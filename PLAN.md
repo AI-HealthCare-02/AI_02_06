@@ -1,431 +1,627 @@
-# Security Enhancement Plan
+---
 
-## 1. RTR (Refresh Token Rotation) + Grace Period
+# 약품 데이터 통합 + RAG 파이프라인 + 툴콜링 계획
 
-### 개념
-- **RTR**: Refresh Token 사용 시 새 토큰 발급 + 기존 토큰 무효화
-- **Grace Period**: 동시 요청 시 구 토큰도 잠시 유효하게 유지
+## 전체 시스템 Flowchart
 
-### Grace Period 적정값 분석
+```mermaid
+flowchart TD
+    subgraph USER["👤 사용자 영역"]
+        A["회원가입 + 사전설문<br />(나이, 성별, 기존 복약, 알레르기)"]
+        B["약봉투 사진 촬영<br />및 업로드"]
+        C["챗봇 질문 입력"]
+    end
 
-| 값 | 장점 | 단점 |
-|----|------|------|
-| 0.01초 (10ms) | 보안 극대화 | 네트워크 지연 시 실패 (RTT 50-200ms) |
-| 1-2초 | 대부분 동시 요청 커버 | 짧은 공격 윈도우 |
-| 5초 | 모바일/느린 네트워크 대응 | 탈취 시 악용 가능 |
-| 30초 | 안정성 최대 | 보안 약화 |
+    subgraph FRONTEND["🖥️ Next.js Frontend"]
+        D["이미지 업로드 UI"]
+        E["채팅 인터페이스"]
+        F["가이드 표시 UI"]
+    end
 
-**권장: 2초**
-- 일반적인 네트워크 지연(RTT 200ms) + 서버 처리 시간 고려
-- 다중 탭/요청 동시 발생 대응
-- 공격자가 2초 내 재사용해야 하므로 실질적 위험 낮음
+    subgraph BACKEND["⚙️ FastAPI Backend"]
+        G["OCR Router"]
+        H["Chat Router"]
+        I["Profile Service<br />(사전설문 데이터)"]
+        J["Medication Service<br />(처방 약품 관리)"]
+    end
 
-### DB 스키마 변경
-```sql
--- refresh_tokens 테이블에 추가
-rotated_at TIMESTAMP NULL,  -- 교체된 시점 (grace period 계산용)
-replaced_by BIGINT NULL,    -- 새 토큰 ID (추적용)
-```
+    subgraph AI_WORKER["🤖 AI Worker"]
+        K["OpenCV 전처리"]
+        L["CLOVA OCR"]
+        M["OCR 후처리<br />(Regex + 정규화)"]
+        N["약품 DB 매칭"]
+        O["의도 분류기<br />(Intent Classifier)"]
+        P["RAG 검색 엔진"]
+        Q["LLM 응답 생성<br />(GPT-4o)"]
+    end
 
-### 토큰 검증 로직
-```
-1. token_hash로 조회
-2. is_revoked = True?
-   - rotated_at이 있고, 현재시간 - rotated_at < 2초 → 유효 (grace)
-   - 그 외 → 무효
-3. is_revoked = False?
-   - expires_at 확인 → 유효/만료
+    subgraph DATA["💾 데이터 계층"]
+        R[("PostgreSQL<br />+ pgvector")]
+        S[("Redis<br />캐시/큐")]
+        T["공공데이터 CSV<br />(증분 업데이트)"]
+    end
+
+    A --> I
+    B --> D --> G --> K
+    K --> L --> M --> N
+    N --> J
+    J --> R
+
+    C --> E --> H --> O
+    O --> P
+    P --> R
+    P --> Q
+    Q --> E
+
+    I --> Q
+    J --> Q
+
+    T -->|월 1회 증분 갱신| R
 ```
 
 ---
 
-## 2. Request Deduplication (FE)
+## Phase 1: 공공데이터 약품 DB 구축 (상세 구현)
 
-### 문제점
-| 문제 | 설명 |
-|------|------|
-| 죽음의 무한루프 | 401 → refresh → 401 → refresh... |
-| 약속의 실종 | refresh 중 다른 요청이 새 토큰 못 받음 |
-| 잘못된 합치기 | 여러 refresh 요청이 각각 토큰 발급 |
-| 레이스 컨디션 | 동시 요청이 서로 다른 토큰 사용 |
+### 1.0 Goal
 
-### 해결: Token Refresh Queue
+- 식약처 공공데이터포털 의약품 허가정보 API 3종 연동
+- `medicine_info` 모델 확장 (API 필드 매핑 + 증분 추적)
+- `data_sync_log` 모델 신규 생성 (동기화 이력 관리)
+- 최초 전체 수집(Full Sync) + 월 1회 증분 업데이트(Incremental Sync)
+- OCR 이미지 전처리(OpenCV) 및 텍스트 후처리 모듈 분리
+- 병원 전용 주사제 등 환자 불필요 데이터 필터링
 
-```javascript
-// tokenManager.js
-let isRefreshing = false;
-let refreshSubscribers = [];
+### 1.1 API 연동 정보
 
-function subscribeTokenRefresh(callback) {
-  refreshSubscribers.push(callback);
-}
+| 항목 | 값 |
+|------|-----|
+| **Base Endpoint** | `https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07` |
+| **허가 상세정보** | `/getDrugPrdtPrmsnDtlInq06` (메인 수집 대상) |
+| **허가 목록** | `/getDrugPrdtPrmsnInq07` (보조 참조) |
+| **주성분 상세** | `/getDrugPrdtMcpnDtlInq07` (성분 정보 보강) |
+| **인증 방식** | serviceKey (URL Encode), 무료 |
+| **일일 트래픽** | 10,000 건/일 |
+| **응답 형식** | JSON (type=json) |
+| **전체 데이터** | ~43,266 건 (2026-04 기준) |
 
-function onRefreshed(newToken) {
-  refreshSubscribers.forEach(cb => cb(newToken));
-  refreshSubscribers = [];
-}
+**증분 업데이트용 파라미터:**
+- `start_change_date` / `end_change_date` (YYYYMMDD) : 변경일자 범위 필터
+- `item_seq` : 품목기준코드 (Unique Key, UPSERT 기준)
 
-async function refreshToken() {
-  if (isRefreshing) {
-    // 이미 갱신 중이면 대기
-    return new Promise(resolve => subscribeTokenRefresh(resolve));
-  }
+### 1.2 데이터 수집 및 저장 전략
 
-  isRefreshing = true;
-  try {
-    const { data } = await api.post('/api/v1/auth/refresh');
-    localStorage.setItem('access_token', data.access_token);
-    onRefreshed(data.access_token);
-    return data.access_token;
-  } finally {
-    isRefreshing = false;
-  }
-}
+```mermaid
+flowchart TD
+    A["공공데이터포털 API<br/>(getDrugPrdtPrmsnDtlInq06)"] -->|httpx async| B["MedicineDataService<br/>(비즈니스 로직)"]
+    B -->|JSON 페이징 수집| C["데이터 정제<br/>(필터링 + 필드 매핑)"]
+
+    C -->|중간 저장| D["ai_worker/data/<br/>medicines_YYYYMMDD.json"]
+    C -->|DB 적재| E["MedicineInfoRepository<br/>(bulk_upsert)"]
+    E -->|item_seq 기준| F[("medicine_info 테이블<br/>PostgreSQL")]
+
+    G["월 1회 cron<br/>scripts/crawling/"] -->|start_change_date| H{변경분 존재?}
+    H -->|Yes| I["증분 데이터 수집"]
+    H -->|No| J["스킵 + 로그 기록"]
+    I --> C
+
+    K["DataSyncLog"] -->|이력 기록| F
 ```
 
-### Axios Interceptor 흐름
-```
-요청 실패 (401)
-  ↓
-isRefreshing 체크
-  ├─ false → refreshToken() 호출, isRefreshing = true
-  │           ↓
-  │         성공 → 대기 중인 요청들에 새 토큰 전달
-  │         실패 → 로그아웃 처리
-  │
-  └─ true → Promise 반환, refreshSubscribers에 등록
-            (토큰 갱신 완료 시 자동 재시도)
-```
+### 1.3 증분 업데이트 전략
 
----
-
-## 3. 입력값 검증 (BE Middleware)
-
-### 검증 대상
-| 패턴 | 공격 유형 | 처리 |
-|------|----------|------|
-| `<script>`, `javascript:`, `on\w+=` | XSS | 차단 |
-| `' OR`, `" OR`, `; DROP`, `UNION SELECT` | SQL Injection | 차단 |
-| `{{`, `${`, `#{` | Template Injection | 차단 |
-| `../`, `..\\` | Path Traversal | 차단 |
-
-### 미들웨어 구조
 ```python
-# app/middlewares/security.py
+# 핵심 로직 (pseudo-code)
+async def sync_medicine_data(full_sync: bool = False):
+    """전체/증분 동기화 실행."""
+    if full_sync:
+        raw_items = await fetch_all_pages(endpoint, params={})
+    else:
+        last_sync = await DataSyncLog.filter(
+            sync_type="medicine_info", status="SUCCESS"
+        ).order_by("-sync_date").first()
 
-DANGEROUS_PATTERNS = [
-    r'<script',
-    r'javascript:',
-    r'on\w+\s*=',
-    r"('\s*OR|\"\s*OR)",
-    r'(UNION\s+SELECT|DROP\s+TABLE)',
-    r'\{\{|\$\{|#\{',
-    r'\.\.[/\\]',
+        start_date = last_sync.sync_date.strftime("%Y%m%d") if last_sync else "20200101"
+        raw_items = await fetch_all_pages(
+            endpoint, params={"start_change_date": start_date}
+        )
+
+    if not raw_items:
+        return  # No new data
+
+    # Filter: remove hospital-only injectables
+    filtered = [
+        item for item in raw_items
+        if not _is_hospital_only_injectable(item)
+    ]
+
+    # Bulk upsert via repository (item_seq as unique key)
+    stats = await medicine_info_repo.bulk_upsert(filtered)
+
+    # Log sync result
+    await DataSyncLog.create(
+        sync_type="medicine_info",
+        total_fetched=len(raw_items),
+        total_inserted=stats["inserted"],
+        total_updated=stats["updated"],
+        status="SUCCESS",
+    )
+```
+
+### 1.4 모델 변경: medicine_info 확장
+
+| 필드 | 타입 | API 매핑 | 설명 |
+|------|------|----------|------|
+| `item_seq` | VARCHAR(20), UNIQUE | ITEM_SEQ | 품목기준코드 (UPSERT PK) |
+| `medicine_name` | VARCHAR(200) | ITEM_NAME | 약품명 (기존, max_length 확장) |
+| `item_eng_name` | VARCHAR(256) | ITEM_ENG_NAME | 영문 약품명 |
+| `entp_name` | VARCHAR(128) | ENTP_NAME | 제조업체명 |
+| `product_type` | VARCHAR(64) | PRDUCT_TYPE | 제품 유형 ([03310]혈액대용제 등) |
+| `spclty_pblc` | VARCHAR(32) | SPCLTY_PBLC | 전문/일반의약품 구분 |
+| `permit_date` | VARCHAR(8) | ITEM_PERMIT_DATE | 허가일자 (YYYYMMDD) |
+| `cancel_name` | VARCHAR(16) | CANCEL_NAME | 상태 (정상/취소) |
+| `change_date` | VARCHAR(8) | - | 마지막 변경일자 |
+| `main_item_ingr` | TEXT | MAIN_ITEM_INGR | 유효성분 |
+| `storage_method` | TEXT | STORAGE_METHOD | 저장방법 |
+| `edi_code` | VARCHAR(256) | EDI_CODE | 보험코드 |
+| `bizrno` | VARCHAR(16) | BIZRNO | 사업자등록번호 |
+| `category` | VARCHAR(64) | (기존) | 약품 분류 |
+| `efficacy` | TEXT | (기존) | 효능/효과 |
+| `side_effects` | TEXT | (기존) | 부작용 |
+| `precautions` | TEXT | (기존) | 주의사항 |
+| `embedding` | TEXT | (기존) | 임베딩 벡터 |
+| `last_synced_at` | DatetimeField | - | 마지막 동기화 시각 |
+
+### 1.5 신규 모델: data_sync_log
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `id` | BigInt PK | 내부용 |
+| `sync_type` | VARCHAR(32) | 동기화 대상 (medicine_info) |
+| `sync_date` | DatetimeField | 동기화 실행 시각 |
+| `total_fetched` | Int | API에서 수집한 총 건수 |
+| `total_inserted` | Int | 신규 삽입 건수 |
+| `total_updated` | Int | 업데이트 건수 |
+| `status` | VARCHAR(16) | SUCCESS / FAILED |
+| `error_message` | TEXT, nullable | 실패 시 에러 메시지 |
+| `created_at` | DatetimeField | 레코드 생성 시각 |
+
+### 1.6 파일 구조 및 Affected Files
+
+| 파일 | 변경 내용 | 상태 |
+|------|----------|------|
+| `app/models/medicine_info.py` | API 필드 매핑 확장 (item_seq, entp_name 등) | 수정 |
+| `app/models/data_sync_log.py` | 동기화 이력 모델 신규 생성 | 신규 |
+| `app/repositories/medicine_info_repository.py` | CRUD + bulk_upsert + 검색 | 신규 |
+| `app/services/medicine_data_service.py` | API 수집 + 정제 + 동기화 로직 | 신규 |
+| `ai_worker/utils/image_preprocessor.py` | OpenCV 전처리 (Grayscale, Blur, Threshold, Morphology) | 신규 |
+| `ai_worker/utils/text_postprocessor.py` | OCR 후처리 (Regex, Blacklist, 정규화) | 신규 |
+| `ai_worker/tasks/ocr_tasks.py` | 전처리/후처리 모듈 통합 | 수정 |
+| `ai_worker/core/config.py` | CLOVA_OCR_URL, CLOVA_OCR_SECRET, DATA_GO_KR_API_KEY 추가 | 수정 |
+| `app/core/config.py` | DATA_GO_KR_API_KEY 추가 | 수정 |
+| `app/db/databases.py` | MODELS 리스트에 data_sync_log 추가 | 수정 |
+| `scripts/crawling/sync_medicine_data.py` | CLI 진입점 (전체/증분 동기화) | 신규 |
+| `docs/db_schema.dbml` | medicine_info 확장 + data_sync_log 추가 | 수정 |
+| `envs/example.local.env` | DATA_GO_KR_API_KEY 항목 추가 | 수정 |
+
+### 1.7 OCR 전처리/후처리 파이프라인
+
+```mermaid
+flowchart TD
+    subgraph PREPROCESS["OpenCV 전처리"]
+        A["원본 이미지"] --> B["그레이스케일 변환<br/>(cvtColor BGR2GRAY)"]
+        B --> C["가우시안 블러<br/>(GaussianBlur 5x5)"]
+        C --> D["적응형 이진화<br/>(adaptiveThreshold)"]
+        D --> E["모폴로지 연산<br/>(dilate + erode)"]
+        E --> F["전처리 완료 이미지"]
+    end
+
+    subgraph POSTPROCESS["텍스트 후처리"]
+        G["OCR Raw Text"] --> H["Regex 필터링<br/>('1일 3회', '식후 30분' 제거)"]
+        H --> I["블랙리스트 제거<br/>('용량', '용법', '처방' 등)"]
+        I --> J["텍스트 정규화<br/>(공백 통일, strip)"]
+        J --> K["약품명 후보 리스트"]
+    end
+
+    F -->|CLOVA OCR| G
+    K -->|medicine_info DB 매칭| L["확정 약품명"]
+```
+
+### 1.8 TDD Steps
+
+#### Step 1: Model / Migration
+- [ ] Red: medicine_info 확장 필드 검증 테스트 + data_sync_log 필드 테스트
+- [ ] Green: 모델 정의 + aerich migrate
+- [ ] Refactor: docs/db_schema.dbml 업데이트
+
+#### Step 2: Repository
+- [ ] Red: `app/tests/test_medicine_info_repository.py` (bulk_upsert, 검색)
+- [ ] Green: `app/repositories/medicine_info_repository.py` 구현
+- [ ] Refactor: soft delete 미적용 확인 (캐시성 테이블)
+
+#### Step 3: Service
+- [ ] Red: `app/tests/test_medicine_data_service.py` (API 수집, 정제, 동기화)
+- [ ] Green: `app/services/medicine_data_service.py` 구현
+- [ ] Refactor: httpx timeout/retry, 에러 처리 강화
+
+#### Step 4: OCR Modules
+- [ ] Red: `ai_worker/tests/test_image_preprocessor.py` + `test_text_postprocessor.py`
+- [ ] Green: 전처리/후처리 모듈 구현
+- [ ] Refactor: ocr_tasks.py 통합
+
+#### Step 5: Scripts
+- [ ] `scripts/crawling/sync_medicine_data.py` CLI 엔트리포인트
+
+### 1.9 Trade-off Decisions
+
+| 항목 | 선택 | 대안 | 이유 |
+|------|------|------|------|
+| HTTP 클라이언트 | httpx.AsyncClient | requests | 프로젝트 표준 (async 필수), 이미 의존성에 포함 |
+| DB 적재 방식 | Tortoise ORM bulk_upsert | Raw SQL / psycopg2 | 아키텍처 일관성, 마이그레이션 호환 |
+| 중간 저장 | JSON (ai_worker/data/) | CSV (pandas) | pandas 의존성 불필요, JSON이 API 응답과 동일 형태 |
+| UPSERT 기준 | item_seq (품목기준코드) | medicine_name | item_seq가 식약처 공식 고유키, 약품명은 변경 가능 |
+| 필터링 시점 | DB 적재 전 (수집 시) | DB 적재 후 (조회 시) | 불필요 데이터 저장 방지, DB 용량 절약 |
+| 동기화 주기 | 월 1회 (cron) | 실시간 | 일일 트래픽 10,000건 제한, 데이터 변경 빈도 낮음 |
+
+---
+
+## Phase 2: OCR 파이프라인 (약봉투 → 약품 정보)
+
+### 2.1 OCR 전체 흐름
+
+```mermaid
+flowchart TD
+    A["약봉투 이미지 업로드"] --> B["파일 검증<br />(형식, 크기, 보안)"]
+    B --> C["OpenCV 전처리"]
+
+    subgraph OPENCV["OpenCV 전처리 단계"]
+        C --> D["그레이스케일 변환"]
+        D --> E["노이즈 제거<br />(Gaussian Blur)"]
+        E --> F["투영 변환<br />(Perspective Transform)"]
+        F --> G["이진화<br />(Adaptive Thresholding)"]
+        G --> H["팽창/침식<br />(Dilation/Erosion)"]
+    end
+
+    H --> I["CLOVA OCR API 호출"]
+    I --> J["Raw 텍스트 추출"]
+
+    subgraph POSTPROCESS["OCR 후처리 단계"]
+        J --> K["Regex 필터링<br />('1일 3회', '식후 30분' 등 제거)"]
+        K --> L["블랙리스트 제거<br />('용량', '용법' 등)"]
+        L --> M["텍스트 정규화<br />(공백, 대소문자 통일)"]
+        M --> N["약품명 후보 추출"]
+    end
+
+    N --> O["medicine_info DB 매칭<br />(유사도 검색)"]
+    O --> P{매칭 결과}
+    P -->|매칭 성공| Q["medications 테이블에 저장<br />(프로필 연결)"]
+    P -->|매칭 실패| R["사용자에게 수동 확인 요청"]
+    Q --> S["복약 가이드 자동 생성<br />(사전설문 + 약품정보 기반)"]
+```
+
+### 2.2 Regex 필터링 규칙
+
+```python
+# 제거 대상 패턴
+REMOVE_PATTERNS = [
+    r"\d+일\s*\d+회",      # "1일 3회"
+    r"식(전|후)\s*\d+분?",  # "식후 30분"
+    r"\d+일분",             # "7일분"
+    r"\d+(정|캡슐|ml|mg|g|포)", # "1정", "500mg"
+    r"(아침|점심|저녁|취침)",    # 시간 키워드
 ]
 
-async def validate_input_middleware(request, call_next):
-    # Body, Query, Path 파라미터 검사
-    # 위험 패턴 발견 시 400 Bad Request
+# 블랙리스트
+BLACKLIST = ["용량", "용법", "처방", "조제", "약국", "의원", "병원"]
 ```
-
-### 주의사항
-- 정규표현식은 case-insensitive로
-- JSON body의 모든 string 필드 재귀 검사
-- 로깅하되 민감 정보는 마스킹
 
 ---
 
-## 4. CSP (Content Security Policy)
+## Phase 3: RAG 파이프라인 (챗봇 응답 생성)
 
-### 헤더 설정
+### 3.1 RAG 전체 흐름
+
+```mermaid
+flowchart TD
+    A["사용자 질문 입력"] --> B["의도 분류<br />(Intent Classifier)"]
+
+    B --> C{의도 판별}
+    C -->|DRUG_INFO| D["약품 정보 질의 파이프라인"]
+    C -->|INTERACTION| E["상호작용 확인 파이프라인"]
+    C -->|LIFESTYLE| F["생활습관 가이드 파이프라인"]
+    C -->|EMPATHY| G["감정적 공감 파이프라인"]
+    C -->|EMERGENCY| H["긴급 상황 안내<br />(즉시 병원/119 안내)"]
+
+    subgraph RAG_CORE["RAG 검색 및 생성"]
+        D --> I["키워드 추출 +<br />카테고리 필터"]
+        E --> J["사용자 복약 목록 조회<br />(medications 테이블)"]
+        F --> K["사전설문 데이터 조회<br />(health_survey)"]
+        G --> L["최소 컨텍스트 검색<br />(보조 정보만)"]
+
+        I --> M["pgvector 유사도 검색<br />(하이브리드: 메타필터 + 벡터)"]
+        J --> M
+        K --> M
+        L --> M
+
+        M --> N["컨텍스트 조합<br />(약품정보 + 사전설문 + 복약기록)"]
+        N --> O["시스템 프롬프트 구성<br />(의도별 지시사항 포함)"]
+        O --> P["LLM 호출<br />(GPT-4o)"]
+    end
+
+    P --> Q["응답 후처리<br />(안전성 검증)"]
+    Q --> R["사용자에게 응답 반환"]
+    H --> R
+```
+
+### 3.2 의도 분류 상세 설계
+
+```mermaid
+flowchart TD
+    A["사용자 메시지"] --> B["GPT-4o-mini 호출<br />(의도 분류 전용 프롬프트)"]
+
+    B --> C["JSON 응답 파싱"]
+    C --> D{intent 값}
+
+    D -->|DRUG_INFO| E["약품 정보 질의<br />예: '타이레놀 부작용이 뭐야?'<br />예: '이 약 어떤 효능이 있어?'"]
+    D -->|INTERACTION| F["상호작용 확인<br />예: '타이레놀이랑 아스피린 같이 먹어도 돼?'<br />예: '지금 먹는 약이랑 충돌나는 거 있어?'"]
+    D -->|LIFESTYLE| G["생활습관 가이드<br />예: '이 약 먹으면서 술 마셔도 돼?'<br />예: '운동은 언제 하는 게 좋아?'"]
+    D -->|EMPATHY| H["감정적 공감<br />예: '약 먹기 싫어...'<br />예: '우울한데 약 때문일까?'"]
+    D -->|EMERGENCY| I["긴급 상황<br />예: '약을 두 배로 먹었어'<br />예: '온몸에 두드러기가 났어'"]
+```
+
+### 3.3 의도별 RAG 전략
+
+| 의도 | 검색 범위 | 컨텍스트 구성 | 응답 톤 |
+|------|-----------|---------------|---------|
+| DRUG_INFO | medicine_info (카테고리 필터 + 벡터) | 약품 상세정보 | 정보 전달 위주 |
+| INTERACTION | medications + drug_interaction_cache | 복용 중 약 목록 + 상호작용 데이터 | 주의/경고 포함 |
+| LIFESTYLE | medicine_info + health_survey | 약품정보 + 사전설문(나이,성별,알레르기) | 맞춤형 조언 |
+| EMPATHY | 최소 검색 (부작용 정보만 보조) | 공감 우선, 정보는 보조 | 따뜻하고 공감적 |
+| EMERGENCY | 검색 스킵 | 하드코딩된 안전 메시지 | 즉각적, 명확한 지시 |
+
+### 3.4 하이브리드 검색 구현 (인덱스 페이지 기반)
+
 ```python
-# app/middlewares/security.py
+# 메타데이터 필터 + 벡터 유사도 결합
+async def hybrid_search(
+    query: str,
+    intent: str,
+    category_filter: str | None = None,
+    user_medications: list[str] | None = None,
+    limit: int = 5,
+) -> list[dict]:
+    query_embedding = await get_embedding(query)
 
-CSP_POLICY = {
-    "default-src": "'self'",
-    "script-src": "'self'",  # unsafe-inline 불허
-    "style-src": "'self' 'unsafe-inline'",  # Tailwind 등 인라인 스타일 허용 (필요시)
-    "img-src": "'self' https://k.kakaocdn.net data:",  # 카카오 프로필 이미지
-    "connect-src": "'self' https://kauth.kakao.com https://kapi.kakao.com",
-    "frame-ancestors": "'none'",
-    "form-action": "'self'",
-}
+    # 의도에 따라 SQL 조건 동적 구성
+    where_clauses = []
+    params = [str(query_embedding), limit]
 
-async def add_security_headers(request, call_next):
-    response = await call_next(request)
-    response.headers["Content-Security-Policy"] = build_csp(CSP_POLICY)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    return response
-```
+    if category_filter:
+        where_clauses.append(f"category = ${len(params) + 1}")
+        params.append(category_filter)
 
-### Next.js (FE)
-```javascript
-// next.config.mjs
-const securityHeaders = [
-  { key: 'Content-Security-Policy', value: "..." }
-];
-```
+    if user_medications:
+        placeholders = ", ".join(
+            f"${i}" for i in range(len(params) + 1, len(params) + 1 + len(user_medications))
+        )
+        where_clauses.append(f"medicine_name IN ({placeholders})")
+        params.extend(user_medications)
 
----
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-## 5. 즉시 차단 / 즉시 알림 / 간편 복구
-
-### 즉시 차단
-- **BE**: 토큰 탈취 감지 시 `revoke_all_for_account()` 호출
-- **탈취 감지 조건**:
-  - Grace period 이후 구 토큰 재사용 시도
-  - 동일 토큰이 다른 IP/User-Agent에서 사용
-
-### 즉시 알림
-- **FE**: 403 응답 시 Toast + 모달로 안내
-  - "다른 기기에서 로그인되어 현재 세션이 종료되었습니다"
-- **BE**: (선택) 이메일/푸시 알림
-
-### 간편 복구
-- **FE**: 로그아웃 처리 후 로그인 페이지로 리다이렉트
-- 재로그인만으로 새 세션 시작 (별도 복구 절차 없음)
-
-```javascript
-// errors.js 확장
-if (parsed.code === 'token_compromised') {
-  showError('보안을 위해 로그아웃되었습니다. 다시 로그인해주세요.');
-  localStorage.removeItem('access_token');
-  window.location.href = '/login';
-}
+    sql = f"""
+        SELECT medicine_name, category, efficacy, side_effects, precautions,
+               embedding <=> $1::vector AS distance
+        FROM medicine_info
+        {where_sql}
+        ORDER BY embedding <=> $1::vector
+        LIMIT $2;
+    """
+    return await conn.execute_query_dict(sql, params)
 ```
 
 ---
 
-## 6. 구현 순서 (커밋 단위)
+## Phase 4: 툴콜링 (Tool Calling) 기능 — 수요일 이후 개발
 
-### Phase 1: Backend 기반
-1. **refresh_tokens 모델 확장** (rotated_at, replaced_by)
-2. **RTR 엔드포인트 추가** (POST /auth/refresh)
-3. **Grace Period 로직** (repository 수정)
+### 4.1 툴콜링 전체 흐름
 
-### Phase 2: Security Middleware
-4. **입력값 검증 미들웨어**
-5. **CSP 헤더 미들웨어**
-6. **탈취 감지 로직** (이상 사용 감지)
+```mermaid
+flowchart TD
+    A["사용자 질문"] --> B["의도 분류 +<br />툴 필요 여부 판단"]
 
-### Phase 3: Frontend
-7. **tokenManager.js** (Request Deduplication)
-8. **api.js 인터셉터 개선** (401 처리 큐)
-9. **에러 처리 확장** (token_compromised)
+    B --> C{툴 호출 필요?}
+    C -->|No| D["일반 RAG 응답 생성"]
+    C -->|Yes| E["GPT-4o Function Calling"]
 
-### Phase 4: Integration
-10. **E2E 테스트** (시나리오별 검증)
+    E --> F{호출할 툴 선택}
+
+    F -->|search_medicine| G["약품 정보 검색<br />(medicine_info DB)"]
+    F -->|check_interaction| H["상호작용 확인<br />(drug_interaction_cache)"]
+    F -->|get_user_medications| I["사용자 복약 목록 조회<br />(medications 테이블)"]
+    F -->|get_health_profile| J["사전설문 데이터 조회<br />(health_survey)"]
+    F -->|generate_guide| K["맞춤형 가이드 생성<br />(약품 + 설문 종합)"]
+
+    G --> L["툴 실행 결과 반환"]
+    H --> L
+    I --> L
+    J --> L
+    K --> L
+
+    L --> M["결과를 컨텍스트에 추가"]
+    M --> N["최종 응답 생성<br />(GPT-4o)"]
+    N --> O["사용자에게 응답"]
+```
+
+### 4.2 Tool 정의 (OpenAI Function Calling 형식)
+
+```python
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_medicine",
+            "description": "약품명으로 효능, 부작용, 주의사항 등을 검색합니다",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "medicine_name": {
+                        "type": "string",
+                        "description": "검색할 약품명"
+                    }
+                },
+                "required": ["medicine_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_interaction",
+            "description": "두 약품 간 상호작용을 확인합니다",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "medicine_a": {"type": "string"},
+                    "medicine_b": {"type": "string"}
+                },
+                "required": ["medicine_a", "medicine_b"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_user_medications",
+            "description": "현재 사용자가 복용 중인 약품 목록을 조회합니다",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_health_profile",
+            "description": "사용자의 건강 설문 데이터(나이, 성별, 알레르기 등)를 조회합니다",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_guide",
+            "description": "약품 정보와 사용자 건강 프로필을 종합하여 맞춤형 복약 가이드를 생성합니다",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "medicine_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "가이드를 생성할 약품명 목록"
+                    }
+                },
+                "required": ["medicine_names"]
+            }
+        }
+    }
+]
+```
+
+### 4.3 툴콜링 실행 엔진
+
+```mermaid
+flowchart TD
+    A["GPT-4o 응답<br />(tool_calls 포함)"] --> B["tool_calls 파싱"]
+    B --> C["각 tool_call 순차 실행"]
+
+    C --> D["Tool Registry에서<br />함수 조회"]
+    D --> E["함수 실행<br />(DB 조회 등)"]
+    E --> F["실행 결과를<br />messages에 추가"]
+
+    F --> G{추가 tool_call<br />필요?}
+    G -->|Yes| H["GPT-4o 재호출<br />(이전 결과 포함)"]
+    H --> B
+    G -->|No| I["최종 텍스트 응답 생성"]
+    I --> J["사용자에게 반환"]
+```
+
+### 4.4 Tool Calling vs 순수 RAG 비교
+
+| 항목 | 순수 RAG | Tool Calling |
+|------|----------|-------------|
+| 정보 소스 | 벡터 유사도 검색만 | DB 직접 조회 + 벡터 검색 |
+| 정확도 | 유사도 기반 (근사) | 정확한 데이터 조회 |
+| 복잡한 질의 | 단일 검색만 가능 | 다단계 조회 가능 |
+| 예시 | "타이레놀 부작용" | "내가 먹는 약 중에 상호작용 위험한 조합 있어?" |
+| 비용 | LLM 1회 호출 | LLM 2~3회 호출 |
 
 ---
 
-## 7. 예상 파일 변경
+## Phase 5: 맞춤형 복약/생활습관 가이드 자동 생성
+
+### 5.1 가이드 생성 흐름
+
+```mermaid
+flowchart TD
+    A["OCR 완료<br />(약품 매칭 성공)"] --> B["사용자 프로필 조회"]
+
+    subgraph CONTEXT["컨텍스트 수집"]
+        B --> C["사전설문 데이터<br />(나이, 성별, 알레르기)"]
+        B --> D["기존 복약 목록<br />(medications)"]
+        B --> E["매칭된 신규 약품 정보<br />(medicine_info)"]
+    end
+
+    C --> F["가이드 생성 프롬프트 구성"]
+    D --> F
+    E --> F
+
+    F --> G["GPT-4o 호출<br />(구조화된 가이드 생성)"]
+
+    G --> H["가이드 항목"]
+    H --> I["복약 시간/방법 안내"]
+    H --> J["음식/약물 상호작용 경고"]
+    H --> K["생활습관 권고<br />(운동, 음주, 수면 등)"]
+    H --> L["부작용 모니터링 포인트"]
+    H --> M["응급 상황 대처법"]
+
+    I --> N["프론트엔드 가이드 카드로 표시"]
+    J --> N
+    K --> N
+    L --> N
+    M --> N
+```
+
+---
+
+## 구현 일정
+
+| Phase | 기간 | 내용 |
+|-------|------|------|
+| Phase 1 | 즉시 | 공공데이터 CSV → medicine_info DB 구축 + 증분 업데이트 스크립트 |
+| Phase 2 | 이번 주 | OpenCV 전처리 + OCR 후처리 파이프라인 고도화 |
+| Phase 3 | 이번 주 | RAG 파이프라인 (의도분류 + 하이브리드 검색) |
+| Phase 4 | 수요일 이후 | Tool Calling 통합 (Function Calling 기반) |
+| Phase 5 | Phase 2+3 완료 후 | 맞춤형 가이드 자동 생성 |
+
+---
+
+## 예상 파일 변경/생성
 
 | 파일 | 변경 내용 |
 |------|----------|
-| `app/models/refresh_tokens.py` | rotated_at, replaced_by 필드 추가 |
-| `app/repositories/refresh_token_repository.py` | rotate(), validate_with_grace() |
-| `app/services/oauth.py` | refresh_access_token() 메서드 |
-| `app/apis/v1/oauth_routers.py` | POST /auth/refresh 엔드포인트 |
-| `app/middlewares/__init__.py` | 신규 |
-| `app/middlewares/security.py` | 입력값 검증 + CSP |
-| `app/main.py` | 미들웨어 등록 |
-| `medication-frontend/src/lib/tokenManager.js` | 신규 |
-| `medication-frontend/src/lib/api.js` | 인터셉터 개선 |
-| `medication-frontend/src/lib/errors.js` | 에러 코드 추가 |
-
----
-
-## 8. 결정 완료
-
-| 항목 | 결정 |
-|------|------|
-| Grace Period | **2초** |
-| CSP style-src | **nonce 기반** (unsafe-inline 불허) |
-| 탈취 감지 시 | **해당 토큰만 종료** |
-| 입력값 검증 실패 | **400 Bad Request** |
-| 입력값 검증 방식 | **Middleware(1차) + Pydantic+Bleach(2차)** |
-
----
-
-# Survey Popup 자동 표시 기능
-
-## 목표
-- **Dev 사용자**: main 페이지 진입 시 항상 설문 팝업 표시
-- **Kakao 로그인 사용자**: 신규 가입자(최초 생성)만 설문 팝업 표시
-
----
-
-## 현재 상태 분석
-
-### 1. 기존 흐름
-```
-[로그인] --> {is_new_user?}
-           |
-           |--(Yes)--> /survey 페이지로 리다이렉트
-           |
-           |--(No)--> /main 페이지로 이동
-                        |
-                        --> SurveyModal 있지만 수동 트리거만 가능
-```
-
-### 2. 관련 파일
-| 파일 | 현재 역할 |
-|------|----------|
-| `auth/kakao/callback/page.jsx` | `is_new_user` 확인 후 `/survey` 리다이렉트 |
-| `main/page.jsx` | SurveyModal 컴포넌트 존재, 수동 트리거만 |
-| `login/page.jsx` | Dev 로그인 시 `code=dev_test_login` 사용 |
-
-### 3. 문제점
-- 신규 유저가 `/survey`로 리다이렉트되면 main 페이지 경험 없음
-- Dev 사용자 구분 로직 없음
-- main 페이지에서 자동 팝업 트리거 없음
-
----
-
-## 수정 계획
-
-### Phase 1: 백엔드 수정 (is_dev_user 플래그 추가)
-
-**파일**: `app/apis/v1/oauth_routers.py`
-
-- Dev 로그인 응답에 `is_dev_user: true` 플래그 추가
-- 기존 `is_new_user` 플래그 유지
-
-```python
-# 예시: callback 응답
-{
-    "access_token": "...",
-    "is_new_user": true,
-    "is_dev_user": true  # Dev 로그인인 경우만
-}
-```
-
-### Phase 2: 프론트엔드 콜백 수정
-
-**파일**: `medication-frontend/src/app/auth/kakao/callback/page.jsx`
-
-- 기존: `is_new_user`면 `/survey`로 리다이렉트
-- 변경: `/main`으로 이동하면서 쿼리 파라미터로 상태 전달
-
-```javascript
-// Before
-if (is_new_user) {
-  router.replace('/survey')
-} else {
-  router.replace('/main')
-}
-
-// After
-if (is_new_user || is_dev_user) {
-  router.replace('/main?showSurvey=true')
-} else {
-  router.replace('/main')
-}
-```
-
-### Phase 3: main 페이지 수정
-
-**파일**: `medication-frontend/src/app/main/page.jsx`
-
-- URL 쿼리 파라미터 `showSurvey=true` 감지
-- 감지 시 자동으로 SurveyModal 표시
-- 표시 후 URL에서 파라미터 제거 (clean URL)
-
-```javascript
-'use client'
-import { useSearchParams, useRouter } from 'next/navigation'
-
-// 컴포넌트 내부
-const searchParams = useSearchParams()
-const router = useRouter()
-
-useEffect(() => {
-  if (searchParams.get('showSurvey') === 'true') {
-    setShowSurvey(true)
-    // Clean URL
-    router.replace('/main', { scroll: false })
-  }
-}, [searchParams])
-```
-
----
-
-## 데이터 플로우 (수정 후)
-
-```
-[로그인 시도] --> {로그인 타입?}
-                    |
-                    |--(Dev 로그인)--> Backend: is_dev_user=true 반환
-                    |                      |
-                    |                      v
-                    |--(Kakao 로그인)--> {신규 유저?}
-                                           |
-                                           |--(Yes)--> Backend: is_new_user=true 반환
-                                           |                 |
-                                           |                 v
-                                           |            Callback: /main?showSurvey=true로 이동
-                                           |                 |
-                                           |                 v
-                                           |            Main: showSurvey 파라미터 감지
-                                           |                 |
-                                           |                 v
-                                           |            SurveyModal 자동 표시
-                                           |                 |
-                                           |                 v
-                                           |            URL 파라미터 제거
-                                           |
-                                           |--(No)--> Backend: is_new_user=false 반환
-                                                          |
-                                                          v
-                                                     Callback: /main으로 이동
-                                                          |
-                                                          v
-                                                     Main: 일반 화면 표시
-```
-
----
-
-## 체크리스트
-
-### Phase 1: Backend
-- [x] `oauth_routers.py`에서 dev 로그인 또는 신규 유저일 때 `?showSurvey=true` 쿼리 파라미터 추가
-- [ ] 기존 테스트 통과 확인
-
-### Phase 2: Frontend Callback
-- [x] 백엔드에서 직접 리다이렉트하므로 프론트엔드 콜백 수정 불필요
-
-### Phase 3: Frontend Main
-- [x] `main/page.jsx`에 useSearchParams 훅 추가
-- [x] showSurvey 파라미터 감지 로직 추가
-- [x] URL 클린업 로직 추가
-- [x] Suspense boundary 추가 (useSearchParams 필수 요구사항)
-
-### Phase 4: 테스트
-- [ ] Dev 로그인 -> 설문 팝업 표시 확인
-- [ ] 신규 Kakao 유저 -> 설문 팝업 표시 확인
-- [ ] 기존 Kakao 유저 -> 설문 팝업 미표시 확인
-
----
-
-## 대안 검토
-
-### 대안 A: localStorage 사용 (선택하지 않음)
-- 장점: URL이 깔끔함
-- 단점: 브라우저 간 동기화 불가, 개발자 도구로 조작 가능
-
-### 대안 B: 쿼리 파라미터 사용 (선택)
-- 장점: 상태 명확, SSR 호환, 디버깅 용이
-- 단점: URL에 잠시 파라미터 노출 (바로 제거됨)
-
----
-
-## 예상 변경 파일
-
-| 파일 | 변경 내용 |
-|------|----------|
-| `app/apis/v1/oauth_routers.py` | is_dev_user 플래그 추가 |
-| `medication-frontend/src/app/auth/kakao/callback/page.jsx` | 리다이렉트 로직 수정 |
-| `medication-frontend/src/app/main/page.jsx` | useSearchParams로 자동 팝업 |
+| `ai_worker/utils/ocr.py` | OpenCV 전처리 + OCR 후처리 추가 |
+| `ai_worker/utils/rag.py` | 의도분류 + 하이브리드 검색 + 툴콜링 통합 |
+| `ai_worker/utils/image_preprocessor.py` | 신규: OpenCV 전처리 모듈 |
+| `ai_worker/utils/text_postprocessor.py` | 신규: OCR 텍스트 후처리 모듈 |
+| `ai_worker/utils/intent_classifier.py` | 신규: 의도 분류 모듈 |
+| `ai_worker/utils/tool_executor.py` | 신규: 툴콜링 실행 엔진 |
+| `ai_worker/tasks/data_sync_tasks.py` | 신규: 공공데이터 증분 업데이트 태스크 |
+| `app/models/medicine_info.py` | 메타데이터 컬럼 추가 (ingredient, usage 등) |
+| `app/repositories/medicine_info_repository.py` | 하이브리드 검색 쿼리 |
+| `scripts/sync_medicine_data.py` | 신규: 공공데이터 동기화 스크립트 |
 

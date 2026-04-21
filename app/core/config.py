@@ -102,6 +102,7 @@ class Config(BaseSettings):
 
     # External API settings
     OPENAI_API_KEY: str | None = None
+    DATA_GO_KR_API_KEY: str | None = None
 
     # Kakao OAuth settings
     KAKAO_CLIENT_ID: str = _DEFAULT_KAKAO_CLIENT_ID

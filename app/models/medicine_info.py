@@ -1,23 +1,144 @@
+"""Medicine information model module.
+
+This module defines the MedicineInfo model for the pharmaceutical
+knowledge base, integrating public API data and supporting RAG search.
+"""
+
 from tortoise import fields, models
 
-class MedicineInfo(models.Model):
-    """
-    RAG를 위한 약학 정보 지식 베이스 테이블
-    """
-    id = fields.IntField(pk=True)
-    medicine_name = fields.CharField(max_length=128, unique=True, note="약품명")
-    category = fields.CharField(max_length=64, null=True, note="약품 분류")
-    efficacy = fields.TextField(null=True, note="효능/효과")
-    side_effects = fields.TextField(null=True, note="부작용")
-    precautions = fields.TextField(null=True, note="주의사항")
-    
-    # pgvector 전용: 실제 DB에는 'vector(1536)' 타입으로 수동 생성 필요 (OpenAI Embedding 기준)
-    # Tortoise에서는 TextField로 선언하되, Raw SQL로 처리하거나 가상 필드로 활용
-    embedding = fields.TextField(null=True, note="OpenAI 텍스트 임베딩 데이터 (JSON 형태 저장 또는 Raw SQL 처리)")
 
+class MedicineInfo(models.Model):
+    """Pharmaceutical knowledge base for RAG search and public API data.
+
+    Stores drug permit data from the Food and Drug Safety public API
+    (getDrugPrdtPrmsnDtlInq06) and supports vector similarity search
+    via pgvector for the RAG pipeline.
+
+    Attributes:
+        id: Auto-increment primary key.
+        item_seq: Unique drug product code from public API (UPSERT key).
+        medicine_name: Drug product name in Korean.
+        item_eng_name: Drug product name in English.
+        entp_name: Manufacturer name.
+        product_type: Product classification code.
+        spclty_pblc: Professional/OTC drug classification.
+        permit_date: Permit date in YYYYMMDD format.
+        cancel_name: Current status (normal/cancelled).
+        main_item_ingr: Active ingredients with standard codes.
+        storage_method: Storage instructions.
+        edi_code: Insurance billing codes.
+        bizrno: Business registration number.
+        change_date: Last change date from API in YYYYMMDD format.
+        category: Drug category for search filtering.
+        efficacy: Drug efficacy and effects.
+        side_effects: Known side effects.
+        precautions: Usage precautions.
+        embedding: Vector embedding for similarity search.
+        last_synced_at: Last sync timestamp from public API.
+        created_at: Record creation timestamp.
+        updated_at: Record update timestamp.
+    """
+
+    id = fields.IntField(pk=True)
+
+    # Public API fields (getDrugPrdtPrmsnDtlInq06)
+    item_seq = fields.CharField(
+        max_length=20,
+        unique=True,
+        null=True,
+        description="Drug product code from public API (UPSERT key)",
+    )
+    medicine_name = fields.CharField(
+        max_length=200,
+        unique=True,
+        description="Drug product name in Korean",
+    )
+    item_eng_name = fields.CharField(
+        max_length=256,
+        null=True,
+        description="Drug product name in English",
+    )
+    entp_name = fields.CharField(
+        max_length=128,
+        null=True,
+        description="Manufacturer name",
+    )
+    product_type = fields.CharField(
+        max_length=64,
+        null=True,
+        description="Product classification code",
+    )
+    spclty_pblc = fields.CharField(
+        max_length=32,
+        null=True,
+        description="Professional or OTC drug classification",
+    )
+    permit_date = fields.CharField(
+        max_length=8,
+        null=True,
+        description="Permit date in YYYYMMDD format",
+    )
+    cancel_name = fields.CharField(
+        max_length=16,
+        null=True,
+        description="Current status (normal or cancelled)",
+    )
+    main_item_ingr = fields.TextField(
+        null=True,
+        description="Active ingredients with standard codes",
+    )
+    storage_method = fields.TextField(
+        null=True,
+        description="Storage method and instructions",
+    )
+    edi_code = fields.CharField(
+        max_length=256,
+        null=True,
+        description="Insurance billing codes (comma-separated)",
+    )
+    bizrno = fields.CharField(
+        max_length=16,
+        null=True,
+        description="Business registration number",
+    )
+    change_date = fields.CharField(
+        max_length=8,
+        null=True,
+        description="Last change date from API in YYYYMMDD format",
+    )
+
+    # RAG knowledge base fields (populated by LLM or manual curation)
+    category = fields.CharField(
+        max_length=64,
+        null=True,
+        description="Drug category for search filtering",
+    )
+    efficacy = fields.TextField(
+        null=True,
+        description="Drug efficacy and effects",
+    )
+    side_effects = fields.TextField(
+        null=True,
+        description="Known side effects",
+    )
+    precautions = fields.TextField(
+        null=True,
+        description="Usage precautions",
+    )
+
+    # pgvector: declared as TEXT, actual vector ops via Raw SQL
+    embedding = fields.TextField(
+        null=True,
+        description="OpenAI text embedding data for vector similarity search",
+    )
+
+    last_synced_at = fields.DatetimeField(
+        null=True,
+        description="Last synchronization timestamp from public API",
+    )
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)
 
     class Meta:
         table = "medicine_info"
-        table_description = "RAG 검색을 위한 표준 약학 정보"
+        table_description = "Pharmaceutical knowledge base for RAG search and public API data"

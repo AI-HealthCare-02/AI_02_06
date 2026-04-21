@@ -27,6 +27,7 @@ TORTOISE_APP_MODELS: list[str] = [
     "app.models.intake_log",
     "app.models.drug_interaction_cache",
     "app.models.llm_response_cache",
+    "app.models.data_sync_log",
 ]
 
 # Tortoise ORM configuration
