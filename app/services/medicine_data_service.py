@@ -21,18 +21,17 @@ from app.repositories.medicine_info_repository import MedicineInfoRepository
 
 logger = logging.getLogger(__name__)
 
-# Public API endpoints
+# ── 공공데이터 API 설정 ──────────────────────────────────────────────
+# 식약처 의약품 허가정보 서비스 (DrugPrdtPrmsnInfoService07)
 _BASE_URL = "https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07"
-_DETAIL_ENDPOINT = f"{_BASE_URL}/getDrugPrdtPrmsnDtlInq06"
+_DETAIL_ENDPOINT = f"{_BASE_URL}/getDrugPrdtPrmsnDtlInq06"  # 허가 상세정보
 
-# Filtering: hospital-only injectable keywords
+# ── 필터링 키워드 (병원 전용 주사제 제외, 자가주사는 유지) ────────────
 _EXCLUDE_KEYWORDS = ("주사", "수액", "이식")
 _SELF_INJECT_KEYWORDS = ("인슐린", "삭센다", "자가주사", "펜주", "프리필드")
 
-# Data storage directory for JSON backups
+# ── 백업 저장 경로 및 HTTP 설정 ──────────────────────────────────────
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "ai_worker" / "data"
-
-# HTTP client settings
 _REQUEST_TIMEOUT = 30.0
 _MAX_ROWS_PER_PAGE = 100
 
@@ -48,6 +47,16 @@ class MedicineDataService:
         self.api_key = api_key
         self.repository = MedicineInfoRepository()
 
+    # ── 메인 동기화 메서드 ─────────────────────────────────────────
+    # 전체 흐름:
+    #   1. 파라미터 구성 (전체 or 증분)
+    #   2. API 페이징 수집 (_fetch_all_pages)
+    #   3. JSON 백업 저장 (_save_backup)
+    #   4. 병원 전용 주사제 필터링 (_is_hospital_only_injectable)
+    #   5. API 필드 -> 모델 필드 변환 (_transform_item)
+    #   6. DB UPSERT (repository.bulk_upsert)
+    #   7. 동기화 결과 로그 기록 (_record_sync_log)
+
     async def sync(self, full_sync: bool = False) -> dict[str, int]:
         """Execute full or incremental data synchronization.
 
@@ -61,6 +70,7 @@ class MedicineDataService:
         Raises:
             httpx.HTTPStatusError: If API request fails.
         """
+        # Step 1: 전체/증분에 따라 API 요청 파라미터 구성
         params = self._build_params(full_sync)
         sync_start = datetime.now(tz=UTC)
 
@@ -69,6 +79,7 @@ class MedicineDataService:
             "full" if full_sync else "incremental",
         )
 
+        # Step 2: API에서 전체 페이지 수집 (페이징 자동 처리)
         try:
             raw_items = await self._fetch_all_pages(params)
         except httpx.HTTPStatusError:
@@ -87,8 +98,10 @@ class MedicineDataService:
             await self._record_sync_log(sync_start, 0, 0, 0, "SUCCESS")
             return {"fetched": 0, "inserted": 0, "updated": 0}
 
+        # Step 3: 원본 데이터 JSON 백업 (감사 추적용)
         self._save_backup(raw_items)
 
+        # Step 4: 병원 전용 주사제 필터링 (인슐린 등 자가주사는 유지)
         filtered = [item for item in raw_items if not self._is_hospital_only_injectable(item)]
         logger.info(
             "Filtered %d -> %d items (removed %d hospital-only injectables)",
@@ -97,9 +110,11 @@ class MedicineDataService:
             len(raw_items) - len(filtered),
         )
 
+        # Step 5-6: API 필드명 -> 모델 필드명 변환 후 DB UPSERT
         transformed = [self._transform_item(item) for item in filtered]
         stats = await self.repository.bulk_upsert(transformed)
 
+        # Step 7: 동기화 결과를 data_sync_log 테이블에 기록
         await self._record_sync_log(
             sync_start,
             len(raw_items),
@@ -119,6 +134,8 @@ class MedicineDataService:
             "inserted": stats["inserted"],
             "updated": stats["updated"],
         }
+
+    # ── API 파라미터 구성 (전체: 필터 없음 / 증분: start_change_date 설정) ──
 
     async def _build_params(self, full_sync: bool) -> dict:
         """Build API request parameters for full or incremental sync.
@@ -147,6 +164,8 @@ class MedicineDataService:
             logger.info("No previous sync found, falling back to full sync")
 
         return params
+
+    # ── 페이징 수집 (pageNo를 증가시키며 totalCount에 도달할 때까지 반복) ──
 
     async def _fetch_all_pages(self, params: dict) -> list[dict]:
         """Fetch all pages of data from the public API.
@@ -196,6 +215,8 @@ class MedicineDataService:
 
         return all_items
 
+    # ── 필터링: 병원 전용 주사제 판별 ──────────────────────────────
+
     @staticmethod
     def _is_hospital_only_injectable(item: dict) -> bool:
         """Check if the item is a hospital-only injectable drug.
@@ -213,6 +234,8 @@ class MedicineDataService:
         has_exclude = any(kw in name for kw in _EXCLUDE_KEYWORDS)
         has_self_inject = any(kw in name for kw in _SELF_INJECT_KEYWORDS)
         return has_exclude and not has_self_inject
+
+    # ── API 응답 필드 -> DB 모델 필드 매핑 변환 ────────────────────
 
     @staticmethod
     def _transform_item(item: dict) -> dict:
@@ -239,6 +262,8 @@ class MedicineDataService:
             "bizrno": item.get("BIZRNO") or None,
         }
 
+    # ── 원본 데이터 JSON 백업 (ai_worker/data/에 타임스탬프 파일) ──
+
     @staticmethod
     def _save_backup(items: list[dict]) -> None:
         """Save raw API data as JSON backup file.
@@ -256,6 +281,8 @@ class MedicineDataService:
             json.dump(items, f, ensure_ascii=False, indent=2)
 
         logger.info("Saved backup: %s (%d items)", filepath, len(items))
+
+    # ── 동기화 결과 로그 기록 (data_sync_log 테이블) ────────────────
 
     @staticmethod
     async def _record_sync_log(

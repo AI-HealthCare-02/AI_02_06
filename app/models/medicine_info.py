@@ -41,7 +41,8 @@ class MedicineInfo(models.Model):
 
     id = fields.IntField(pk=True)
 
-    # Public API fields (getDrugPrdtPrmsnDtlInq06)
+    # ── 공공데이터 API 필드 (getDrugPrdtPrmsnDtlInq06에서 수집) ──────────
+    # item_seq를 UPSERT 기준 키로 사용하여 증분 업데이트 시 중복 방지
     item_seq = fields.CharField(
         max_length=20,
         unique=True,
@@ -107,7 +108,7 @@ class MedicineInfo(models.Model):
         description="Last change date from API in YYYYMMDD format",
     )
 
-    # RAG knowledge base fields (populated by LLM or manual curation)
+    # ── RAG 지식 베이스 필드 (LLM 호출 또는 수동 큐레이션으로 채워짐) ───
     category = fields.CharField(
         max_length=64,
         null=True,
@@ -126,12 +127,13 @@ class MedicineInfo(models.Model):
         description="Usage precautions",
     )
 
-    # pgvector: declared as TEXT, actual vector ops via Raw SQL
+    # ── 벡터 검색용 임베딩 (pgvector 확장으로 실제 벡터 연산 수행) ──────
     embedding = fields.TextField(
         null=True,
         description="OpenAI text embedding data for vector similarity search",
     )
 
+    # ── 동기화 추적 및 타임스탬프 ──────────────────────────────────────
     last_synced_at = fields.DatetimeField(
         null=True,
         description="Last synchronization timestamp from public API",

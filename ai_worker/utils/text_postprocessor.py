@@ -11,7 +11,7 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# Regex patterns for dosage and instruction text removal
+# ── 제거 대상 정규식 (복용 지시, 날짜, 용량 등 비약품명 텍스트) ──────
 _REMOVE_PATTERNS: list[re.Pattern] = [
     re.compile(r"\d+일\s*\d+회"),
     re.compile(r"식(전|후)\s*\d+분?"),
@@ -24,7 +24,7 @@ _REMOVE_PATTERNS: list[re.Pattern] = [
     re.compile(r"(조제|처방)\s*일\s*:?\s*\S+"),
 ]
 
-# Keywords that indicate non-medicine text
+# ── 블랙리스트 키워드 (약국/병원/환자 정보 등 비약품명 단어) ─────────
 _BLACKLIST_KEYWORDS: list[str] = [
     "용량",
     "용법",
@@ -55,6 +55,9 @@ _BLACKLIST_KEYWORDS: list[str] = [
 _MIN_NAME_LENGTH = 2
 
 
+# ── 텍스트 클리닝 (정규식 제거 -> 특수문자 제거 -> 공백 정규화) ──────
+
+
 def clean_ocr_text(raw_text: str) -> str:
     """Remove dosage instructions and noise from raw OCR text.
 
@@ -76,6 +79,9 @@ def clean_ocr_text(raw_text: str) -> str:
     cleaned = " ".join(cleaned.split())
 
     return cleaned
+
+
+# ── 약품명 후보 추출 (토큰 분리 -> 블랙리스트/숫자 제외 -> 후보 반환) ──
 
 
 def extract_medicine_candidates(cleaned_text: str) -> list[str]:
@@ -113,6 +119,9 @@ def extract_medicine_candidates(cleaned_text: str) -> list[str]:
         len(candidates),
     )
     return candidates
+
+
+# ── 블랙리스트 판별 헬퍼 ─────────────────────────────────────────────
 
 
 def _is_blacklisted(token: str) -> bool:

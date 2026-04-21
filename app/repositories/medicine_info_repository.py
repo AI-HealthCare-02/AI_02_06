@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 class MedicineInfoRepository:
     """Medicine info database repository for drug data management."""
 
+    # ── 단건 조회 (ID / 품목코드 / 약품명) ───────────────────────────
+
     async def get_by_id(self, medicine_id: int) -> MedicineInfo | None:
         """Get medicine info by ID.
 
@@ -50,6 +52,8 @@ class MedicineInfoRepository:
         """
         return await MedicineInfo.filter(medicine_name=medicine_name).first()
 
+    # ── 검색 (약품명 부분 일치) ─────────────────────────────────────
+
     async def search_by_name(
         self,
         query: str,
@@ -73,6 +77,8 @@ class MedicineInfoRepository:
             .all()
         )
 
+    # ── UPSERT (item_seq 기준으로 신규 삽입 또는 기존 갱신) ─────────
+
     async def upsert_from_api(self, item_data: dict) -> tuple[MedicineInfo, bool]:
         """Insert or update a single medicine info record from API data.
 
@@ -92,6 +98,10 @@ class MedicineInfoRepository:
             item_seq=item_seq,
         )
         return instance, created
+
+    # ── 대량 UPSERT (API 수집 데이터를 배치로 처리) ────────────────
+    # 흐름: items 순회 -> upsert_from_api 호출 -> 성공/실패 카운트
+    #       -> batch_size 마다 진행률 로그 출력
 
     async def bulk_upsert(
         self,
@@ -144,6 +154,8 @@ class MedicineInfoRepository:
         )
         return {"inserted": inserted, "updated": updated}
 
+    # ── 동기화 이력 조회 (증분 업데이트 시작 날짜 결정용) ────────────
+
     async def get_last_sync_date(self) -> str | None:
         """Get the last successful sync date for medicine_info.
 
@@ -163,6 +175,8 @@ class MedicineInfoRepository:
         if not last_log:
             return None
         return last_log.sync_date.strftime("%Y%m%d")
+
+    # ── 통계 ─────────────────────────────────────────────────────────
 
     async def count_all(self) -> int:
         """Count total medicine info records.

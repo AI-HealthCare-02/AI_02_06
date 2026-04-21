@@ -17,9 +17,12 @@ from app.dtos.ocr import ExtractedMedicine, OcrExtractResponse
 logger = get_logger(__name__)
 
 
-# LLM 파싱용 내부 모델
+# ── LLM 파싱용 내부 모델 (OCR 텍스트 -> 구조화된 약품 데이터) ────────
 class LlmExtractionResult(BaseModel):
     medicines: list[ExtractedMedicine]
+
+
+# ── CLOVA OCR API 호출 (httpx 동기 방식, RQ 워커에서 실행) ────────────
 
 
 def _call_clova_ocr(image_path: str) -> str:
@@ -71,6 +74,9 @@ def _call_clova_ocr(image_path: str) -> str:
         raise
 
 
+# ── LLM 구조화 파싱 (OCR 텍스트에서 약품명/용량/지시사항 추출) ────────
+
+
 def _parse_text_with_llm(text: str, client: OpenAI) -> LlmExtractionResult:
     """LLM을 이용한 구조화 데이터 파싱 (워커 내부용)"""
     prompt = f"""
@@ -98,8 +104,14 @@ def _parse_text_with_llm(text: str, client: OpenAI) -> LlmExtractionResult:
         raise
 
 
+# ── OCR 전체 파이프라인 (RQ Task) ────────────────────────────────────
+# 흐름: OpenCV 전처리 -> CLOVA OCR -> 텍스트 후처리 -> LLM 파싱
+#       -> Redis에 결과 저장 (10분 만료)
+
+
 def process_ocr_task(image_path: str, draft_id: str) -> bool:
-    """[RQ Task] OCR 추출 및 파싱 전체 프로세스
+    """[RQ Task] OCR 추출 및 파싱 전체 프로세스.
+
     결과를 Redis의 'ocr_draft:{draft_id}' 키에 저장합니다.
     """
     logger.info(f"Starting OCR task: {image_path} (Draft ID: {draft_id})")
@@ -144,6 +156,10 @@ def process_ocr_task(image_path: str, draft_id: str) -> bool:
         Path(image_path).unlink(missing_ok=True)
         preprocessed = Path(image_path).parent / f"{Path(image_path).stem}_preprocessed{Path(image_path).suffix}"
         preprocessed.unlink(missing_ok=True)
+
+
+# ── 복약 가이드 생성 (RQ Task) ───────────────────────────────────────
+# 흐름: 약품 리스트 -> LLM 프롬프트 구성 -> GPT-4o 호출 -> Redis 저장
 
 
 def generate_guide_task(medicines_json: str, profile_id: str, job_id: str) -> bool:

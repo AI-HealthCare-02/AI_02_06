@@ -26,12 +26,16 @@ from app.core.config import config
 from app.db.databases import TORTOISE_ORM
 from app.services.medicine_data_service import MedicineDataService
 
+# ── 로깅 설정 ───────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] [%(levelname)s] [%(name)s:%(lineno)d] - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+
+# ── CLI 인자 파싱 (--full: 전체 동기화, --api-key: API 키 직접 전달) ──
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,6 +61,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+# ── 동기화 실행 (Tortoise ORM 초기화 -> Service 호출 -> 연결 종료) ────
+# 흐름: DB 연결 -> MedicineDataService.sync() -> 결과 로그 -> DB 종료
+
+
 async def run_sync(full_sync: bool, api_key: str) -> None:
     """Initialize DB connection and run sync operation.
 
@@ -80,6 +88,9 @@ async def run_sync(full_sync: bool, api_key: str) -> None:
     finally:
         await Tortoise.close_connections()
         logger.info("Database connection closed")
+
+
+# ── 메인 진입점 (.env에서 API 키 로드 후 asyncio.run으로 실행) ───────
 
 
 def main() -> None:

@@ -25,6 +25,7 @@ class DataSyncLog(models.Model):
         created_at: Record creation timestamp.
     """
 
+    # ── 동기화 실행 정보 ──────────────────────────────────────────────
     id = fields.BigIntField(pk=True)
     sync_type = fields.CharField(
         max_length=32,
@@ -33,6 +34,7 @@ class DataSyncLog(models.Model):
     sync_date = fields.DatetimeField(
         description="Sync execution timestamp",
     )
+    # ── 동기화 결과 통계 (수집/삽입/갱신 건수) ─────────────────────────
     total_fetched = fields.IntField(
         default=0,
         description="Total records fetched from API",
@@ -45,6 +47,7 @@ class DataSyncLog(models.Model):
         default=0,
         description="Number of updated existing records",
     )
+    # ── 상태 및 에러 추적 ──────────────────────────────────────────────
     status = fields.CharField(
         max_length=16,
         description="Sync result status (SUCCESS / FAILED)",
