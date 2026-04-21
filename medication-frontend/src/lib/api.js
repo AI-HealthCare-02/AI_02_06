@@ -9,7 +9,7 @@ import { parseApiError, ERROR_CODE_MESSAGES, HTTP_STATUS_MESSAGES } from './erro
 const api = axios.create({
   baseURL: config.API_BASE_URL,
   withCredentials: true,
-  timeout: 15000,
+  timeout: 60000,
 });
 
 api.interceptors.request.use(

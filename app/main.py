@@ -158,3 +158,19 @@ initialize_tortoise(app)
 
 # Include API routers
 app.include_router(v1_routers)
+
+
+@app.on_event("startup")
+async def startup_preload_rag() -> None:
+    """Pre-load RAG pipeline on startup to avoid first-request latency."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+    try:
+        from app.services.rag import get_rag_pipeline
+
+        logger.info("Pre-loading RAG pipeline...")
+        await get_rag_pipeline()
+        logger.info("RAG pipeline pre-loaded successfully.")
+    except Exception as e:
+        logger.warning("RAG pipeline pre-load failed (non-fatal): %s", e)
