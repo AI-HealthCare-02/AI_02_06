@@ -189,18 +189,27 @@ class MessageService:
         """
         user_msg = await self.repository.create_user_message(session_id, content)
 
+        # Get recent messages (returned in newest-first order)
         recent = await self.repository.get_recent_by_session(session_id, limit=10)
+
+        # Build history in chronological order (oldest first) by reversing
         history = [
             {"role": "user" if m.sender_type == "USER" else "assistant", "content": m.content}
-            for m in recent
+            for m in reversed(recent)
             if m.id != user_msg.id
         ]
 
         try:
-            pipeline = get_rag_pipeline()
-            rag_response = await pipeline.ask(question=content, history=history)
-            reply = rag_response.answer
-        except (ValueError, RuntimeError) as e:
+            # Get RAG pipeline (async factory ensures initialization)
+            pipeline = await get_rag_pipeline()
+
+            # Generate response through RAG pipeline with intent classification
+            response = await pipeline.ask(
+                question=content,
+                history=history,
+            )
+            reply = response.answer
+        except Exception as e:
             await self.repository.soft_delete(user_msg)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -213,6 +222,25 @@ class MessageService:
 
         assistant_msg = await self.repository.create_assistant_message(session_id, reply)
         return user_msg, assistant_msg
+
+    async def ask_and_reply_with_owner_check(
+        self, session_id: UUID, account_id: UUID, content: str
+    ) -> tuple[ChatMessage, ChatMessage]:
+        """Save user message, generate RAG-based response with ownership verification.
+
+        Args:
+            session_id: Session UUID.
+            account_id: Account UUID for ownership check.
+            content: User message content.
+
+        Returns:
+            tuple[ChatMessage, ChatMessage]: (user_message, assistant_message)
+
+        Raises:
+            HTTPException: If session not found, access denied, or AI fails.
+        """
+        await self._verify_session_ownership(session_id, account_id)
+        return await self.ask_and_reply(session_id, content)
 
     async def delete_message(self, message_id: UUID) -> None:
         """Delete message (soft delete).

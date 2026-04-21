@@ -7,15 +7,21 @@ from app.services.rag.intent.classifier import IntentClassifier
 from app.services.rag.intent.intents import IntentType
 from app.services.rag.pipeline import RAGPipeline
 from app.services.rag.protocols import EmbeddingProvider, Retriever
-from app.services.rag.providers.sentence_transformer import SentenceTransformerProvider
+from app.services.rag.providers.sentence_transformer import (
+    SentenceTransformerProvider,
+    get_sentence_transformer_provider,
+)
 from app.services.rag.retrievers.hybrid import HybridRetriever
 from app.services.rag.tools import ToolRouter
 
 _pipeline: RAGPipeline | None = None
 
 
-def get_rag_pipeline() -> RAGPipeline:
+async def get_rag_pipeline() -> RAGPipeline:
     """Get or create the global RAGPipeline instance.
+
+    This is an async factory that ensures the embedding provider
+    is properly initialized before use.
 
     Returns:
         Configured RAGPipeline with all dependencies injected.
@@ -25,7 +31,8 @@ def get_rag_pipeline() -> RAGPipeline:
     if _pipeline is None:
         from ai_worker.utils.rag import RAGGenerator
 
-        provider = SentenceTransformerProvider()
+        # Use the async factory to get an initialized provider
+        provider = await get_sentence_transformer_provider()
         _pipeline = RAGPipeline(
             embedding_provider=provider,
             retriever=HybridRetriever(embedding_provider=provider),

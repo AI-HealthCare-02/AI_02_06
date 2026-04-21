@@ -44,19 +44,22 @@ CurrentAccount = Annotated[Account, Depends(get_current_account)]
 )
 async def ask_message(
     data: ChatAskRequest,
+    current_account: CurrentAccount,
     service: MessageServiceDep,
 ) -> ChatAskResponse:
     """Send user message and generate RAG-based AI response.
 
     Args:
         data: Chat ask request data containing session ID and message content.
+        current_account: Current authenticated account.
         service: Message service instance.
 
     Returns:
         ChatAskResponse: Response containing both user and assistant messages.
     """
-    user_msg, assistant_msg = await service.ask_and_reply(
+    user_msg, assistant_msg = await service.ask_and_reply_with_owner_check(
         session_id=data.session_id,
+        account_id=current_account.id,
         content=data.content,
     )
     return ChatAskResponse(

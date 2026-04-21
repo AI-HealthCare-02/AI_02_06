@@ -1,6 +1,6 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
-import { X, Send } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { X, Send, RefreshCw } from 'lucide-react'
 import api, { showError } from '@/lib/api'
 
 /**
@@ -19,59 +19,64 @@ export default function ChatModal({ onClose, profileId }) {
   const [initError, setInitError] = useState(false)
   const scrollRef = useRef(null)
 
-  // 모달 열릴 때: 기존 세션 조회 또는 새 세션 생성
-  useEffect(() => {
-    const initSession = async () => {
-      if (!profileId) {
-        setMessages([{ role: 'assistant', content: '프로필 정보를 불러올 수 없습니다.' }])
-        setIsInitializing(false)
-        return
-      }
-
-      try {
-        // 1. 기존 세션 조회
-        const sessionsRes = await api.get('/api/v1/chat-sessions', {
-          params: { profile_id: profileId }
-        })
-
-        let currentSessionId = null
-
-        if (sessionsRes.data?.length > 0) {
-          // 가장 최근 세션 사용
-          currentSessionId = sessionsRes.data[0].id
-          setSessionId(currentSessionId)
-
-          // 2. 기존 메시지 불러오기
-          const messagesRes = await api.get(`/api/v1/messages/session/${currentSessionId}`)
-          if (messagesRes.data?.length > 0) {
-            const loadedMessages = messagesRes.data.map(m => ({
-              role: m.sender_type === 'USER' ? 'user' : 'assistant',
-              content: m.content
-            }))
-            setMessages(loadedMessages)
-          } else {
-            setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
-          }
-        } else {
-          // 3. 세션이 없으면 새로 생성
-          const newSessionRes = await api.post('/api/v1/chat-sessions', {
-            profile_id: profileId,
-            title: '복약 상담'
-          })
-          setSessionId(newSessionRes.data.id)
-          setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
-        }
-      } catch (err) {
-        console.error('세션 초기화 실패:', err)
-        showError('채팅 세션을 시작할 수 없습니다.')
-        setMessages([{ role: 'assistant', content: '채팅 연결에 실패했습니다. 잠시 후 다시 시도해주세요.' }])
-      } finally {
-        setIsInitializing(false)
-      }
+  // 세션 초기화 함수 (재시도 가능하도록 useCallback 사용)
+  const initSession = useCallback(async () => {
+    if (!profileId) {
+      setMessages([{ role: 'assistant', content: '프로필 정보를 불러올 수 없습니다.' }])
+      setIsInitializing(false)
+      return
     }
 
-    initSession()
+    setIsInitializing(true)
+    setInitError(false)
+
+    try {
+      // 1. 기존 세션 조회
+      const sessionsRes = await api.get('/api/v1/chat-sessions', {
+        params: { profile_id: profileId }
+      })
+
+      let currentSessionId = null
+
+      if (sessionsRes.data?.length > 0) {
+        // 가장 최근 세션 사용
+        currentSessionId = sessionsRes.data[0].id
+        setSessionId(currentSessionId)
+
+        // 2. 기존 메시지 불러오기
+        const messagesRes = await api.get(`/api/v1/messages/session/${currentSessionId}`)
+        if (messagesRes.data?.length > 0) {
+          const loadedMessages = messagesRes.data.map(m => ({
+            role: m.sender_type === 'USER' ? 'user' : 'assistant',
+            content: m.content
+          }))
+          setMessages(loadedMessages)
+        } else {
+          setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
+        }
+      } else {
+        // 3. 세션이 없으면 새로 생성
+        const newSessionRes = await api.post('/api/v1/chat-sessions', {
+          profile_id: profileId,
+          title: '복약 상담'
+        })
+        setSessionId(newSessionRes.data.id)
+        setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
+      }
+    } catch (err) {
+      console.error('세션 초기화 실패:', err)
+      showError('채팅 세션을 시작할 수 없습니다.')
+      setMessages([{ role: 'assistant', content: '채팅 연결에 실패했습니다. 아래 버튼을 눌러 다시 시도해주세요.' }])
+      setInitError(true)
+    } finally {
+      setIsInitializing(false)
+    }
   }, [profileId])
+
+  // 모달 열릴 때: 기존 세션 조회 또는 새 세션 생성
+  useEffect(() => {
+    initSession()
+  }, [initSession])
 
   // 메시지 추가 시 자동 스크롤
   useEffect(() => {
@@ -144,22 +149,37 @@ export default function ChatModal({ onClose, profileId }) {
 
         {/* 입력창 */}
         <div className="p-4 bg-white border-t border-gray-100 flex gap-2 items-center">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyUp={(e) => { if (e.key === 'Enter') handleSend() }}
-            disabled={isInitializing || !sessionId}
-            placeholder={isInitializing ? '연결 중...' : (!sessionId ? '연결 실패' : '메시지를 입력하세요')}
-            className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-gray-400 transition-all disabled:opacity-50"
-          />
-          <button
-            onClick={handleSend}
-            disabled={isLoading || !input.trim() || isInitializing || !sessionId}
-            className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-900 text-white hover:bg-gray-700 disabled:bg-gray-100 disabled:text-gray-300 active:scale-95 transition-all cursor-pointer"
-          >
-            <Send size={16} />
-          </button>
+          {initError ? (
+            /* 재시도 버튼 (초기화 실패 시) */
+            <button
+              onClick={initSession}
+              disabled={isInitializing}
+              className="flex-1 flex items-center justify-center gap-2 bg-gray-900 text-white rounded-xl px-4 py-2.5 text-sm hover:bg-gray-700 disabled:bg-gray-400 active:scale-95 transition-all cursor-pointer"
+            >
+              <RefreshCw size={16} className={isInitializing ? 'animate-spin' : ''} />
+              {isInitializing ? '연결 중...' : '다시 연결하기'}
+            </button>
+          ) : (
+            /* 일반 입력창 */
+            <>
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyUp={(e) => { if (e.key === 'Enter') handleSend() }}
+                disabled={isInitializing || !sessionId}
+                placeholder={isInitializing ? '연결 중...' : (!sessionId ? '연결 실패' : '메시지를 입력하세요')}
+                className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-gray-400 transition-all disabled:opacity-50"
+              />
+              <button
+                onClick={handleSend}
+                disabled={isLoading || !input.trim() || isInitializing || !sessionId}
+                className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-900 text-white hover:bg-gray-700 disabled:bg-gray-100 disabled:text-gray-300 active:scale-95 transition-all cursor-pointer"
+              >
+                <Send size={16} />
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
