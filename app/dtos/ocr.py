@@ -4,6 +4,8 @@ This module contains data transfer objects for OCR (Optical Character Recognitio
 operations including medicine extraction, temporary storage, and confirmation.
 """
 
+from datetime import date
+
 from pydantic import BaseModel, Field
 
 
@@ -15,6 +17,7 @@ class ExtractedMedicine(BaseModel):
     """
 
     medicine_name: str = Field(description="추출된 약품명 (예: 타이레놀정500mg)")
+    dispensed_date: date | None = Field(None, description="처방전에 적힌 처방(조제)일 (예: 2026-04-13)")
     department: str | None = Field(None, description="처방 진료과 (예: 내과, 정형외과)")
     category: str | None = Field(None, description="약품 분류 (예: 해열진통제, 항생제)")
     dose_per_intake: str | None = Field(None, description="1회 복용량 단위 포함 (예: 1정, 2캡슐, 5ml)")

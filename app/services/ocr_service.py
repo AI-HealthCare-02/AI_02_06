@@ -14,21 +14,15 @@ import time
 from typing import Any
 import uuid
 
-import httpx
-import redis.asyncio as redis
 from fastapi import BackgroundTasks, UploadFile
+import httpx
 from openai import AsyncOpenAI, OpenAIError
 from pydantic import BaseModel
-import redis.asyncio as redis  # Async Redis client
-import requests
+import redis.asyncio as redis
 
-from app.core import config
+from app.core.config import config
 from app.dtos.ocr import ConfirmMedicationRequest, ExtractedMedicine, OcrExtractResponse
 from app.models.medication import Medication
-from app.core.config import config
-
-# DTO path reflection
-from app.models.medication import Medication  # DB model import
 
 # 공유 볼륨 경로 (Docker Compose의 ai-worker와 공유되어야 함)
 _UPLOAD_DIR = Path(os.environ.get("ALLOWED_IMAGE_DIR", tempfile.gettempdir())) / "ocr_images"
@@ -59,7 +53,7 @@ async def _call_clova_ocr(image_path: Path) -> str:
         "version": "V2",
         "timestamp": round(time.time() * 1000),
     }
-    with open(image_path, "rb") as f:
+    with image_path.open("rb") as f:
         image_data = f.read()
 
     async with httpx.AsyncClient(timeout=30) as client:
@@ -134,12 +128,15 @@ class OCRService:
 
 [추출 규칙]
 1. medicine_name: 약품명 오탈자를 보정하세요. (예: '타이레뉼' -> '타이레놀')
-2. department: 처방 진료과를 추출하세요. (예: '내과', '정형외과') 없으면 null.
-3. category: 약품 분류를 추론하세요. (예: '해열진통제', '항생제', '소화제') 없으면 null.
-4. dose_per_intake: 1회 복용량을 단위 포함하여 추출하세요. (예: '1정', '2캡슐', '5ml') 없으면 null.
-5. daily_intake_count: 하루에 몇 번 복용하는지 정수로 추출하세요. (예: 1일 3회 -> 3) 없으면 null.
-6. total_intake_days: 총 며칠간 복용하는지 정수로 추출하세요. (예: 5일치 -> 5) daily_intake_count와 다른 값입니다. 없으면 null.
-7. intake_instruction: 복용 시점만 추출하세요. (예: '식후 30분', '취침 전', '공복') 없으면 null.
+2. dispensed_date: 처방전에 적힌 처방일(조제일)을 YYYY-MM-DD 형식으로 추출하세요. \
+모든 약품에 동일하게 적용됩니다. 없으면 null.
+3. department: 처방 진료과를 추출하세요. (예: '내과', '정형외과') 없으면 null.
+4. category: 약품 분류를 추론하세요. (예: '해열진통제', '항생제', '소화제') 없으면 null.
+5. dose_per_intake: 1회 복용량을 단위 포함하여 추출하세요. (예: '1정', '2캡슐', '5ml') 없으면 null.
+6. daily_intake_count: 하루에 몇 번 복용하는지 정수로 추출하세요. (예: 1일 3회 -> 3) 없으면 null.
+7. total_intake_days: 총 며칠간 복용하는지 정수로 추출하세요. (예: 5일치 -> 5) \
+daily_intake_count와 다른 값입니다. 없으면 null.
+8. intake_instruction: 복용 시점만 추출하세요. (예: '식후 30분', '취침 전', '공복') 없으면 null.
 
 [중요] daily_intake_count(1일 횟수)와 total_intake_days(총 일수)는 반드시 다른 값입니다.
 예시: "1일 3회 5일분" -> daily_intake_count=3, total_intake_days=5
@@ -162,7 +159,12 @@ class OCRService:
             return OcrExtractResponse.model_validate_json(data_json)
         return None
 
-    async def confirm_and_save(self, request: ConfirmMedicationRequest, profile_id: str, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    async def confirm_and_save(
+        self,
+        request: ConfirmMedicationRequest,
+        profile_id: str,
+        background_tasks: BackgroundTasks,
+    ) -> dict[str, Any]:
         """최종 데이터를 DB에 저장하고, 가이드를 생성한 뒤 Redis를 정리합니다."""
         saved_meds = []
 
@@ -178,6 +180,7 @@ class OCRService:
             total_days = med.total_intake_days or 1
             total_count = daily_count * total_days
 
+            today = datetime.now(tz=config.TIMEZONE).date()
             new_med = await Medication.create(
                 profile_id=profile_id,
                 medicine_name=med.medicine_name,
@@ -190,7 +193,8 @@ class OCRService:
                 intake_times=[],  # TODO: 복용 시간 설정 기능 (다음 sprint)
                 total_intake_count=total_count,
                 remaining_intake_count=total_count,
-                start_date=datetime.now(tz=config.TIMEZONE).date(),
+                start_date=med.dispensed_date or today,
+                dispensed_date=med.dispensed_date,
                 is_active=True,
             )
             saved_meds.append(new_med)
