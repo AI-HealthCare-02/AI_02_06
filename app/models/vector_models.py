@@ -76,7 +76,7 @@ class PharmaceuticalDocument(Model, VectorQueryMixin):
     last_indexed_at = fields.DatetimeField(null=True, description="Last time document was indexed")
 
     # Document embedding (for document-level similarity)
-    document_embedding = VectorField(dimensions=1536, null=True, description="Document-level embedding")
+    document_embedding = VectorField(dimensions=768, null=True, description="Document-level embedding")
 
     class Meta:
         table = "pharmaceutical_documents"
@@ -123,7 +123,7 @@ class DocumentChunk(Model, VectorQueryMixin):
     contraindicated_conditions = fields.JSONField(default=list, description="Contraindicated conditions")
 
     # Vector embedding
-    embedding = VectorField(dimensions=1536, description="Chunk embedding for similarity search")
+    embedding = VectorField(dimensions=768, description="Chunk embedding for similarity search")
 
     # Search optimization
     embedding_normalized = fields.BooleanField(default=False, description="Whether embedding is normalized")
@@ -151,7 +151,7 @@ class SearchQuery(Model):
 
     # Query information
     query_text = fields.TextField(description="Original query text")
-    query_embedding = VectorField(dimensions=1536, null=True, description="Query embedding")
+    query_embedding = VectorField(dimensions=768, null=True, description="Query embedding")
 
     # Search parameters
     search_type = fields.CharField(max_length=50, description="Type of search performed")
