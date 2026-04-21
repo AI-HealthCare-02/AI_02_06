@@ -75,6 +75,7 @@ services:
     volumes:
       - ./app:/app/app
       - ./ai_worker:/app/ai_worker
+      - ./scripts:/app/scripts
       - static_volume:/app/templates
     ports:
       - "8000:8000"
@@ -86,7 +87,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 120s
     depends_on:
       postgres:
         condition: service_healthy
