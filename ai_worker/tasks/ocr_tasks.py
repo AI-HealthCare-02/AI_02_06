@@ -1,25 +1,30 @@
+"""OCR task module for prescription image processing.
+
+This module provides RQ tasks for the OCR pipeline:
+1. OpenCV preprocessing -> CLOVA OCR -> text postprocessing
+   -> medicine_info DB matching -> Redis result storage
+2. Medication guide generation (separate task, uses LLM)
+
+LLM is NOT used in OCR parsing. Medicine identification relies on
+DB matching against the medicine_info table (public API data).
+LLM is reserved for the RAG pipeline (Phase 3).
+"""
+
 import json
 from pathlib import Path
 import time
 import uuid
 
 import httpx
-from openai import OpenAI
-from pydantic import BaseModel
 import redis
 
 from ai_worker.core.config import config
 from ai_worker.core.logger import get_logger
 from ai_worker.utils.image_preprocessor import preprocess_for_ocr
-from ai_worker.utils.text_postprocessor import clean_ocr_text
+from ai_worker.utils.text_postprocessor import clean_ocr_text, extract_medicine_candidates
 from app.dtos.ocr import ExtractedMedicine, OcrExtractResponse
 
 logger = get_logger(__name__)
-
-
-# ── LLM 파싱용 내부 모델 (OCR 텍스트 -> 구조화된 약품 데이터) ────────
-class LlmExtractionResult(BaseModel):
-    medicines: list[ExtractedMedicine]
 
 
 # ── CLOVA OCR API 호출 (httpx 동기 방식, RQ 워커에서 실행) ────────────
@@ -74,135 +79,127 @@ def _call_clova_ocr(image_path: str) -> str:
         raise
 
 
-# ── LLM 구조화 파싱 (OCR 텍스트에서 약품명/용량/지시사항 추출) ────────
+# ── medicine_info DB 매칭 (후보 약품명을 DB에서 검색하여 확정) ─────────
+# LLM 없이 부분 일치(ILIKE) 검색으로 약품 식별
 
 
-def _parse_text_with_llm(text: str, client: OpenAI) -> LlmExtractionResult:
-    """LLM을 이용한 구조화 데이터 파싱 (워커 내부용)"""
-    prompt = f"""
-    당신은 의료 데이터 파싱 전문가입니다. 다음 처방전(또는 약봉투) OCR 텍스트에서
-    약품명과 복용 지시사항을 정확하게 추출하세요.
+def _match_candidates_from_db(candidates: list[str]) -> list[ExtractedMedicine]:
+    """Match medicine name candidates against medicine_info DB.
 
-    [OCR 텍스트]
-    {text}
+    Searches each candidate token in medicine_info table
+    using partial name matching (case-insensitive).
 
-    지침:
-    1. 약품명(medicine_name)은 오탈자를 문맥에 맞게 보정하세요. (예: '타이레뉼' -> '타이레놀')
-    2. 복용량, 횟수, 일수 등의 숫자를 정확히 분리하세요.
-    3. 알 수 없는 필드는 null로 비워두세요.
+    Args:
+        candidates: List of medicine name candidate strings
+            from OCR text postprocessing.
+
+    Returns:
+        List of ExtractedMedicine with matched medicine names.
     """
-    try:
-        response = client.beta.chat.completions.parse(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            response_format=LlmExtractionResult,
-        )
-        return response.choices[0].message.parsed
-    except Exception as e:
-        logger.error(f"LLM Parsing Error: {e}")
-        raise
+    import asyncio
+
+    from app.repositories.medicine_info_repository import MedicineInfoRepository
+
+    repo = MedicineInfoRepository()
+    matched: list[ExtractedMedicine] = []
+    seen_names: set[str] = set()
+
+    async def _search() -> None:
+        for candidate in candidates:
+            results = await repo.search_by_name(candidate, limit=1)
+            if not results:
+                continue
+
+            medicine = results[0]
+            if medicine.medicine_name in seen_names:
+                continue
+
+            seen_names.add(medicine.medicine_name)
+            matched.append(
+                ExtractedMedicine(
+                    medicine_name=medicine.medicine_name,
+                    category=medicine.category,
+                )
+            )
+
+    # RQ 워커는 동기 환경이므로 asyncio.run으로 실행
+    asyncio.run(_search())
+
+    logger.info(
+        "DB matching: %d candidates -> %d matched medicines",
+        len(candidates),
+        len(matched),
+    )
+    return matched
 
 
 # ── OCR 전체 파이프라인 (RQ Task) ────────────────────────────────────
-# 흐름: OpenCV 전처리 -> CLOVA OCR -> 텍스트 후처리 -> LLM 파싱
+# 흐름: OpenCV 전처리 -> CLOVA OCR -> 텍스트 후처리 -> DB 매칭
 #       -> Redis에 결과 저장 (10분 만료)
+# 참고: LLM은 사용하지 않음. 약품 식별은 medicine_info DB 매칭으로 수행
 
 
 def process_ocr_task(image_path: str, draft_id: str) -> bool:
-    """[RQ Task] OCR 추출 및 파싱 전체 프로세스.
+    """[RQ Task] OCR extraction and DB matching pipeline.
 
-    결과를 Redis의 'ocr_draft:{draft_id}' 키에 저장합니다.
+    Processes prescription image through OpenCV preprocessing,
+    CLOVA OCR text extraction, text postprocessing, and
+    medicine_info DB matching. Results stored in Redis.
+
+    Args:
+        image_path: Path to the uploaded prescription image.
+        draft_id: Unique ID for Redis temporary storage.
+
+    Returns:
+        True if processing succeeded, False otherwise.
     """
-    logger.info(f"Starting OCR task: {image_path} (Draft ID: {draft_id})")
+    logger.info("Starting OCR task: %s (Draft ID: %s)", image_path, draft_id)
 
     # Redis 연결 (동기 방식)
     redis_conn = redis.from_url(config.REDIS_URL, decode_responses=True)
 
     try:
-        # 1. OpenCV preprocessing
+        # Step 1: OpenCV 전처리 (그레이스케일 -> 블러 -> 이진화 -> 모폴로지)
         preprocessed_path = preprocess_for_ocr(image_path)
         logger.info("Image preprocessed: %s", preprocessed_path)
 
-        # 2. OCR call
+        # Step 2: CLOVA OCR 호출 -> Raw 텍스트 추출
         raw_text = _call_clova_ocr(preprocessed_path)
         if not raw_text.strip():
             logger.warning("No text extracted from image: %s", image_path)
             redis_conn.setex(f"ocr_status:{draft_id}", 600, "no_text")
             return False
 
-        # 3. Text postprocessing (clean noise before LLM)
-        raw_text = clean_ocr_text(raw_text)
+        # Step 3: 텍스트 후처리 (복용지시/날짜/블랙리스트 제거 -> 약품명 후보 추출)
+        cleaned_text = clean_ocr_text(raw_text)
+        candidates = extract_medicine_candidates(cleaned_text)
 
-        # 4. LLM structured parsing
-        client = OpenAI(api_key=config.OPENAI_API_KEY)
-        parsed_data = _parse_text_with_llm(raw_text, client)
+        if not candidates:
+            logger.warning("No medicine candidates found in OCR text")
+            redis_conn.setex(f"ocr_status:{draft_id}", 600, "no_candidates")
+            return False
 
-        # 5. Store result (10 min expiry)
-        response_obj = OcrExtractResponse(draft_id=draft_id, medicines=parsed_data.medicines)
+        # Step 4: medicine_info DB 매칭 (LLM 없이 DB 검색으로 약품 확정)
+        matched_medicines = _match_candidates_from_db(candidates)
 
+        # Step 5: 결과를 Redis에 저장 (10분 만료, 프론트에서 폴링)
+        response_obj = OcrExtractResponse(draft_id=draft_id, medicines=matched_medicines)
         redis_conn.setex(f"ocr_draft:{draft_id}", 600, response_obj.model_dump_json())
 
-        logger.info(f"Successfully processed OCR task for {draft_id}")
+        logger.info(
+            "OCR task complete for %s: %d candidates -> %d matched",
+            draft_id,
+            len(candidates),
+            len(matched_medicines),
+        )
         return True
 
-    except Exception as e:
-        logger.error(f"Task failed for {draft_id}: {e}")
-        # 실패 상태를 명시적으로 저장 (선택 사항)
+    except Exception:
+        logger.exception("OCR task failed for %s", draft_id)
         redis_conn.setex(f"ocr_status:{draft_id}", 600, "failed")
         return False
     finally:
-        # Clean up temporary images
+        # 임시 이미지 파일 정리
         Path(image_path).unlink(missing_ok=True)
         preprocessed = Path(image_path).parent / f"{Path(image_path).stem}_preprocessed{Path(image_path).suffix}"
         preprocessed.unlink(missing_ok=True)
-
-
-# ── 복약 가이드 생성 (RQ Task) ───────────────────────────────────────
-# 흐름: 약품 리스트 -> LLM 프롬프트 구성 -> GPT-4o 호출 -> Redis 저장
-
-
-def generate_guide_task(medicines_json: str, profile_id: str, job_id: str) -> bool:
-    """[RQ Task] Generate final medication guide asynchronously."""
-    logger.info(f"Starting Guide Generation task for Profile: {profile_id}")
-
-    redis_conn = redis.from_url(config.REDIS_URL, decode_responses=True)
-    medicines = json.loads(medicines_json)
-
-    medicines_text = "\n".join(
-        f"- {m['medicine_name']} "
-        f"(1회 {m.get('dose_per_intake') or '적정량'}, "
-        f"{m.get('intake_instruction') or '지시대로 복용'})"
-        for m in medicines
-    )
-
-    prompt = f"""당신은 친절하고 전문적인 약사 AI입니다.
-    아래 환자가 복용할 최종 확정된 약물 리스트를 바탕으로 복약 가이드를 작성해주세요.
-
-    [환자 복용 약물]
-    {medicines_text}
-
-    지침:
-    1. 각 약품의 일반적인 효능과 주요 주의사항(졸음, 위장장애 등)을 알기 쉽게 설명하세요.
-    2. 병용 금기나 주의해야 할 음식이 있다면 반드시 강조하세요.
-    3. 문장은 부드럽고 격려하는 톤으로 작성하세요.
-    4. 마지막에 반드시 다음 면책 문구를 포함하세요:
-       "⚠️ 이 안내는 참고용이며, 정확한 진단과 처방은 반드시 전문 의료인과 상의하십시오."
-    """
-
-    try:
-        client = OpenAI(api_key=config.OPENAI_API_KEY)
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-        )
-        guide = response.choices[0].message.content or "가이드를 생성할 수 없습니다."
-
-        # 가이드 결과를 Redis에 저장 (사용자가 폴링해서 가져감)
-        redis_conn.setex(f"ocr_guide:{job_id}", 600, guide)
-        logger.info(f"Successfully generated guide for {job_id}")
-        return True
-    except Exception as e:
-        logger.error(f"Guide Generation Task failed: {e}")
-        return False

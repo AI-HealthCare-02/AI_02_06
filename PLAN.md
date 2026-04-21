@@ -29,10 +29,10 @@ flowchart TD
         K["OpenCV 전처리"]
         L["CLOVA OCR"]
         M["OCR 후처리<br />(Regex + 정규화)"]
-        N["약품 DB 매칭"]
+        N["medicine_info DB 매칭<br />(LLM 미사용)"]
         O["의도 분류기<br />(Intent Classifier)"]
         P["RAG 검색 엔진"]
-        Q["LLM 응답 생성<br />(GPT-4o)"]
+        Q["LLM 응답 생성<br />(GPT-4o)<br />사전설문+약정보+RAG"]
     end
 
     subgraph DATA["💾 데이터 계층"]
@@ -204,7 +204,11 @@ async def sync_medicine_data(full_sync: bool = False):
 | `docs/db_schema.dbml` | medicine_info 확장 + data_sync_log 추가 | 수정 |
 | `envs/example.local.env` | DATA_GO_KR_API_KEY 항목 추가 | 수정 |
 
-### 1.7 OCR 전처리/후처리 파이프라인
+### 1.7 OCR 파이프라인 (LLM 미사용, DB 매칭 방식)
+
+> **핵심 원칙**: OCR 단계에서는 LLM을 사용하지 않는다.
+> 약품 식별은 medicine_info DB 매칭으로 수행하고,
+> LLM은 Phase 3 RAG 파이프라인에서만 사용한다.
 
 ```mermaid
 flowchart TD
@@ -223,8 +227,20 @@ flowchart TD
         J --> K["약품명 후보 리스트"]
     end
 
+    subgraph MATCHING["DB 매칭 (LLM 미사용)"]
+        K --> L["medicine_info 테이블<br/>부분 일치 검색 (ILIKE)"]
+        L --> M{매칭 결과}
+        M -->|성공| N["medications 테이블 저장<br/>(프로필 연결)"]
+        M -->|실패| O["사용자 수동 확인 요청"]
+    end
+
     F -->|CLOVA OCR| G
-    K -->|medicine_info DB 매칭| L["확정 약품명"]
+```
+
+**올바른 전체 흐름 (Phase별 LLM 사용 시점)**
+```
+Phase 2 (OCR): 사진 -> OpenCV -> CLOVA OCR -> 텍스트 후처리 -> DB 매칭 -> medications 저장
+Phase 3 (RAG): 사용자 질문 + 사전설문(health_survey) + 복용약(medications) -> LLM(GPT-4o)
 ```
 
 ### 1.8 TDD Steps
