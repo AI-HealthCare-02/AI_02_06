@@ -34,7 +34,7 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
         "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "updated_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "last_indexed_at" TIMESTAMPTZ,
-        "document_embedding" vector(1536)
+        "document_embedding" vector(768)
     );
 
     -- Create indexes for pharmaceutical_documents
@@ -61,7 +61,7 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
         "dosage_info" JSONB NOT NULL DEFAULT '{}',
         "target_conditions" JSONB NOT NULL DEFAULT '[]',
         "contraindicated_conditions" JSONB NOT NULL DEFAULT '[]',
-        "embedding" vector(1536) NOT NULL,
+        "embedding" vector(768) NOT NULL,
         "embedding_normalized" BOOLEAN NOT NULL DEFAULT FALSE,
         "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "updated_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -87,7 +87,7 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
     CREATE TABLE IF NOT EXISTS "search_queries" (
         "id" SERIAL NOT NULL PRIMARY KEY,
         "query_text" TEXT NOT NULL,
-        "query_embedding" vector(1536),
+        "query_embedding" vector(768),
         "search_type" VARCHAR(50) NOT NULL,
         "filters_applied" JSONB NOT NULL DEFAULT '{}',
         "results_count" INT NOT NULL,

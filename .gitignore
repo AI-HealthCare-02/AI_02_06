@@ -3,6 +3,11 @@
 Thumbs.db
 desktop.ini
 
+# Python 캐시
+__pycache__/
+*.py[cod]
+*$py.class
+
 # IDE 관련
 .idea/
 .vscode/
