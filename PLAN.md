@@ -1,431 +1,264 @@
-# Security Enhancement Plan
+# PLAN: OCR 이미지 전처리 + DB 후처리 개선
 
-## 1. RTR (Refresh Token Rotation) + Grace Period
+## 개요
 
-### 개념
-- **RTR**: Refresh Token 사용 시 새 토큰 발급 + 기존 토큰 무효화
-- **Grace Period**: 동시 요청 시 구 토큰도 잠시 유효하게 유지
+OCR 파이프라인의 정확도와 안정성을 높이기 위해 두 가지 독립적인 개선을 수행합니다.
 
-### Grace Period 적정값 분석
+- **Feature A (전처리)**: Clova OCR 호출 전 이미지 품질을 향상시켜 인식률을 높입니다.
+- **Feature B (후처리)**: DB 저장을 트랜잭션으로 묶고, UPSERT 패턴 및 pg_trgm 인덱스를 도입합니다.
 
-| 값 | 장점 | 단점 |
-|----|------|------|
-| 0.01초 (10ms) | 보안 극대화 | 네트워크 지연 시 실패 (RTT 50-200ms) |
-| 1-2초 | 대부분 동시 요청 커버 | 짧은 공격 윈도우 |
-| 5초 | 모바일/느린 네트워크 대응 | 탈취 시 악용 가능 |
-| 30초 | 안정성 최대 | 보안 약화 |
+---
 
-**권장: 2초**
-- 일반적인 네트워크 지연(RTT 200ms) + 서버 처리 시간 고려
-- 다중 탭/요청 동시 발생 대응
-- 공격자가 2초 내 재사용해야 하므로 실질적 위험 낮음
+## 현재 파이프라인 (As-Is)
 
-### DB 스키마 변경
+```mermaid
+flowchart TD
+    A[클라이언트 이미지 업로드] --> B[파일 저장]
+    B --> C[Clova OCR 호출 - 원본 이미지]
+    C --> D[LLM Structured Outputs]
+    D --> E[Redis setex - 10분 TTL]
+    E --> F[클라이언트 확인]
+    F --> G[Redis atomic delete]
+    G --> H{삭제 성공?}
+    H -- No --> I[409 Conflict]
+    H -- Yes --> J[Medication.create 루프 - 트랜잭션 없음]
+    J --> K[BackgroundTasks]
+```
+
+**문제점**
+
+| 구분 | 현상 | 위험도 |
+|---|---|---|
+| 전처리 없음 | 저화질 이미지에서 OCR 오인식 발생 | 중 |
+| 트랜잭션 없음 | 중간 실패 시 일부만 저장되는 partial write | 높음 |
+| UPSERT 없음 | 동일 처방전 재등록 시 중복 레코드 생성 | 높음 |
+| medicine_name 인덱스 없음 | 약품명 검색 시 full scan | 중 |
+| traceback 노출 | 500 에러 시 서버 내부 정보가 클라이언트에 노출 | 높음 |
+
+---
+
+## 목표 파이프라인 (To-Be)
+
+```mermaid
+flowchart TD
+    A[클라이언트 이미지 업로드] --> B[파일 저장]
+    B --> C[ImagePreprocessor.enhance]
+    C --> |성공| D[전처리 이미지]
+    C --> |실패 fallback| E[원본 이미지]
+    D --> F[Clova OCR 호출]
+    E --> F
+    F --> G[LLM Structured Outputs]
+    G --> H[Redis setex - 10분 TTL]
+    H --> I[클라이언트 확인]
+    I --> J[Redis atomic delete]
+    J --> K{삭제 성공?}
+    K -- No --> L[409 Conflict]
+    K -- Yes --> M[in_transaction 시작]
+    M --> N[UPSERT 루프]
+    N --> O[커밋]
+    O --> P[BackgroundTasks]
+    O --> |실패| Q[롤백 + 500]
+```
+
+---
+
+## Feature A: 이미지 전처리 (ImagePreprocessor)
+
+### 신규 파일: `app/services/image_preprocessor.py`
+
+**전처리 파이프라인 (순서 고정)**
+
+```mermaid
+flowchart LR
+    RAW[원본 이미지] --> GRAY[Grayscale 변환]
+    GRAY --> BLUR[GaussianBlur 노이즈 제거]
+    BLUR --> CLAHE[CLAHE 대비 향상]
+    CLAHE --> THRESH[Adaptive Threshold 이진화]
+    THRESH --> DESKEW[Deskew 기울기 보정]
+    DESKEW --> OUT[전처리 완료 이미지]
+```
+
+**설계 원칙**
+- `ImagePreprocessor` 클래스: SRP, 각 단계가 독립 메서드
+- 전처리 실패 시 원본 이미지로 fallback (OCR 자체를 막지 않음)
+- 임시 파일 생성 후 Clova OCR 전달, 완료 후 삭제
+- 의존성: `opencv-python-headless`, `pillow` (이미 requirements에 포함 여부 확인 필요)
+
+**인터페이스**
+
+```python
+class ImagePreprocessor:
+    async def enhance(self, image_path: str) -> str:
+        """전처리된 임시 이미지 경로 반환. 실패 시 원본 경로 반환."""
+        ...
+    
+    def _to_grayscale(self, img: np.ndarray) -> np.ndarray: ...
+    def _denoise(self, img: np.ndarray) -> np.ndarray: ...
+    def _enhance_contrast(self, img: np.ndarray) -> np.ndarray: ...
+    def _binarize(self, img: np.ndarray) -> np.ndarray: ...
+    def _deskew(self, img: np.ndarray) -> np.ndarray: ...
+```
+
+**ocr_service.py 변경 범위 (Feature A)**
+- `extract_and_parse_image()`: Clova OCR 호출 직전에 `ImagePreprocessor.enhance()` 삽입
+- 변경 라인 수: ~5줄
+
+---
+
+## Feature B: DB 후처리 개선
+
+### B-1. 트랜잭션 적용 (`ocr_service.py`)
+
+```python
+# Before (line 176-196)
+for med_data in confirmed_medicines:
+    await Medication.create(...)
+
+# After
+async with in_transaction():
+    for med_data in confirmed_medicines:
+        await Medication.get_or_create(
+            profile_id=profile_id,
+            medicine_name=med_data.medicine_name,
+            dispensed_date=med_data.dispensed_date,
+            defaults={...}
+        )
+```
+
+**UPSERT 키**: `(profile_id, medicine_name, dispensed_date)`
+- 동일 처방전 재등록 시 기존 레코드 업데이트 (중복 방지)
+- `dispensed_date`가 null인 경우 처리 필요 (null은 unique key에서 제외)
+
+### B-2. pg_trgm 마이그레이션
+
+**신규 마이그레이션 파일**: `migrations/models/XXX_add_medicine_name_trgm_index.py`
+
 ```sql
--- refresh_tokens 테이블에 추가
-rotated_at TIMESTAMP NULL,  -- 교체된 시점 (grace period 계산용)
-replaced_by BIGINT NULL,    -- 새 토큰 ID (추적용)
+-- Up
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX CONCURRENTLY idx_medication_medicine_name_trgm
+    ON medication USING gin (medicine_name gin_trgm_ops);
+
+-- Down
+DROP INDEX IF EXISTS idx_medication_medicine_name_trgm;
 ```
 
-### 토큰 검증 로직
-```
-1. token_hash로 조회
-2. is_revoked = True?
-   - rotated_at이 있고, 현재시간 - rotated_at < 2초 → 유효 (grace)
-   - 그 외 → 무효
-3. is_revoked = False?
-   - expires_at 확인 → 유효/만료
-```
-
----
-
-## 2. Request Deduplication (FE)
-
-### 문제점
-| 문제 | 설명 |
-|------|------|
-| 죽음의 무한루프 | 401 → refresh → 401 → refresh... |
-| 약속의 실종 | refresh 중 다른 요청이 새 토큰 못 받음 |
-| 잘못된 합치기 | 여러 refresh 요청이 각각 토큰 발급 |
-| 레이스 컨디션 | 동시 요청이 서로 다른 토큰 사용 |
-
-### 해결: Token Refresh Queue
-
-```javascript
-// tokenManager.js
-let isRefreshing = false;
-let refreshSubscribers = [];
-
-function subscribeTokenRefresh(callback) {
-  refreshSubscribers.push(callback);
-}
-
-function onRefreshed(newToken) {
-  refreshSubscribers.forEach(cb => cb(newToken));
-  refreshSubscribers = [];
-}
-
-async function refreshToken() {
-  if (isRefreshing) {
-    // 이미 갱신 중이면 대기
-    return new Promise(resolve => subscribeTokenRefresh(resolve));
-  }
-
-  isRefreshing = true;
-  try {
-    const { data } = await api.post('/api/v1/auth/refresh');
-    localStorage.setItem('access_token', data.access_token);
-    onRefreshed(data.access_token);
-    return data.access_token;
-  } finally {
-    isRefreshing = false;
-  }
-}
-```
-
-### Axios Interceptor 흐름
-```
-요청 실패 (401)
-  ↓
-isRefreshing 체크
-  ├─ false → refreshToken() 호출, isRefreshing = true
-  │           ↓
-  │         성공 → 대기 중인 요청들에 새 토큰 전달
-  │         실패 → 로그아웃 처리
-  │
-  └─ true → Promise 반환, refreshSubscribers에 등록
-            (토큰 갱신 완료 시 자동 재시도)
-```
-
----
-
-## 3. 입력값 검증 (BE Middleware)
-
-### 검증 대상
-| 패턴 | 공격 유형 | 처리 |
-|------|----------|------|
-| `<script>`, `javascript:`, `on\w+=` | XSS | 차단 |
-| `' OR`, `" OR`, `; DROP`, `UNION SELECT` | SQL Injection | 차단 |
-| `{{`, `${`, `#{` | Template Injection | 차단 |
-| `../`, `..\\` | Path Traversal | 차단 |
-
-### 미들웨어 구조
-```python
-# app/middlewares/security.py
-
-DANGEROUS_PATTERNS = [
-    r'<script',
-    r'javascript:',
-    r'on\w+\s*=',
-    r"('\s*OR|\"\s*OR)",
-    r'(UNION\s+SELECT|DROP\s+TABLE)',
-    r'\{\{|\$\{|#\{',
-    r'\.\.[/\\]',
-]
-
-async def validate_input_middleware(request, call_next):
-    # Body, Query, Path 파라미터 검사
-    # 위험 패턴 발견 시 400 Bad Request
-```
-
-### 주의사항
-- 정규표현식은 case-insensitive로
-- JSON body의 모든 string 필드 재귀 검사
-- 로깅하되 민감 정보는 마스킹
-
----
-
-## 4. CSP (Content Security Policy)
-
-### 헤더 설정
-```python
-# app/middlewares/security.py
-
-CSP_POLICY = {
-    "default-src": "'self'",
-    "script-src": "'self'",  # unsafe-inline 불허
-    "style-src": "'self' 'unsafe-inline'",  # Tailwind 등 인라인 스타일 허용 (필요시)
-    "img-src": "'self' https://k.kakaocdn.net data:",  # 카카오 프로필 이미지
-    "connect-src": "'self' https://kauth.kakao.com https://kapi.kakao.com",
-    "frame-ancestors": "'none'",
-    "form-action": "'self'",
-}
-
-async def add_security_headers(request, call_next):
-    response = await call_next(request)
-    response.headers["Content-Security-Policy"] = build_csp(CSP_POLICY)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    return response
-```
-
-### Next.js (FE)
-```javascript
-// next.config.mjs
-const securityHeaders = [
-  { key: 'Content-Security-Policy', value: "..." }
-];
-```
-
----
-
-## 5. 즉시 차단 / 즉시 알림 / 간편 복구
-
-### 즉시 차단
-- **BE**: 토큰 탈취 감지 시 `revoke_all_for_account()` 호출
-- **탈취 감지 조건**:
-  - Grace period 이후 구 토큰 재사용 시도
-  - 동일 토큰이 다른 IP/User-Agent에서 사용
-
-### 즉시 알림
-- **FE**: 403 응답 시 Toast + 모달로 안내
-  - "다른 기기에서 로그인되어 현재 세션이 종료되었습니다"
-- **BE**: (선택) 이메일/푸시 알림
-
-### 간편 복구
-- **FE**: 로그아웃 처리 후 로그인 페이지로 리다이렉트
-- 재로그인만으로 새 세션 시작 (별도 복구 절차 없음)
-
-```javascript
-// errors.js 확장
-if (parsed.code === 'token_compromised') {
-  showError('보안을 위해 로그아웃되었습니다. 다시 로그인해주세요.');
-  localStorage.removeItem('access_token');
-  window.location.href = '/login';
-}
-```
-
----
-
-## 6. 구현 순서 (커밋 단위)
-
-### Phase 1: Backend 기반
-1. **refresh_tokens 모델 확장** (rotated_at, replaced_by)
-2. **RTR 엔드포인트 추가** (POST /auth/refresh)
-3. **Grace Period 로직** (repository 수정)
-
-### Phase 2: Security Middleware
-4. **입력값 검증 미들웨어**
-5. **CSP 헤더 미들웨어**
-6. **탈취 감지 로직** (이상 사용 감지)
-
-### Phase 3: Frontend
-7. **tokenManager.js** (Request Deduplication)
-8. **api.js 인터셉터 개선** (401 처리 큐)
-9. **에러 처리 확장** (token_compromised)
-
-### Phase 4: Integration
-10. **E2E 테스트** (시나리오별 검증)
-
----
-
-## 7. 예상 파일 변경
-
-| 파일 | 변경 내용 |
-|------|----------|
-| `app/models/refresh_tokens.py` | rotated_at, replaced_by 필드 추가 |
-| `app/repositories/refresh_token_repository.py` | rotate(), validate_with_grace() |
-| `app/services/oauth.py` | refresh_access_token() 메서드 |
-| `app/apis/v1/oauth_routers.py` | POST /auth/refresh 엔드포인트 |
-| `app/middlewares/__init__.py` | 신규 |
-| `app/middlewares/security.py` | 입력값 검증 + CSP |
-| `app/main.py` | 미들웨어 등록 |
-| `medication-frontend/src/lib/tokenManager.js` | 신규 |
-| `medication-frontend/src/lib/api.js` | 인터셉터 개선 |
-| `medication-frontend/src/lib/errors.js` | 에러 코드 추가 |
-
----
-
-## 8. 결정 완료
-
-| 항목 | 결정 |
-|------|------|
-| Grace Period | **2초** |
-| CSP style-src | **nonce 기반** (unsafe-inline 불허) |
-| 탈취 감지 시 | **해당 토큰만 종료** |
-| 입력값 검증 실패 | **400 Bad Request** |
-| 입력값 검증 방식 | **Middleware(1차) + Pydantic+Bleach(2차)** |
-
----
-
-# Survey Popup 자동 표시 기능
-
-## 목표
-- **Dev 사용자**: main 페이지 진입 시 항상 설문 팝업 표시
-- **Kakao 로그인 사용자**: 신규 가입자(최초 생성)만 설문 팝업 표시
-
----
-
-## 현재 상태 분석
-
-### 1. 기존 흐름
-```
-[로그인] --> {is_new_user?}
-           |
-           |--(Yes)--> /survey 페이지로 리다이렉트
-           |
-           |--(No)--> /main 페이지로 이동
-                        |
-                        --> SurveyModal 있지만 수동 트리거만 가능
-```
-
-### 2. 관련 파일
-| 파일 | 현재 역할 |
-|------|----------|
-| `auth/kakao/callback/page.jsx` | `is_new_user` 확인 후 `/survey` 리다이렉트 |
-| `main/page.jsx` | SurveyModal 컴포넌트 존재, 수동 트리거만 |
-| `login/page.jsx` | Dev 로그인 시 `code=dev_test_login` 사용 |
-
-### 3. 문제점
-- 신규 유저가 `/survey`로 리다이렉트되면 main 페이지 경험 없음
-- Dev 사용자 구분 로직 없음
-- main 페이지에서 자동 팝업 트리거 없음
-
----
-
-## 수정 계획
-
-### Phase 1: 백엔드 수정 (is_dev_user 플래그 추가)
-
-**파일**: `app/apis/v1/oauth_routers.py`
-
-- Dev 로그인 응답에 `is_dev_user: true` 플래그 추가
-- 기존 `is_new_user` 플래그 유지
+### B-3. traceback 노출 제거 (`ocr_routers.py`)
 
 ```python
-# 예시: callback 응답
-{
-    "access_token": "...",
-    "is_new_user": true,
-    "is_dev_user": true  # Dev 로그인인 경우만
-}
-```
+# Before (현재 코드)
+except Exception as e:
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(e), "traceback": traceback.format_exc()}
+    )
 
-### Phase 2: 프론트엔드 콜백 수정
-
-**파일**: `medication-frontend/src/app/auth/kakao/callback/page.jsx`
-
-- 기존: `is_new_user`면 `/survey`로 리다이렉트
-- 변경: `/main`으로 이동하면서 쿼리 파라미터로 상태 전달
-
-```javascript
-// Before
-if (is_new_user) {
-  router.replace('/survey')
-} else {
-  router.replace('/main')
-}
-
-// After
-if (is_new_user || is_dev_user) {
-  router.replace('/main?showSurvey=true')
-} else {
-  router.replace('/main')
-}
-```
-
-### Phase 3: main 페이지 수정
-
-**파일**: `medication-frontend/src/app/main/page.jsx`
-
-- URL 쿼리 파라미터 `showSurvey=true` 감지
-- 감지 시 자동으로 SurveyModal 표시
-- 표시 후 URL에서 파라미터 제거 (clean URL)
-
-```javascript
-'use client'
-import { useSearchParams, useRouter } from 'next/navigation'
-
-// 컴포넌트 내부
-const searchParams = useSearchParams()
-const router = useRouter()
-
-useEffect(() => {
-  if (searchParams.get('showSurvey') === 'true') {
-    setShowSurvey(true)
-    // Clean URL
-    router.replace('/main', { scroll: false })
-  }
-}, [searchParams])
+# After
+except Exception:
+    logger.exception("OCR confirm 처리 중 예기치 않은 오류")
+    raise HTTPException(status_code=500, detail="처리 중 오류가 발생했습니다.")
 ```
 
 ---
 
-## 데이터 플로우 (수정 후)
+## 개발 순서 (3-Step Cycle)
 
-```
-[로그인 시도] --> {로그인 타입?}
-                    |
-                    |--(Dev 로그인)--> Backend: is_dev_user=true 반환
-                    |                      |
-                    |                      v
-                    |--(Kakao 로그인)--> {신규 유저?}
-                                           |
-                                           |--(Yes)--> Backend: is_new_user=true 반환
-                                           |                 |
-                                           |                 v
-                                           |            Callback: /main?showSurvey=true로 이동
-                                           |                 |
-                                           |                 v
-                                           |            Main: showSurvey 파라미터 감지
-                                           |                 |
-                                           |                 v
-                                           |            SurveyModal 자동 표시
-                                           |                 |
-                                           |                 v
-                                           |            URL 파라미터 제거
-                                           |
-                                           |--(No)--> Backend: is_new_user=false 반환
-                                                          |
-                                                          v
-                                                     Callback: /main으로 이동
-                                                          |
-                                                          v
-                                                     Main: 일반 화면 표시
-```
+### Feature A 개발 순서
+
+| 단계 | 작업 |
+|---|---|
+| Tidy | `ocr_service.py` import 정리, 함수 길이 점검 |
+| Test (Red) | `test_image_preprocessor.py`: enhance 성공 케이스 + fallback 케이스 |
+| Implement (Green) | `image_preprocessor.py` 구현 + `ocr_service.py` 연동 |
+
+### Feature B 개발 순서
+
+| 단계 | 작업 |
+|---|---|
+| Tidy | `confirm_and_save()` 함수 분리 (현재 한 함수에 너무 많은 책임) |
+| Test (Red) | `test_ocr_service.py`: 트랜잭션 롤백 케이스, UPSERT 중복 케이스 |
+| Implement (Green) | `in_transaction()` 적용, UPSERT 패턴 적용, 마이그레이션 추가 |
 
 ---
 
 ## 체크리스트
 
-### Phase 1: Backend
-- [x] `oauth_routers.py`에서 dev 로그인 또는 신규 유저일 때 `?showSurvey=true` 쿼리 파라미터 추가
-- [ ] 기존 테스트 통과 확인
+### Feature A
+- [ ] `opencv-python-headless`, `pillow` requirements 확인
+- [ ] `ImagePreprocessor` 클래스 구현
+- [ ] `enhance()` fallback 동작 테스트
+- [ ] `ocr_service.py` 연동 (5줄 내외)
 
-### Phase 2: Frontend Callback
-- [x] 백엔드에서 직접 리다이렉트하므로 프론트엔드 콜백 수정 불필요
-
-### Phase 3: Frontend Main
-- [x] `main/page.jsx`에 useSearchParams 훅 추가
-- [x] showSurvey 파라미터 감지 로직 추가
-- [x] URL 클린업 로직 추가
-- [x] Suspense boundary 추가 (useSearchParams 필수 요구사항)
-
-### Phase 4: 테스트
-- [ ] Dev 로그인 -> 설문 팝업 표시 확인
-- [ ] 신규 Kakao 유저 -> 설문 팝업 표시 확인
-- [ ] 기존 Kakao 유저 -> 설문 팝업 미표시 확인
+### Feature B
+- [ ] `confirm_and_save()` Tidy (단일 책임 분리)
+- [ ] `in_transaction()` 적용
+- [ ] UPSERT 키 설계 (`dispensed_date` null 처리)
+- [ ] pg_trgm 마이그레이션 작성
+- [ ] traceback 노출 제거 + `logger.exception()` 적용
+- [ ] `medication.py` 모델에 인덱스 추가
 
 ---
 
-## 대안 검토
+## 영향 범위
 
-### 대안 A: localStorage 사용 (선택하지 않음)
-- 장점: URL이 깔끔함
-- 단점: 브라우저 간 동기화 불가, 개발자 도구로 조작 가능
-
-### 대안 B: 쿼리 파라미터 사용 (선택)
-- 장점: 상태 명확, SSR 호환, 디버깅 용이
-- 단점: URL에 잠시 파라미터 노출 (바로 제거됨)
+| 파일 | 변경 유형 |
+|---|---|
+| `app/services/image_preprocessor.py` | 신규 생성 |
+| `app/services/ocr_service.py` | 수정 (전처리 연동 + 트랜잭션 + UPSERT) |
+| `app/apis/v1/ocr_routers.py` | 수정 (traceback 제거) |
+| `app/models/medication.py` | 수정 (인덱스 추가) |
+| `migrations/models/XXX_add_trgm.py` | 신규 생성 |
+| `tests/test_image_preprocessor.py` | 신규 생성 |
+| `tests/test_ocr_service.py` | 수정 (트랜잭션/UPSERT 테스트 추가) |
 
 ---
 
-## 예상 변경 파일
+*`go` 명령어를 입력하시면 Feature A Tidy 단계부터 시작합니다.*
 
-| 파일 | 변경 내용 |
-|------|----------|
-| `app/apis/v1/oauth_routers.py` | is_dev_user 플래그 추가 |
-| `medication-frontend/src/app/auth/kakao/callback/page.jsx` | 리다이렉트 로직 수정 |
-| `medication-frontend/src/app/main/page.jsx` | useSearchParams로 자동 팝업 |
+---
 
+## 핵심 프로세스 플로우차트
+
+### OCR 전체 흐름
+
+```mermaid
+flowchart TD
+    A[처방전 사진 찍기] --> B{사진이 정상인가?}
+    B -- 이상한 파일 --> C[다시 업로드 해주세요]
+    B -- 정상 --> D[사진 보관함에 저장]
+    D --> E[사진 화질 개선]
+    E --> F[사진에서 글자 읽기]
+    F --> G{글자 읽기 성공?}
+    G -- 실패 --> H[지금 서비스가 바빠요.<br/>잠시 후 다시 시도해주세요]
+    G -- 성공 --> I[약 이름 찾기]
+    I --> J{약 이름 찾았나?}
+    J -- 실패 --> K[사진이 흐려요.<br/>더 선명하게 찍어주세요]
+    J -- 성공 --> L[사용자 확인 화면]
+    L --> M[AI가 복약 안내 만들기]
+    M --> N{AI 응답 성공?}
+    N -- 실패 --> O{재시도 3회}
+    O -- 최종 실패 --> P[AI가 지금 바빠요.<br/>잠시 후 다시 시도해주세요]
+    O -- 성공 --> Q[저장 완료]
+    N -- 성공 --> Q
+```
+
+---
+
+### 챗봇 대화 흐름
+
+```mermaid
+flowchart TD
+    A[사용자 메시지] --> B{어떤 종류의 질문인가?}
+    B -- 욕설 또는 의미없는 말 --> C[정중한 안내 메시지 반환]
+    B -- 날씨 등 약과 무관한 질문 --> D[약 관련 질문만 답할 수 있어요]
+    B -- 약 관련 질문 --> E[질문의 의미를 숫자로 바꾸기]
+    E --> F[약품 정보 창고에서 비슷한 정보 찾기]
+    F --> G{관련 정보 찾았나?}
+    G -- 없음 --> H[해당 약품 정보가 없어요]
+    G -- 있음 --> I[찾은 정보 + 대화 내용을 AI에게 전달]
+    I --> J{AI 응답 성공?}
+    J -- 실패 --> K{재시도 3회}
+    K -- 최종 실패 --> L[AI가 지금 바빠요.<br/>잠시 후 다시 시도해주세요]
+    K -- 성공 --> M[답변 저장 및 반환]
+    J -- 성공 --> M
+```
