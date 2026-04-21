@@ -79,15 +79,18 @@ def _call_clova_ocr(image_path: str) -> str:
         raise
 
 
-# ── medicine_info DB 매칭 (후보 약품명을 DB에서 검색하여 확정) ─────────
-# LLM 없이 부분 일치(ILIKE) 검색으로 약품 식별
+# ── medicine_info DB 매칭 (유사도 검색 -> 정확 매칭 2단계) ────────────
+# Step 3.5: pg_trgm 유사도 검색 (OCR 오타 보정, 예: "다이레놀" -> "타이레놀")
+# Step 4:   매칭 결과 확정 -> ExtractedMedicine 리스트 반환
+# LLM은 사용하지 않음. 문자 수준 유사도로 약품 식별
 
 
 def _match_candidates_from_db(candidates: list[str]) -> list[ExtractedMedicine]:
     """Match medicine name candidates against medicine_info DB.
 
-    Searches each candidate token in medicine_info table
-    using partial name matching (case-insensitive).
+    Uses a 2-step matching strategy:
+    1. Exact/partial match (ILIKE) - fast, handles clean OCR text
+    2. Trigram fuzzy search (pg_trgm) - handles OCR typos
 
     Args:
         candidates: List of medicine name candidate strings
@@ -105,9 +108,37 @@ def _match_candidates_from_db(candidates: list[str]) -> list[ExtractedMedicine]:
     seen_names: set[str] = set()
 
     async def _search() -> None:
+        # pg_trgm 확장 활성화 (최초 1회만 실제 실행됨)
+        await repo.ensure_pg_trgm()
+
         for candidate in candidates:
+            # Step 1: 정확/부분 일치 시도 (빠름)
             results = await repo.search_by_name(candidate, limit=1)
+
+            # Step 2: 매칭 실패 시 유사도 검색 (OCR 오타 보정)
             if not results:
+                fuzzy_results = await repo.fuzzy_search_by_name(
+                    candidate,
+                    threshold=0.3,
+                    limit=1,
+                )
+                if fuzzy_results:
+                    best = fuzzy_results[0]
+                    logger.info(
+                        "Fuzzy matched: '%s' -> '%s' (score: %.2f)",
+                        candidate,
+                        best["medicine_name"],
+                        best["score"],
+                    )
+                    medicine = await repo.get_by_id(best["id"])
+                    if medicine and medicine.medicine_name not in seen_names:
+                        seen_names.add(medicine.medicine_name)
+                        matched.append(
+                            ExtractedMedicine(
+                                medicine_name=medicine.medicine_name,
+                                category=medicine.category,
+                            )
+                        )
                 continue
 
             medicine = results[0]
@@ -134,9 +165,10 @@ def _match_candidates_from_db(candidates: list[str]) -> list[ExtractedMedicine]:
 
 
 # ── OCR 전체 파이프라인 (RQ Task) ────────────────────────────────────
-# 흐름: OpenCV 전처리 -> CLOVA OCR -> 텍스트 후처리 -> DB 매칭
+# 흐름: OpenCV 전처리 -> CLOVA OCR -> 텍스트 후처리
+#       -> pg_trgm 유사도 검색 (오타 보정) -> DB 매칭 확정
 #       -> Redis에 결과 저장 (10분 만료)
-# 참고: LLM은 사용하지 않음. 약품 식별은 medicine_info DB 매칭으로 수행
+# 참고: LLM은 사용하지 않음. Phase 3 RAG에서만 LLM 사용
 
 
 def process_ocr_task(image_path: str, draft_id: str) -> bool:

@@ -1,12 +1,14 @@
 """Medicine info repository module.
 
 This module provides data access layer for the medicine_info table,
-handling drug information queries and bulk upsert operations
-for public API data synchronization.
+handling drug information queries, trigram fuzzy search (pg_trgm),
+and bulk upsert operations for public API data synchronization.
 """
 
 from datetime import UTC, datetime
 import logging
+
+from tortoise import Tortoise
 
 from app.models.data_sync_log import DataSyncLog
 from app.models.medicine_info import MedicineInfo
@@ -76,6 +78,59 @@ class MedicineInfoRepository:
             .limit(limit)
             .all()
         )
+
+    # ── 유사도 검색 (pg_trgm 기반, OCR 오타 보정용) ────────────────
+    # "다이레놀정" -> "타이레놀정" 처럼 글자가 비슷한 약품명을 찾아줌
+    # pgvector(의미 유사도)와 별개로, 문자 수준 오타 교정 전용
+
+    async def fuzzy_search_by_name(
+        self,
+        query: str,
+        threshold: float = 0.3,
+        limit: int = 3,
+    ) -> list[dict]:
+        """Search medicine by name using trigram similarity (pg_trgm).
+
+        Handles OCR typos by comparing character-level similarity.
+        For example, '다이레놀정' matches '타이레놀정' with high score.
+
+        Args:
+            query: OCR-extracted medicine name candidate (may contain typos).
+            threshold: Minimum similarity score (0.0~1.0, default 0.3).
+            limit: Maximum number of results to return.
+
+        Returns:
+            List of dicts with 'id', 'medicine_name', 'category', 'score'.
+        """
+        conn = Tortoise.get_connection("default")
+        _, rows = await conn.execute_query(
+            "SELECT id, medicine_name, category, "
+            "similarity(medicine_name, $1) AS score "
+            "FROM medicine_info "
+            "WHERE similarity(medicine_name, $1) > $2 "
+            "ORDER BY score DESC "
+            "LIMIT $3",
+            [query, threshold, limit],
+        )
+        return [
+            {
+                "id": row["id"],
+                "medicine_name": row["medicine_name"],
+                "category": row["category"],
+                "score": float(row["score"]),
+            }
+            for row in rows
+        ]
+
+    async def ensure_pg_trgm(self) -> None:
+        """Ensure pg_trgm extension is available in the database.
+
+        Creates the extension if it does not already exist.
+        Required for fuzzy_search_by_name to work.
+        """
+        conn = Tortoise.get_connection("default")
+        await conn.execute_query("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+        logger.info("pg_trgm extension verified")
 
     # ── UPSERT (item_seq 기준으로 신규 삽입 또는 기존 갱신) ─────────
 

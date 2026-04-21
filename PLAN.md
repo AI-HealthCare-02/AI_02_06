@@ -239,9 +239,17 @@ flowchart TD
 
 **올바른 전체 흐름 (Phase별 LLM 사용 시점)**
 ```
-Phase 2 (OCR): 사진 -> OpenCV -> CLOVA OCR -> 텍스트 후처리 -> DB 매칭 -> medications 저장
-Phase 3 (RAG): 사용자 질문 + 사전설문(health_survey) + 복용약(medications) -> LLM(GPT-4o)
+Phase 2 (OCR): 사진 -> OpenCV -> CLOVA OCR -> 텍스트 후처리
+               -> pg_trgm 유사도 검색 (오타 보정) -> DB 매칭 확정 -> medications 저장
+Phase 3 (RAG): 사용자 질문 + 사전설문(health_survey) + 복용약(medications)
+               -> pgvector 의미 검색 + RAG 컨텍스트 조합 -> LLM(GPT-4o)
 ```
+
+**유사도 검색 도구 구분**
+| 도구 | 용도 | Phase | 예시 |
+|------|------|-------|------|
+| pg_trgm (문자 유사도) | OCR 오타 보정 | Phase 2 | "다이레놀" -> "타이레놀" (score: 0.65) |
+| pgvector (의미 유사도) | RAG 질의응답 | Phase 3 | "두통약 추천" -> 관련 약품 목록 |
 
 ### 1.8 TDD Steps
 
