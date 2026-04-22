@@ -6,20 +6,42 @@ import api, { showError } from '@/lib/api'
 /**
  * 공통 챗봇 모달 컴포넌트
  *
+ * 내부 상태는 다중 세션 구조로 정규화되어 있다.
+ * - sessions: 프로필에 속한 모든 세션 목록 (updated_at DESC)
+ * - activeSessionId: 현재 활성화된 세션 ID
+ * - messages: 활성 세션의 메시지 리스트
+ *
+ * 사이드바 UI는 별도 커밋에서 붙이며, 현재 동작은 기존과 동일하다
+ * (가장 최근 세션 1개만 활성화, 없으면 자동 생성).
+ *
  * @param {Object} props
  * @param {Function} props.onClose - 모달 닫기 콜백
  * @param {string} props.profileId - 프로필 ID (필수)
  */
 export default function ChatModal({ onClose, profileId }) {
+  const [sessions, setSessions] = useState([])
+  const [activeSessionId, setActiveSessionId] = useState(null)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [sessionId, setSessionId] = useState(null)
   const [isInitializing, setIsInitializing] = useState(true)
   const [initError, setInitError] = useState(false)
   const scrollRef = useRef(null)
 
-  // 세션 초기화 함수 (재시도 가능하도록 useCallback 사용)
+  // 특정 세션의 메시지를 불러온다 (신규 세션이면 환영 메시지)
+  const loadMessagesForSession = useCallback(async (sessionId) => {
+    const res = await api.get(`/api/v1/messages/session/${sessionId}`)
+    if (res.data?.length > 0) {
+      setMessages(res.data.map(m => ({
+        role: m.sender_type === 'USER' ? 'user' : 'assistant',
+        content: m.content,
+      })))
+    } else {
+      setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
+    }
+  }, [])
+
+  // 세션 초기화: 리스트 조회 → 없으면 신규 생성 → 가장 최근 세션 활성화
   const initSession = useCallback(async () => {
     if (!profileId) {
       setMessages([{ role: 'assistant', content: '프로필 정보를 불러올 수 없습니다.' }])
@@ -31,38 +53,25 @@ export default function ChatModal({ onClose, profileId }) {
     setInitError(false)
 
     try {
-      // 1. 기존 세션 조회
       const sessionsRes = await api.get('/api/v1/chat-sessions', {
-        params: { profile_id: profileId }
+        params: { profile_id: profileId },
       })
 
-      let currentSessionId = null
+      let sessionList = sessionsRes.data || []
 
-      if (sessionsRes.data?.length > 0) {
-        // 가장 최근 세션 사용
-        currentSessionId = sessionsRes.data[0].id
-        setSessionId(currentSessionId)
-
-        // 2. 기존 메시지 불러오기
-        const messagesRes = await api.get(`/api/v1/messages/session/${currentSessionId}`)
-        if (messagesRes.data?.length > 0) {
-          const loadedMessages = messagesRes.data.map(m => ({
-            role: m.sender_type === 'USER' ? 'user' : 'assistant',
-            content: m.content
-          }))
-          setMessages(loadedMessages)
-        } else {
-          setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
-        }
-      } else {
-        // 3. 세션이 없으면 새로 생성
+      if (sessionList.length === 0) {
+        // 세션이 없으면 신규 생성
         const newSessionRes = await api.post('/api/v1/chat-sessions', {
           profile_id: profileId,
-          title: '복약 상담'
+          title: '복약 상담',
         })
-        setSessionId(newSessionRes.data.id)
-        setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
+        sessionList = [newSessionRes.data]
       }
+
+      const currentSessionId = sessionList[0].id
+      setSessions(sessionList)
+      setActiveSessionId(currentSessionId)
+      await loadMessagesForSession(currentSessionId)
     } catch (err) {
       console.error('세션 초기화 실패:', err)
       showError('채팅 세션을 시작할 수 없습니다.')
@@ -71,9 +80,9 @@ export default function ChatModal({ onClose, profileId }) {
     } finally {
       setIsInitializing(false)
     }
-  }, [profileId])
+  }, [profileId, loadMessagesForSession])
 
-  // 모달 열릴 때: 기존 세션 조회 또는 새 세션 생성
+  // 모달 열릴 때: 세션 초기화
   useEffect(() => {
     initSession()
   }, [initSession])
@@ -87,7 +96,7 @@ export default function ChatModal({ onClose, profileId }) {
 
   const handleSend = async () => {
     const message = input.trim()
-    if (!message || isLoading || !sessionId) return
+    if (!message || isLoading || !activeSessionId) return
 
     setInput('')
     setMessages(prev => [...prev, { role: 'user', content: message }])
@@ -95,8 +104,8 @@ export default function ChatModal({ onClose, profileId }) {
 
     try {
       const res = await api.post('/api/v1/messages/ask', {
-        session_id: sessionId,
-        content: message
+        session_id: activeSessionId,
+        content: message,
       })
       const assistantContent = res.data.assistant_message?.content || '응답을 받지 못했습니다.'
       setMessages(prev => [...prev, { role: 'assistant', content: assistantContent }])
@@ -167,13 +176,13 @@ export default function ChatModal({ onClose, profileId }) {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyUp={(e) => { if (e.key === 'Enter') handleSend() }}
-                disabled={isInitializing || !sessionId}
-                placeholder={isInitializing ? '연결 중...' : (!sessionId ? '연결 실패' : '메시지를 입력하세요')}
+                disabled={isInitializing || !activeSessionId}
+                placeholder={isInitializing ? '연결 중...' : (!activeSessionId ? '연결 실패' : '메시지를 입력하세요')}
                 className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-gray-400 transition-all disabled:opacity-50"
               />
               <button
                 onClick={handleSend}
-                disabled={isLoading || !input.trim() || isInitializing || !sessionId}
+                disabled={isLoading || !input.trim() || isInitializing || !activeSessionId}
                 className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-900 text-white hover:bg-gray-700 disabled:bg-gray-100 disabled:text-gray-300 active:scale-95 transition-all cursor-pointer"
               >
                 <Send size={16} />
