@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.dtos.rag import RAGResponse
+from app.dtos.rag import ChatCompletion, RAGResponse
 from app.services.rag.intent.intents import IntentType
 from app.services.rag.pipeline import RAGPipeline
 
@@ -30,7 +30,9 @@ def _make_pipeline(
     mock_tool_router.execute = AsyncMock(return_value=llm_answer)
 
     mock_generator = MagicMock()
-    mock_generator.generate_chat_response = AsyncMock(return_value=llm_answer)
+    mock_generator.generate_chat_response = AsyncMock(
+        return_value=ChatCompletion(answer=llm_answer, token_usage=None),
+    )
 
     return RAGPipeline(
         embedding_provider=mock_provider,

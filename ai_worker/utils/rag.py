@@ -12,6 +12,7 @@ import logging
 from openai import AsyncOpenAI
 
 from app.core.config import config
+from app.dtos.rag import ChatCompletion, TokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class RAGGenerator:
         self,
         messages: list[dict[str, str]],
         system_prompt: str | None = None,
-    ) -> str:
+    ) -> ChatCompletion:
         """Generate a chat response from prior messages and a prepared system prompt.
 
         Args:
@@ -40,11 +41,15 @@ class RAGGenerator:
                 fallback prompt with no retrieval context is used.
 
         Returns:
-            Generated assistant reply, or a fallback message when the API key
-            is missing.
+            ChatCompletion carrying the answer and (when available) token usage.
+            When the API key is missing, returns a fallback answer with
+            token_usage=None.
         """
         if self.client is None:
-            return "현재 AI 응답을 생성할 수 있는 설정이 준비되지 않았어요."
+            return ChatCompletion(
+                answer="현재 AI 응답을 생성할 수 있는 설정이 준비되지 않았어요.",
+                token_usage=None,
+            )
 
         default_system = (
             "You are 'Dayak,' a professional and warm-hearted pharmacist.\n"
@@ -64,4 +69,13 @@ class RAGGenerator:
             temperature=0.7,
             max_tokens=800,
         )
-        return response.choices[0].message.content
+        answer = response.choices[0].message.content
+        usage = None
+        if response.usage is not None:
+            usage = TokenUsage(
+                model=self.model,
+                prompt_tokens=response.usage.prompt_tokens,
+                completion_tokens=response.usage.completion_tokens,
+                total_tokens=response.usage.total_tokens,
+            )
+        return ChatCompletion(answer=answer, token_usage=usage)

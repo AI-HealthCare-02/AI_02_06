@@ -7,7 +7,12 @@ to process user queries end-to-end.
 import logging
 import time
 
-from app.dtos.rag import RAGResponse, SearchFilters, SearchResult
+from app.dtos.rag import (
+    RAGResponse,
+    RetrievalMetadata,
+    SearchFilters,
+    SearchResult,
+)
 from app.services.rag.intent.classifier import IntentClassifier
 from app.services.rag.intent.intents import IntentType
 from app.services.rag.protocols import EmbeddingProvider, Retriever
@@ -96,19 +101,27 @@ class RAGPipeline:
                 confidence_score=1.0,
                 search_results_count=0,
                 processing_time_ms=int((time.time() - start_time) * 1000),
+                intent=intent.value,
+                query_keywords=[],
+                retrieval=RetrievalMetadata(),
+                token_usage=None,
             )
 
         # Step 3: Handle general chat directly
         if intent == IntentType.GENERAL_CHAT:
             messages = [*history, {"role": "user", "content": question}]
             logger.info("[RAG] path=general_chat llm_msgs=%d", len(messages))
-            answer = await self.rag_generator.generate_chat_response(messages, system_prompt=system_prompt)
+            completion = await self.rag_generator.generate_chat_response(messages, system_prompt=system_prompt)
             return RAGResponse(
-                answer=answer,
+                answer=completion.answer,
                 sources=[],
                 confidence_score=1.0,
                 search_results_count=0,
                 processing_time_ms=int((time.time() - start_time) * 1000),
+                intent=intent.value,
+                query_keywords=[],
+                retrieval=RetrievalMetadata(),
+                token_usage=completion.token_usage,
             )
 
         # Step 4: RAG retrieval for knowledge-based intents
@@ -135,16 +148,24 @@ class RAGPipeline:
             prompt = system_prompt or self._default_system_prompt(context)
 
             logger.info("[RAG] llm msgs=%d ctx_chars=%d", len(messages) + 1, len(prompt))
-            answer = await self.rag_generator.generate_chat_response(messages, system_prompt=prompt)
+            completion = await self.rag_generator.generate_chat_response(messages, system_prompt=prompt)
             confidence = self._calculate_confidence(search_results)
             sources = self._build_sources(search_results)
+            retrieval_metadata = self._build_retrieval_metadata(search_results)
+            query_keywords = (
+                self.retriever.extract_keywords(question) if hasattr(self.retriever, "extract_keywords") else []
+            )
 
             return RAGResponse(
-                answer=answer,
+                answer=completion.answer,
                 sources=sources,
                 confidence_score=confidence,
                 search_results_count=len(search_results),
                 processing_time_ms=int((time.time() - start_time) * 1000),
+                intent=intent.value,
+                query_keywords=query_keywords,
+                retrieval=retrieval_metadata,
+                token_usage=completion.token_usage,
             )
 
         # Step 5: Tool-based intents (MY_SCHEDULE, NEARBY_HOSPITAL, WEATHER, etc.)
@@ -160,6 +181,10 @@ class RAGPipeline:
             confidence_score=1.0,
             search_results_count=0,
             processing_time_ms=int((time.time() - start_time) * 1000),
+            intent=intent.value,
+            query_keywords=[],
+            retrieval=RetrievalMetadata(),
+            token_usage=None,
         )
 
     def _build_context(self, search_results: list[SearchResult]) -> str:
@@ -219,6 +244,23 @@ class RAGPipeline:
         avg = sum(r.final_score for r in search_results) / len(search_results)
         diversity = min(len({r.medicine.usage for r in search_results}) * 0.1, 0.3)
         return min(avg + diversity, 1.0)
+
+    def _build_retrieval_metadata(self, search_results: list[SearchResult]) -> RetrievalMetadata:
+        """Summarize retrieval stage for persistence on user-turn metadata.
+
+        Captures top-k medicine names/usages plus the top-1 score breakdown.
+        """
+        if not search_results:
+            return RetrievalMetadata()
+        top = search_results[0]
+        return RetrievalMetadata(
+            medicine_names=[r.medicine.name for r in search_results],
+            medicine_usages=[r.medicine.usage for r in search_results if r.medicine.usage],
+            top_similarity=top.vector_score,
+            vector_score=top.vector_score,
+            keyword_score=top.keyword_score,
+            final_score=top.final_score,
+        )
 
     def _build_sources(self, search_results: list[SearchResult]) -> list[dict]:
         """Build source payload returned to the API client.

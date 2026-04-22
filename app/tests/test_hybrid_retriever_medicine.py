@@ -28,7 +28,7 @@ class TestKeywordExtraction:
     def test_extracts_content_words(self) -> None:
         retriever = _make_retriever()
 
-        keywords = retriever._extract_keywords("타이레놀의 부작용이 뭐야")
+        keywords = retriever.extract_keywords("타이레놀의 부작용이 뭐야")
 
         assert "타이레놀" in keywords
         assert "부작용" in keywords
@@ -36,7 +36,7 @@ class TestKeywordExtraction:
     def test_drops_stopwords_and_single_chars(self) -> None:
         retriever = _make_retriever()
 
-        keywords = retriever._extract_keywords("이 약은 뭐야")
+        keywords = retriever.extract_keywords("이 약은 뭐야")
 
         assert "이" not in keywords
         assert "는" not in keywords

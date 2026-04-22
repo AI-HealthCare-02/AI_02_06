@@ -82,7 +82,7 @@ class HybridRetriever:
         if not vector_results:
             return []
 
-        query_keywords = self._extract_keywords(query)
+        query_keywords = self.extract_keywords(query)
         results: list[SearchResult] = []
 
         for medicine, vector_score in vector_results:
@@ -188,7 +188,7 @@ class HybridRetriever:
         max_possible = len(query_keywords) * 3
         return min(matches / max_possible, 1.0)
 
-    def _extract_keywords(self, query: str) -> list[str]:
+    def extract_keywords(self, query: str) -> list[str]:
         """Extract meaningful Korean/alphanumeric keywords from a query.
 
         Strips trailing Korean particles (은/는/이/가/을/를 ...) so that
