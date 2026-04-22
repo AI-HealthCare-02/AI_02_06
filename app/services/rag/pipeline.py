@@ -15,10 +15,6 @@ from app.dtos.rag import (
 )
 from app.services.rag.intent.classifier import IntentClassifier
 from app.services.rag.intent.intents import IntentType
-from app.services.rag.pronoun_resolver import (
-    collect_recent_medicine_names,
-    has_medicine_reference,
-)
 from app.services.rag.protocols import EmbeddingProvider, Retriever
 
 logger = logging.getLogger(__name__)
@@ -77,7 +73,7 @@ class RAGPipeline:
         system_prompt: str | None = None,
         user_profile_id: int | None = None,
         max_sources: int = 5,
-        history_metadata: list[dict] | None = None,
+        history_metadata: list[dict] | None = None,  # noqa: ARG002  (consumed in next commit: LLM rewrite)
     ) -> RAGResponse:
         """Process a user question through the full RAG pipeline.
 
@@ -152,43 +148,13 @@ class RAGPipeline:
             else:
                 logger.info("[RAG] retrieved=0 (no matches above threshold)")
 
-            # Pronoun / elided-subject resolution: if the current query is
-            # ambiguous, rewrite it using the most recent medicine from
-            # history metadata and re-run retrieval once.
-            effective_question = question
-            resolution_note: str | None = None
-            if not has_medicine_reference(search_results):
-                recent_names = collect_recent_medicine_names(history_metadata or [], limit=3)
-                if recent_names:
-                    effective_question = f"{recent_names[0]} {question}"
-                    logger.info(
-                        "[RAG] pronoun_resolve: %r -> %r (history hint=%s)",
-                        question,
-                        effective_question,
-                        recent_names[0],
-                    )
-                    retry_embedding = await self.embedding_provider.encode_single(effective_question)
-                    search_results = await self.retriever.retrieve(
-                        query=effective_question,
-                        query_embedding=retry_embedding,
-                        filters=filters,
-                        limit=max_sources,
-                    )
-                    if search_results:
-                        summary = ", ".join(f"{r.medicine.name}({r.final_score:.2f})" for r in search_results)
-                        logger.info("[RAG] retrieved(retry)=%d: %s", len(search_results), summary)
-                else:
-                    # Policy 2: No anchoring medicine anywhere → LLM should
-                    # ask the user to specify which medicine they mean.
-                    resolution_note = "ambiguous_no_history"
-                    logger.info("[RAG] pronoun_resolve: ambiguous, no history hint; ask-to-clarify")
-
+            # NOTE: Pronoun / elided-subject resolution is pending a move to
+            # LLM-based query rewriting (see RAGGenerator.rewrite_query).
+            # The rule-based resolver has been removed; this commit
+            # temporarily lacks multi-turn reference handling.
             context = self._build_context(search_results)
             messages = [*history, {"role": "user", "content": question}]
-            if resolution_note == "ambiguous_no_history":
-                prompt = self._clarify_system_prompt()
-            else:
-                prompt = system_prompt or self._default_system_prompt(context)
+            prompt = system_prompt or self._default_system_prompt(context)
 
             logger.info("[RAG] llm msgs=%d ctx_chars=%d", len(messages) + 1, len(prompt))
             completion = await self.rag_generator.generate_chat_response(messages, system_prompt=prompt)
