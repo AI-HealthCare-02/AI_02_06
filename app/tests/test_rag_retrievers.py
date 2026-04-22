@@ -89,7 +89,7 @@ class TestHybridRetriever:
 
         score = retriever.calculate_keyword_score(
             query_keywords=["타이레놀", "부작용"],
-            medicine_text="해열진통제",
             medicine_name="타이레놀",
+            category="해열진통제",
         )
         assert 0.0 <= score <= 1.0
