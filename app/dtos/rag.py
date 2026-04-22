@@ -1,8 +1,9 @@
 """RAG (Retrieval-Augmented Generation) DTO models.
 
-Data transfer objects for the MedicineInfo-backed RAG pipeline:
+Data transfer objects for the medicine_chunk + medicine_info RAG pipeline:
 - SearchFilters: metadata filters applied at retrieval time.
-- SearchResult: a single ranked MedicineInfo match.
+- ChunkMatch: one pgvector top-k row (chunk + per-chunk score).
+- SearchResult: MedicineInfo parent + aggregated matched chunks + scores.
 - RetrievalMetadata: summary of the retrieval stage (for debug/cache keys).
 - TokenUsage: LLM token usage for the assistant turn.
 - ChatCompletion: RAGGenerator output (answer + optional token usage).
@@ -15,24 +16,44 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.medicine_chunk import MedicineChunk
 from app.models.medicine_info import MedicineInfo
 
 
 class SearchFilters(BaseModel):
-    """Retrieval-time filters for medicine_info rows."""
+    """Retrieval-time filters applied over medicine_chunk rows."""
 
     medicine_names: list[str] = Field(default_factory=list)
 
 
-class SearchResult(BaseModel):
-    """A single scored MedicineInfo match from the retriever."""
+class ChunkMatch(BaseModel):
+    """A single pgvector top-k hit: one medicine_chunk + its vector score."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    medicine: MedicineInfo
-    vector_score: float
-    keyword_score: float
-    final_score: float
+    chunk: MedicineChunk = Field(..., description="medicine_chunk row (section + content + model_version)")
+    vector_score: float = Field(..., description="Cosine similarity of this chunk against the query")
+
+
+class SearchResult(BaseModel):
+    """Aggregated retrieval hit: parent medicine + all matched chunks.
+
+    The retriever groups chunk-level pgvector hits by parent `medicine_info`.
+    `vector_score` is the representative (top-1) chunk score, while
+    `matched_chunks` preserves every surfaced section for downstream
+    context building.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    medicine: MedicineInfo = Field(..., description="Parent medicine_info row")
+    matched_chunks: list[ChunkMatch] = Field(
+        default_factory=list,
+        description="Chunks that contributed to this result (sorted by vector_score desc)",
+    )
+    vector_score: float = Field(..., description="Representative (top-1) chunk vector score")
+    keyword_score: float = Field(..., description="Keyword overlap score against name/category/content")
+    final_score: float = Field(..., description="Final weighted score used for ranking")
 
 
 class RetrievalMetadata(BaseModel):
@@ -43,7 +64,10 @@ class RetrievalMetadata(BaseModel):
     """
 
     medicine_names: list[str] = Field(default_factory=list, description="Top-k medicine names")
-    medicine_usages: list[str] = Field(default_factory=list, description="Top-k medicine usages (categories)")
+    medicine_usages: list[str] = Field(
+        default_factory=list,
+        description="Top-k medicine categories (sourced from medicine_info.category)",
+    )
     top_similarity: float | None = Field(None, description="Cosine similarity of the top-1 match")
     vector_score: float | None = Field(None, description="Top-1 vector similarity score")
     keyword_score: float | None = Field(None, description="Top-1 keyword score")
