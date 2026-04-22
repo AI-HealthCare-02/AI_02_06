@@ -35,6 +35,10 @@ class ChatMessage(models.Model):
     session = fields.ForeignKeyField("models.ChatSession", related_name="messages")
     sender_type = fields.CharEnumField(enum_type=SenderType, max_length=16)
     content = fields.TextField()
+    metadata = fields.JSONField(
+        default=dict,
+        description="RAG debug/audit metadata (intent, medicine_names, scores, token usage)",
+    )
     created_at = fields.DatetimeField(auto_now_add=True)
     deleted_at = fields.DatetimeField(null=True)
 
