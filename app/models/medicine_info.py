@@ -1,19 +1,28 @@
+"""MedicineInfo model for the pharmaceutical RAG knowledge base.
+
+Stores one row per medicine with a pgvector embedding column used for
+hybrid similarity search. Field shape mirrors `ai_worker/data/medicines.json`.
+"""
+
 from tortoise import fields, models
+
+from app.db.vector_field import VectorField
+from app.services.rag.config import EMBEDDING_DIMENSIONS
 
 
 class MedicineInfo(models.Model):
-    """RAG를 위한 약학 정보 지식 베이스 테이블"""
+    """Medicine knowledge base entry with vector embedding for RAG retrieval."""
 
-    id = fields.IntField(pk=True)
-    medicine_name = fields.CharField(max_length=128, unique=True, note="약품명")
-    category = fields.CharField(max_length=64, null=True, note="약품 분류")
-    efficacy = fields.TextField(null=True, note="효능/효과")
-    side_effects = fields.TextField(null=True, note="부작용")
-    precautions = fields.TextField(null=True, note="주의사항")
+    id = fields.IntField(primary_key=True)
+    name = fields.CharField(max_length=128, unique=True, description="약품명")
+    ingredient = fields.TextField(description="주성분")
+    usage = fields.CharField(max_length=64, description="주된 용도")
+    disclaimer = fields.TextField(description="복용 시 주의사항")
+    contraindicated_drugs = fields.JSONField(default=list, description="병용 금기 약물 리스트")
+    contraindicated_foods = fields.JSONField(default=list, description="병용 금기 음식 리스트")
 
-    # pgvector 전용: 실제 DB에는 'vector(1536)' 타입으로 수동 생성 필요 (OpenAI Embedding 기준)
-    # Tortoise에서는 TextField로 선언하되, Raw SQL로 처리하거나 가상 필드로 활용
-    embedding = fields.TextField(null=True, note="OpenAI 텍스트 임베딩 데이터 (JSON 형태 저장 또는 Raw SQL 처리)")
+    embedding = VectorField(dimensions=EMBEDDING_DIMENSIONS, description="하이브리드 검색용 임베딩")
+    embedding_normalized = fields.BooleanField(default=True, description="임베딩 L2 정규화 여부")
 
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)

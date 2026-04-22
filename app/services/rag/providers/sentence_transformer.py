@@ -11,10 +11,9 @@ import logging
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-logger = logging.getLogger(__name__)
+from app.services.rag.config import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL_NAME
 
-# Default Korean-optimized model. Replace this constant to upgrade globally.
-_DEFAULT_MODEL = "jhgan/ko-sroberta-multitask"
+logger = logging.getLogger(__name__)
 
 # Common Korean pharmaceutical term normalizations for embedding quality.
 _TERM_NORMALIZATIONS: dict[str, str] = {
@@ -38,7 +37,7 @@ class SentenceTransformerProvider:
     Normalizes vectors to unit length for cosine similarity.
     """
 
-    def __init__(self, model_name: str = _DEFAULT_MODEL) -> None:
+    def __init__(self, model_name: str = EMBEDDING_MODEL_NAME) -> None:
         """Initialize provider with model name.
 
         Args:
@@ -46,7 +45,7 @@ class SentenceTransformerProvider:
         """
         self.model_name = model_name
         self.model: SentenceTransformer | None = None
-        self._dimensions: int = 768  # Default for ko-sroberta-multitask
+        self._dimensions: int = EMBEDDING_DIMENSIONS
 
     @property
     def dimensions(self) -> int:

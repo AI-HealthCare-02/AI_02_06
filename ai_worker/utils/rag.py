@@ -104,16 +104,19 @@ class RAGGenerator:
             embedding = await asyncio.get_event_loop().run_in_executor(None, model.encode, query)
             query_vector = _normalize_vector(embedding.tolist())
 
-            # 2. pgvector cosine similarity search on document_chunks
+            # 2. pgvector cosine similarity search on medicine_info
             conn = Tortoise.get_connection("default")
             sql = """
                 SELECT
-                    dc.section_title,
-                    dc.content,
-                    dc.keywords,
-                    1 - (dc.embedding <=> $1::vector) as similarity
-                FROM document_chunks dc
-                ORDER BY dc.embedding <=> $1::vector
+                    mi.name,
+                    mi.ingredient,
+                    mi.usage,
+                    mi.disclaimer,
+                    mi.contraindicated_drugs,
+                    mi.contraindicated_foods,
+                    1 - (mi.embedding <=> $1::vector) as similarity
+                FROM medicine_info mi
+                ORDER BY mi.embedding <=> $1::vector
                 LIMIT $2;
             """
             results = await conn.execute_query_dict(sql, [str(query_vector), limit])
@@ -125,9 +128,18 @@ class RAGGenerator:
             context_list = []
             for res in results:
                 similarity_pct = round(res["similarity"] * 100, 1)
-                context = f"[{res['section_title']}] (유사도: {similarity_pct}%)\n{res['content']}"
+                drugs = ", ".join(res["contraindicated_drugs"] or []) or "해당 없음"
+                foods = ", ".join(res["contraindicated_foods"] or []) or "해당 없음"
+                context = (
+                    f"[{res['name']}] (유사도: {similarity_pct}%)\n"
+                    f"주성분: {res['ingredient']}\n"
+                    f"용도: {res['usage']}\n"
+                    f"주의사항: {res['disclaimer']}\n"
+                    f"병용 금기 약물: {drugs}\n"
+                    f"병용 금기 음식: {foods}"
+                )
                 context_list.append(context)
-                logger.info(f"Retrieved: {res['section_title']} (similarity: {similarity_pct}%)")
+                logger.info(f"Retrieved: {res['name']} (similarity: {similarity_pct}%)")
 
             return "\n\n".join(context_list)
 

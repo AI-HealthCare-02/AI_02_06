@@ -7,8 +7,7 @@ to process user queries end-to-end.
 import logging
 import time
 
-from app.dtos.rag import RAGResponse, SearchFilters
-from app.models.vector_models import UserCondition
+from app.dtos.rag import RAGResponse, SearchFilters, SearchResult
 from app.services.rag.intent.classifier import IntentClassifier
 from app.services.rag.intent.intents import IntentType
 from app.services.rag.protocols import EmbeddingProvider, Retriever
@@ -67,7 +66,6 @@ class RAGPipeline:
         question: str,
         history: list[dict[str, str]],
         system_prompt: str | None = None,
-        user_conditions: list[UserCondition] | None = None,
         user_profile_id: int | None = None,
         max_sources: int = 5,
     ) -> RAGResponse:
@@ -77,9 +75,8 @@ class RAGPipeline:
             question: User's question text.
             history: Previous conversation messages.
             system_prompt: Optional custom system prompt for LLM.
-            user_conditions: User health conditions for personalization.
-            user_profile_id: User profile ID for logging.
-            max_sources: Maximum number of source chunks to use.
+            user_profile_id: User profile ID for downstream tool handlers.
+            max_sources: Maximum number of medicine sources to retrieve.
 
         Returns:
             RAGResponse with answer, sources, and metadata.
@@ -115,7 +112,7 @@ class RAGPipeline:
         # Step 4: RAG retrieval for knowledge-based intents
         if intent in _RAG_INTENTS:
             query_embedding = await self.embedding_provider.encode_single(question)
-            filters = SearchFilters(user_conditions=user_conditions or [])
+            filters = SearchFilters()
 
             search_results = await self.retriever.retrieve(
                 query=question,
@@ -154,18 +151,30 @@ class RAGPipeline:
             processing_time_ms=int((time.time() - start_time) * 1000),
         )
 
-    def _build_context(self, search_results: list) -> str:
-        """Build context string from search results.
+    def _build_context(self, search_results: list[SearchResult]) -> str:
+        """Build context string from MedicineInfo search results.
 
         Args:
-            search_results: List of SearchResult objects.
+            search_results: Ranked MedicineInfo matches.
 
         Returns:
             Formatted context string for LLM prompt.
         """
         if not search_results:
             return ""
-        parts = [f"[{r.chunk.section_title or '정보'}]\n{r.chunk.content}" for r in search_results]
+        parts: list[str] = []
+        for r in search_results:
+            m = r.medicine
+            drugs = ", ".join(m.contraindicated_drugs or []) or "해당 없음"
+            foods = ", ".join(m.contraindicated_foods or []) or "해당 없음"
+            parts.append(
+                f"[{m.name}]\n"
+                f"주성분: {m.ingredient}\n"
+                f"용도: {m.usage}\n"
+                f"주의사항: {m.disclaimer}\n"
+                f"병용 금기 약물: {drugs}\n"
+                f"병용 금기 음식: {foods}"
+            )
         return "\n\n".join(parts)
 
     def _default_system_prompt(self, context: str) -> str:
@@ -185,35 +194,35 @@ class RAGPipeline:
             f"[Context]\n{context}"
         )
 
-    def _calculate_confidence(self, search_results: list) -> float:
-        """Calculate confidence score from search results.
+    def _calculate_confidence(self, search_results: list[SearchResult]) -> float:
+        """Calculate confidence score from MedicineInfo matches.
 
         Args:
-            search_results: List of SearchResult objects.
+            search_results: Ranked MedicineInfo matches.
 
         Returns:
-            Confidence score between 0.0 and 1.0.
+            Confidence score in [0.0, 1.0].
         """
         if not search_results:
             return 0.0
         avg = sum(r.final_score for r in search_results) / len(search_results)
-        diversity = min(len({r.chunk.chunk_type for r in search_results}) * 0.1, 0.3)
+        diversity = min(len({r.medicine.usage for r in search_results}) * 0.1, 0.3)
         return min(avg + diversity, 1.0)
 
-    def _build_sources(self, search_results: list) -> list[dict]:
-        """Build source info list from search results.
+    def _build_sources(self, search_results: list[SearchResult]) -> list[dict]:
+        """Build source payload returned to the API client.
 
         Args:
-            search_results: List of SearchResult objects.
+            search_results: Ranked MedicineInfo matches.
 
         Returns:
-            List of source info dictionaries.
+            List of lightweight source dicts.
         """
         return [
             {
-                "section_title": r.chunk.section_title,
-                "chunk_type": r.chunk.chunk_type.value,
-                "content_preview": r.chunk.content[:200],
+                "name": r.medicine.name,
+                "usage": r.medicine.usage,
+                "ingredient": r.medicine.ingredient,
                 "relevance_score": round(r.final_score, 3),
             }
             for r in search_results

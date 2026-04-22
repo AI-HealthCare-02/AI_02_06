@@ -1,37 +1,39 @@
 """RAG service package.
 
-Public interface for the RAG pipeline.
+The top-level namespace is intentionally minimal so that the leaf
+`config` module (embedding model name, dimensions) can be imported by
+lower layers (`app.models.medicine_info`, `app.dtos.rag`) without
+triggering the full pipeline graph. Public components live at explicit
+submodule paths:
+
+    from app.services.rag.pipeline import RAGPipeline
+    from app.services.rag.retrievers.hybrid import HybridRetriever
+    from app.services.rag.providers.sentence_transformer import (
+        SentenceTransformerProvider,
+        get_sentence_transformer_provider,
+    )
 """
 
-from app.services.rag.intent.classifier import IntentClassifier
-from app.services.rag.intent.intents import IntentType
-from app.services.rag.pipeline import RAGPipeline
-from app.services.rag.protocols import EmbeddingProvider, Retriever
-from app.services.rag.providers.sentence_transformer import (
-    SentenceTransformerProvider,
-    get_sentence_transformer_provider,
-)
-from app.services.rag.retrievers.hybrid import HybridRetriever
-from app.services.rag.tools import ToolRouter
-
-_pipeline: RAGPipeline | None = None
+_pipeline: "RAGPipeline | None" = None  # noqa: F821  # forward ref resolved lazily
 
 
-async def get_rag_pipeline() -> RAGPipeline:
+async def get_rag_pipeline() -> "RAGPipeline":  # noqa: F821  # forward ref resolved lazily
     """Get or create the global RAGPipeline instance.
 
-    This is an async factory that ensures the embedding provider
-    is properly initialized before use.
-
-    Returns:
-        Configured RAGPipeline with all dependencies injected.
+    Builds the pipeline on first call: initializes the embedding model,
+    wires the hybrid retriever, intent classifier, tool router, and
+    RAG generator. Subsequent calls return the cached instance.
     """
     global _pipeline
 
     if _pipeline is None:
         from ai_worker.utils.rag import RAGGenerator
+        from app.services.rag.intent.classifier import IntentClassifier
+        from app.services.rag.pipeline import RAGPipeline
+        from app.services.rag.providers.sentence_transformer import get_sentence_transformer_provider
+        from app.services.rag.retrievers.hybrid import HybridRetriever
+        from app.services.rag.tools import ToolRouter
 
-        # Use the async factory to get an initialized provider
         provider = await get_sentence_transformer_provider()
         _pipeline = RAGPipeline(
             embedding_provider=provider,
@@ -44,14 +46,4 @@ async def get_rag_pipeline() -> RAGPipeline:
     return _pipeline
 
 
-__all__ = [
-    "EmbeddingProvider",
-    "HybridRetriever",
-    "IntentClassifier",
-    "IntentType",
-    "RAGPipeline",
-    "Retriever",
-    "SentenceTransformerProvider",
-    "ToolRouter",
-    "get_rag_pipeline",
-]
+__all__ = ["get_rag_pipeline"]
