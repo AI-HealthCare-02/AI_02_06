@@ -102,8 +102,27 @@ To prevent Messy Data, strictly adhere to the following principles:
 * **Model Migration**: When any model is changed, `aerich migrate` + `docs/db_schema.dbml` update is mandatory.
 
 ### 4.3 Multilingual Processing & Documentation Rules
-* **English Use (LLM/Internal)**: Source code comments, `.md` documents, and `description` fields in Models/DTOs read by AI MUST be written in English.
-* **Korean Use (User/External)**: User Interfaces (UI), log output messages, human-readable DB/DTO `descriptions`, and user responses MUST be written in Korean.
+* **English Use (LLM/Internal)**: Docstrings, `.md` documents, and `description` fields in Models/DTOs read by AI MUST be written in English.
+* **Korean Use (User/External)**: User Interfaces (UI), log output messages, human-readable DB/DTO `descriptions`, in-code comments (section headers, flow descriptions, inline explanations), and user responses MUST be written in Korean.
+
+### 4.4 Section & Flow Comments (Mandatory — Korean)
+Whenever the agent generates or meaningfully modifies a function, class, pipeline task, router handler, or any major logical block, it MUST prepend a **Korean section header comment** with a **flow description**. This improves top-to-bottom scannability and makes data flow traceable without reading the full implementation.
+
+* **Scope**: Apply to all newly generated/modified top-level callables (functions, async tasks, service methods, router endpoints) and to any logically distinct code block that represents a pipeline step, orchestration stage, or cross-layer coordination.
+* **Language**: The comment body MUST be written in **Korean (한글)**. This takes precedence over the general "English for code comments" convention, because these comments target human readers (developers), not LLM parsing.
+* **Required Format**:
+    1. **Section header line**: `# ── [섹션 제목] ──…──` (use U+2500 `─` box-drawing characters to pad to ~70 columns).
+    2. **Flow line(s)**: `# 흐름: [Step 1] -> [Step 2] -> [Step 3]`. If the flow wraps, continuation lines MUST align the arrow under the first step: `#       -> [Step 4]`.
+    3. Optional additional context lines may follow (e.g., expiry, side effects, preconditions) — each on its own `#` line, concise and in Korean.
+* **Canonical Example**:
+    ```python
+    # ── OCR 전체 파이프라인 (RQ Task) ────────────────────────────────────
+    # 흐름: OpenCV 전처리 -> CLOVA OCR -> 텍스트 후처리 -> LLM 파싱
+    #       -> Redis에 결과 저장 (10분 만료)
+    async def run_ocr_pipeline(...):
+        ...
+    ```
+* **Prohibited**: Do not write these section/flow comments in English. Do not omit the flow line for non-trivial orchestration code. Do not place them inside a function body as a substitute — they belong immediately above the `def` / `class` / block opener.
 
 ---
 
