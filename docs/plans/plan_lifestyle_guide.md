@@ -49,27 +49,65 @@ flowchart TD
 
 ---
 
-## ⚠️ 아키텍처 결정 사항 (검토 필요)
+## ⚠️ 아키텍처 결정 사항
 
-### 1. 기존 Challenge 모델과의 충돌
+### 1. 기존 Challenge 모델 확장 (확정)
 
-기존 `challenges` 테이블이 이미 존재하며 `profile_id`를 FK로 사용합니다.
+기존 `challenges` 테이블을 확장한다. `guide_id nullable FK` 추가로 LLM 생성 챌린지와 수동 생성 챌린지를 하나의 테이블에서 관리.
 
-| 구분 | 기존 Challenge | 이번 신규 Challenge |
-|------|---------------|-------------------|
-| FK | `profile_id` | `guide_id` (lifestyle_guides 참조) + `profile_id` |
-| 생성 주체 | 사용자가 직접 생성 | LLM이 자동 추천 |
-| 상태 | IN_PROGRESS / COMPLETED | is_active=false → true |
+| 구분 | LLM 생성 챌린지 | 사용자 수동 챌린지 |
+|------|----------------|-----------------|
+| `guide_id` | 있음 (lifecycle_guides FK) | null |
+| `category` | 5개 카테고리 중 하나 | null 또는 사용자 지정 |
+| 생성 위치 | 가이드 생성 시 자동 | 챌린지 탭에서 직접 추가 |
+| 삭제 | 가능 | 가능 |
 
-**결정 필요**: 기존 테이블에 `guide_id` 컬럼 추가 vs 신규 `lifestyle_challenges` 테이블 분리
+**챌린지 UI 구성 원칙**
+- 기본: 가이드 탭 하단에 LLM 추천 챌린지 표시
+- 챌린지 탭: LLM 추천 + 사용자 수동 추가 챌린지 통합 관리
+- 사용자가 직접 챌린지 추가 / 삭제 가능 (수동 생성 챌린지)
+- LLM 추천 챌린지도 사용자가 삭제 가능 (원하지 않는 챌린지 제거)
 
-> 권장: **기존 테이블 확장** — `guide_id nullable FK` 추가. LLM 생성 챌린지는 guide_id 있음, 수동 생성은 null.
+```
+챌린지 탭 구조
+├── [LLM 추천] 태그가 붙은 카드 (guide_id 있음)
+├── [직접 추가] 태그가 붙은 카드 (guide_id null)
+└── "+ 챌린지 추가" 버튼 (수동 생성 모달)
+```
 
-### 2. user_id vs profile_id
+### 2. user_id vs profile_id (확정)
 
-요구사항에 `user_id` FK로 명시되어 있으나, 기존 아키텍처는 기능별 데이터를 `profile_id`에 연결합니다.
+요구사항에 `user_id` FK로 명시되어 있으나, 기존 아키텍처는 기능별 데이터를 `profile_id`에 연결한다.
 
 > 결정: **`profile_id` 사용** — 기존 설계 원칙 준수
+
+### 3. 로깅 전략 (확정)
+
+약물 추출부터 챌린지 완료까지 전 구간에 구조화된 로그를 남긴다. 태그 prefix로 필터링 가능하게 설계.
+
+**로그 태그 체계**
+
+| 태그 | 대상 구간 | 예시 |
+|------|----------|------|
+| `[OCR]` | 처방전 이미지 수신 → 약물 추출 → 저장 | `[OCR] 약물 추출 완료: 3개` |
+| `[GUIDE]` | 가이드 생성 요청 → GPT 호출 → 저장 | `[GUIDE] GPT 호출 시작 profile_id=xxx` |
+| `[CHALLENGE]` | 챌린지 시작 → 일일 체크 → 완료 | `[CHALLENGE] 챌린지 완료 id=xxx` |
+| `[LOG]` | 일일 증상 로그 입력 → 저장 | `[LOG] 증상 로그 저장 date=2026-04-22` |
+
+**로깅 구현 규칙**
+```python
+# 각 구간별 로그 레벨 기준
+logger.info("[OCR] 약물 추출 완료: %d개 profile_id=%s", count, profile_id)
+logger.info("[GUIDE] GPT 호출 시작 profile_id=%s", profile_id)
+logger.warning("[GUIDE] GPT 응답 파싱 실패 — 재시도 가능")
+logger.error("[GUIDE] 가이드 저장 실패 profile_id=%s", profile_id)
+logger.info("[CHALLENGE] 챌린지 시작 id=%s profile_id=%s", challenge_id, profile_id)
+logger.info("[CHALLENGE] 일일 체크 완료 id=%s date=%s", challenge_id, today)
+logger.info("[CHALLENGE] 챌린지 완료 id=%s", challenge_id)
+logger.info("[LOG] 증상 로그 저장 profile_id=%s date=%s", profile_id, log_date)
+```
+
+> 개인정보(약물명 등) 로그 기록 시 마스킹 필수 — 약물명은 개수만 기록, ID는 허용
 
 ---
 
@@ -438,11 +476,12 @@ git checkout -b feature/lifestyle-guide-llm-refactor
 - [ ] 브랜치 생성 (`feat/lifestyle-guide`)
 - [ ] `lifestyle_guides` 마이그레이션
 - [ ] `daily_symptom_logs` 마이그레이션
-- [ ] `challenges` 테이블 컬럼 추가 마이그레이션
+- [ ] `challenges` 테이블 컬럼 추가 마이그레이션 (guide_id, category, is_active, started_at, completed_at)
 - [ ] `PromptBuilder` 구현 + 단위 테스트
 - [ ] `GuideResponseSchema` Pydantic 검증 모델
 - [ ] `LifestyleGuideService.generate_guide()` 구현 + 단위 테스트
-- [ ] 6개 API 엔드포인트 구현
+- [ ] 8개 API 엔드포인트 구현
+- [ ] `[OCR]` / `[GUIDE]` / `[CHALLENGE]` / `[LOG]` 태그 로깅 전 구간 적용
 
 ### 프론트엔드
 - [ ] 히스토리 날짜 칩 (수평 스크롤, 가이드 전환)
@@ -455,6 +494,9 @@ git checkout -b feature/lifestyle-guide-llm-refactor
 - [ ] 챌린지 3단계 버튼 상태 (시작하기 / 오늘 완료 체크 / 완료 뱃지)
 - [ ] 과거 가이드 열람 시 챌린지 배너 비활성화
 - [ ] 챌린지 시작 버튼 → PATCH API 연동
+- [ ] [LLM 추천] / [직접 추가] 태그 구분 표시
+- [ ] "+ 챌린지 추가" 수동 생성 모달
+- [ ] 챌린지 삭제 (LLM 추천 / 수동 모두)
 - [ ] 가이드 생성 실패 에러 처리 (재시도 버튼)
 - [ ] 복용 약물 없을 때 생성 버튼 비활성화
 - [ ] GPT 호출 중 전체 화면 스켈레톤 + 안내 문구
@@ -540,4 +582,4 @@ def has_medication_changed(snapshot: list[dict], current: list[dict]) -> bool:
 
 ---
 
-*`go` 명령어를 입력하시면 Step 0 브랜치 생성부터 시작합니다.*
+
