@@ -1,18 +1,18 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { X, Send, RefreshCw } from 'lucide-react'
+import { X, Send, RefreshCw, Plus, Pencil, Trash2, Check } from 'lucide-react'
 import api, { showError } from '@/lib/api'
 
 /**
- * 공통 챗봇 모달 컴포넌트
- *
- * 내부 상태는 다중 세션 구조로 정규화되어 있다.
- * - sessions: 프로필에 속한 모든 세션 목록 (updated_at DESC)
- * - activeSessionId: 현재 활성화된 세션 ID
- * - messages: 활성 세션의 메시지 리스트
- *
- * 사이드바 UI는 별도 커밋에서 붙이며, 현재 동작은 기존과 동일하다
- * (가장 최근 세션 1개만 활성화, 없으면 자동 생성).
+ * 기본 세션 제목 포맷: "새 채팅 MM/DD HH:mm"
+ */
+function formatDefaultSessionTitle(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0')
+  return `새 채팅 ${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+/**
+ * 공통 챗봇 모달 컴포넌트 (좌측 세션 사이드바 포함)
  *
  * @param {Object} props
  * @param {Function} props.onClose - 모달 닫기 콜백
@@ -26,9 +26,16 @@ export default function ChatModal({ onClose, profileId }) {
   const [isLoading, setIsLoading] = useState(false)
   const [isInitializing, setIsInitializing] = useState(true)
   const [initError, setInitError] = useState(false)
-  const scrollRef = useRef(null)
 
-  // 특정 세션의 메시지를 불러온다 (신규 세션이면 환영 메시지)
+  // 사이드바 인라인 편집/삭제 상태
+  const [editingSessionId, setEditingSessionId] = useState(null)
+  const [editingTitle, setEditingTitle] = useState('')
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+
+  const scrollRef = useRef(null)
+  const editInputRef = useRef(null)
+
+  // 특정 세션의 메시지 로드 (비어있으면 환영 메시지)
   const loadMessagesForSession = useCallback(async (sessionId) => {
     const res = await api.get(`/api/v1/messages/session/${sessionId}`)
     if (res.data?.length > 0) {
@@ -60,10 +67,9 @@ export default function ChatModal({ onClose, profileId }) {
       let sessionList = sessionsRes.data || []
 
       if (sessionList.length === 0) {
-        // 세션이 없으면 신규 생성
         const newSessionRes = await api.post('/api/v1/chat-sessions', {
           profile_id: profileId,
-          title: '복약 상담',
+          title: formatDefaultSessionTitle(),
         })
         sessionList = [newSessionRes.data]
       }
@@ -82,17 +88,122 @@ export default function ChatModal({ onClose, profileId }) {
     }
   }, [profileId, loadMessagesForSession])
 
-  // 모달 열릴 때: 세션 초기화
   useEffect(() => {
     initSession()
   }, [initSession])
 
-  // 메시지 추가 시 자동 스크롤
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [messages, isLoading])
+
+  // 편집 모드 진입 시 입력창에 포커스
+  useEffect(() => {
+    if (editingSessionId && editInputRef.current) {
+      editInputRef.current.focus()
+      editInputRef.current.select()
+    }
+  }, [editingSessionId])
+
+  // 세션 전환
+  const switchSession = async (sessionId) => {
+    if (sessionId === activeSessionId || isLoading) return
+    setActiveSessionId(sessionId)
+    setConfirmDeleteId(null)
+    try {
+      await loadMessagesForSession(sessionId)
+    } catch (err) {
+      console.error('세션 메시지 로드 실패:', err)
+      showError('메시지를 불러오지 못했습니다.')
+    }
+  }
+
+  // 새 세션 생성
+  const handleCreateSession = async () => {
+    if (isLoading || isInitializing || !profileId) return
+    try {
+      const res = await api.post('/api/v1/chat-sessions', {
+        profile_id: profileId,
+        title: formatDefaultSessionTitle(),
+      })
+      const newSession = res.data
+      setSessions(prev => [newSession, ...prev])
+      setActiveSessionId(newSession.id)
+      setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
+    } catch (err) {
+      console.error('새 세션 생성 실패:', err)
+      showError('새 채팅을 만들 수 없습니다.')
+    }
+  }
+
+  // 편집 시작
+  const startEditing = (session) => {
+    setEditingSessionId(session.id)
+    setEditingTitle(session.title || '')
+    setConfirmDeleteId(null)
+  }
+
+  const cancelEditing = () => {
+    setEditingSessionId(null)
+    setEditingTitle('')
+  }
+
+  // 편집 저장 (Enter / blur / 체크 클릭)
+  const saveEditing = async () => {
+    const sessionId = editingSessionId
+    const trimmed = editingTitle.trim()
+    if (!sessionId) return
+    if (!trimmed) {
+      cancelEditing()
+      return
+    }
+    const original = sessions.find(s => s.id === sessionId)
+    if (original && original.title === trimmed) {
+      cancelEditing()
+      return
+    }
+    try {
+      const res = await api.patch(`/api/v1/chat-sessions/${sessionId}`, { title: trimmed })
+      setSessions(prev => prev.map(s => (s.id === sessionId ? res.data : s)))
+    } catch (err) {
+      console.error('세션 이름 변경 실패:', err)
+      showError('이름을 변경하지 못했습니다.')
+    } finally {
+      cancelEditing()
+    }
+  }
+
+  // 삭제 (인라인 확인: 첫 클릭 → 확정 아이콘 표시, 두 번째 클릭 → 삭제)
+  const handleDeleteClick = async (sessionId) => {
+    if (confirmDeleteId !== sessionId) {
+      setConfirmDeleteId(sessionId)
+      return
+    }
+    // 확정 클릭
+    try {
+      await api.delete(`/api/v1/chat-sessions/${sessionId}`)
+      const remaining = sessions.filter(s => s.id !== sessionId)
+      setSessions(remaining)
+      setConfirmDeleteId(null)
+
+      // 활성 세션을 지운 경우: 다음(이전에 대화한) 세션으로 전환
+      if (sessionId === activeSessionId) {
+        if (remaining.length > 0) {
+          const nextId = remaining[0].id
+          setActiveSessionId(nextId)
+          await loadMessagesForSession(nextId)
+        } else {
+          // 남은 세션이 없으면 자동으로 신규 생성
+          await handleCreateSession()
+        }
+      }
+    } catch (err) {
+      console.error('세션 삭제 실패:', err)
+      showError('세션을 삭제하지 못했습니다.')
+      setConfirmDeleteId(null)
+    }
+  }
 
   const handleSend = async () => {
     const message = input.trim()
@@ -117,78 +228,168 @@ export default function ChatModal({ onClose, profileId }) {
     }
   }
 
+  const formatSessionDate = (iso) => {
+    if (!iso) return ''
+    const d = new Date(iso)
+    const pad = (n) => String(n).padStart(2, '0')
+    return `${pad(d.getMonth() + 1)}/${pad(d.getDate())}`
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 z-[100] flex items-end justify-end p-6 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl w-full max-w-md h-[600px] flex flex-col shadow-2xl border border-gray-100 overflow-hidden">
-        {/* 헤더 */}
-        <div className="flex justify-between items-center p-5 border-b border-gray-100">
-          <div>
-            <h2 className="font-bold text-lg text-gray-900">복약 AI 상담</h2>
-            <p className="text-xs text-gray-400">약 복용 방법 등 무엇이든 물어보세요</p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-black cursor-pointer p-2 transition-colors">
-            <X size={20} />
-          </button>
-        </div>
-
-        {/* 채팅 영역 */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
-          {messages.map((msg, i) => (
-            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm shadow-sm
-                ${msg.role === 'user'
-                  ? 'bg-gray-900 text-white rounded-br-none'
-                  : 'bg-white text-gray-800 rounded-bl-none border border-gray-200'
-                }`}>
-                {msg.content}
-              </div>
-            </div>
-          ))}
-
-          {/* 점 바운스: 세션 초기화 중 또는 AI 응답 대기 중 */}
-          {(isInitializing || isLoading) && (
-            <div className="flex justify-start">
-                <div className="bg-white border border-gray-200 px-4 py-3 rounded-2xl rounded-bl-none shadow-sm flex gap-1.5">
-                  <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
-                  <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
-                  <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
-                </div>
-            </div>)}
-        </div>
-
-        {/* 입력창 */}
-        <div className="p-4 bg-white border-t border-gray-100 flex gap-2 items-center">
-          {initError ? (
-            /* 재시도 버튼 (초기화 실패 시) */
+      <div className="bg-white rounded-2xl w-full max-w-3xl h-[640px] flex shadow-2xl border border-gray-100 overflow-hidden">
+        {/* 좌측 세션 사이드바 */}
+        <aside className="w-56 flex-shrink-0 border-r border-gray-100 flex flex-col bg-gray-50">
+          <div className="p-3 border-b border-gray-100">
             <button
-              onClick={initSession}
-              disabled={isInitializing}
-              className="flex-1 flex items-center justify-center gap-2 bg-gray-900 text-white rounded-xl px-4 py-2.5 text-sm hover:bg-gray-700 disabled:bg-gray-400 active:scale-95 transition-all cursor-pointer"
+              onClick={handleCreateSession}
+              disabled={isInitializing || isLoading}
+              className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-gray-700 disabled:bg-gray-400 active:scale-95 transition-all cursor-pointer"
             >
-              <RefreshCw size={16} className={isInitializing ? 'animate-spin' : ''} />
-              {isInitializing ? '연결 중...' : '다시 연결하기'}
+              <Plus size={16} />
+              새 채팅
             </button>
-          ) : (
-            /* 일반 입력창 */
-            <>
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyUp={(e) => { if (e.key === 'Enter') handleSend() }}
-                disabled={isInitializing || !activeSessionId}
-                placeholder={isInitializing ? '연결 중...' : (!activeSessionId ? '연결 실패' : '메시지를 입력하세요')}
-                className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-gray-400 transition-all disabled:opacity-50"
-              />
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {sessions.length === 0 && !isInitializing && (
+              <div className="p-4 text-xs text-gray-400 text-center">세션이 없습니다.</div>
+            )}
+            <ul>
+              {sessions.map(session => {
+                const isActive = session.id === activeSessionId
+                const isEditing = session.id === editingSessionId
+                const isConfirmingDelete = session.id === confirmDeleteId
+                return (
+                  <li
+                    key={session.id}
+                    className={`group px-3 py-2 border-b border-gray-100 cursor-pointer transition-colors
+                      ${isActive ? 'bg-white' : 'hover:bg-white'}`}
+                    onClick={() => !isEditing && switchSession(session.id)}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      {isEditing ? (
+                        <input
+                          ref={editInputRef}
+                          type="text"
+                          value={editingTitle}
+                          maxLength={64}
+                          onChange={(e) => setEditingTitle(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveEditing()
+                            else if (e.key === 'Escape') cancelEditing()
+                          }}
+                          onBlur={saveEditing}
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex-1 min-w-0 text-sm px-1.5 py-0.5 border border-gray-300 rounded outline-none focus:border-gray-500 bg-white"
+                        />
+                      ) : (
+                        <div
+                          className="flex-1 min-w-0 text-sm truncate"
+                          onDoubleClick={(e) => { e.stopPropagation(); startEditing(session) }}
+                          title={session.title || '제목 없음'}
+                        >
+                          <span className={isActive ? 'font-semibold text-gray-900' : 'text-gray-700'}>
+                            {session.title || '제목 없음'}
+                          </span>
+                        </div>
+                      )}
+                      {!isEditing && (
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); startEditing(session) }}
+                            className="p-1 text-gray-400 hover:text-gray-700 rounded"
+                            aria-label="이름 변경"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeleteClick(session.id) }}
+                            className={`p-1 rounded transition-colors
+                              ${isConfirmingDelete ? 'text-red-600 bg-red-50' : 'text-gray-400 hover:text-red-600'}`}
+                            aria-label={isConfirmingDelete ? '삭제 확정' : '삭제'}
+                          >
+                            {isConfirmingDelete ? <Check size={13} /> : <Trash2 size={13} />}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-0.5">{formatSessionDate(session.created_at)}</div>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        </aside>
+
+        {/* 우측 대화 영역 */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* 헤더 */}
+          <div className="flex justify-between items-center p-5 border-b border-gray-100">
+            <div className="min-w-0">
+              <h2 className="font-bold text-lg text-gray-900">복약 AI 상담</h2>
+              <p className="text-xs text-gray-400 truncate">약 복용 방법 등 무엇이든 물어보세요</p>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-black cursor-pointer p-2 transition-colors">
+              <X size={20} />
+            </button>
+          </div>
+
+          {/* 채팅 영역 */}
+          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+            {messages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm shadow-sm
+                  ${msg.role === 'user'
+                    ? 'bg-gray-900 text-white rounded-br-none'
+                    : 'bg-white text-gray-800 rounded-bl-none border border-gray-200'
+                  }`}>
+                  {msg.content}
+                </div>
+              </div>
+            ))}
+
+            {(isInitializing || isLoading) && (
+              <div className="flex justify-start">
+                  <div className="bg-white border border-gray-200 px-4 py-3 rounded-2xl rounded-bl-none shadow-sm flex gap-1.5">
+                    <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
+                    <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
+                    <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
+                  </div>
+              </div>)}
+          </div>
+
+          {/* 입력창 */}
+          <div className="p-4 bg-white border-t border-gray-100 flex gap-2 items-center">
+            {initError ? (
               <button
-                onClick={handleSend}
-                disabled={isLoading || !input.trim() || isInitializing || !activeSessionId}
-                className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-900 text-white hover:bg-gray-700 disabled:bg-gray-100 disabled:text-gray-300 active:scale-95 transition-all cursor-pointer"
+                onClick={initSession}
+                disabled={isInitializing}
+                className="flex-1 flex items-center justify-center gap-2 bg-gray-900 text-white rounded-xl px-4 py-2.5 text-sm hover:bg-gray-700 disabled:bg-gray-400 active:scale-95 transition-all cursor-pointer"
               >
-                <Send size={16} />
+                <RefreshCw size={16} className={isInitializing ? 'animate-spin' : ''} />
+                {isInitializing ? '연결 중...' : '다시 연결하기'}
               </button>
-            </>
-          )}
+            ) : (
+              <>
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyUp={(e) => { if (e.key === 'Enter') handleSend() }}
+                  disabled={isInitializing || !activeSessionId}
+                  placeholder={isInitializing ? '연결 중...' : (!activeSessionId ? '연결 실패' : '메시지를 입력하세요')}
+                  className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-gray-400 transition-all disabled:opacity-50"
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={isLoading || !input.trim() || isInitializing || !activeSessionId}
+                  className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-900 text-white hover:bg-gray-700 disabled:bg-gray-100 disabled:text-gray-300 active:scale-95 transition-all cursor-pointer"
+                >
+                  <Send size={16} />
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>
