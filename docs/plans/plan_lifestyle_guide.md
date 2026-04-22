@@ -582,4 +582,3 @@ def has_medication_changed(snapshot: list[dict], current: list[dict]) -> bool:
 
 ---
 
-
