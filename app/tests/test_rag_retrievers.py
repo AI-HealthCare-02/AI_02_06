@@ -41,7 +41,7 @@ class TestHybridRetriever:
         """Retrieve must return a list (DB mocked)."""
         mock_provider = MagicMock()
         retriever = HybridRetriever(embedding_provider=mock_provider)
-        retriever._vector_search = AsyncMock(return_value=[])  # noqa: SLF001
+        retriever._vector_search = AsyncMock(return_value=[])
 
         result = await retriever.retrieve(
             query="타이레놀 부작용",
@@ -56,7 +56,7 @@ class TestHybridRetriever:
         """Retrieve results must be SearchResult instances (DB mocked)."""
         mock_provider = MagicMock()
         retriever = HybridRetriever(embedding_provider=mock_provider)
-        retriever._vector_search = AsyncMock(return_value=[])  # noqa: SLF001
+        retriever._vector_search = AsyncMock(return_value=[])
 
         result = await retriever.retrieve(
             query="test",
@@ -72,7 +72,7 @@ class TestHybridRetriever:
         """Retrieve must not return more results than limit (DB mocked)."""
         mock_provider = MagicMock()
         retriever = HybridRetriever(embedding_provider=mock_provider)
-        retriever._vector_search = AsyncMock(return_value=[])  # noqa: SLF001
+        retriever._vector_search = AsyncMock(return_value=[])
 
         result = await retriever.retrieve(
             query="test",

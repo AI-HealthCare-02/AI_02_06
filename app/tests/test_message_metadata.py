@@ -6,7 +6,6 @@ repository contract; the actual RAG pipeline wiring is covered in later
 commits (RAGResponse extension + MessageService integration).
 """
 
-# ruff: noqa: SLF001
 import inspect
 
 from tortoise import fields

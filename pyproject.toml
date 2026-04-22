@@ -271,6 +271,9 @@ ignore = [
 "app/repositories/medication_repository.py" = [
     "DTZ011",  # date.today() usage (existing code, refactor separately)
 ]
+"app/workers/intake_log_worker.py" = [
+    "DTZ011",  # date.today() usage (existing code, refactor separately)
+]
 "app/services/ocr_service.py" = [
     "F811",    # redefined import (existing code, refactor separately)
     "ASYNC230", # blocking open in async (existing code)

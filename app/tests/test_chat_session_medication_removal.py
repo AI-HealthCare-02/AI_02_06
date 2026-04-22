@@ -6,7 +6,6 @@ unused index. These tests pin the absence of every touchpoint so the
 migration that drops the column stays green.
 """
 
-# ruff: noqa: SLF001
 import inspect
 
 from app.dtos.chat_session import ChatSessionCreate, ChatSessionResponse

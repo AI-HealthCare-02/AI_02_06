@@ -7,8 +7,8 @@ Two passes:
   2. expiration_date < today AND deleted_at IS NULL → deleted_at=now()
 """
 
-import logging
 from datetime import datetime
+import logging
 
 from app.core import config
 from app.models.medication import Medication

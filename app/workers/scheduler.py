@@ -5,9 +5,9 @@ Registers cron jobs:
   - 00:10 KST: deactivate and soft-delete expired medications
 """
 
-import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
@@ -21,7 +21,7 @@ _KST = "Asia/Seoul"
 
 
 @asynccontextmanager
-async def scheduler_lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+async def scheduler_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Manage APScheduler lifecycle within FastAPI lifespan.
 
     Starts the scheduler on application startup and shuts it down on exit.
