@@ -289,6 +289,280 @@ Phase 3 (RAG): 사용자 질문 + 사전설문(health_survey) + 복용약(medica
 
 ---
 
+## Phase 1.5: RAG 임베딩 스키마 & 청킹 파이프라인 (금일 착수)
+
+### 1.5.0 Goal
+
+- `medicine_info`의 `embedding` 단일 컬럼 방식을 **청크 기반 pgvector 구조**로 전환
+- `medicine_chunk`(청크 + 벡터), `medicine_ingredient`(주성분 1:N) 신규 테이블 도입
+- 공공데이터 API XML 구조(`EE_DOC_DATA` / `UD_DOC_DATA` / `NB_DOC_DATA`) 기반 **ARTICLE 단위 청킹**
+- `jhgan/ko-sroberta-multitask` (768-dim) 임베딩 모델에 맞는 `vector(768)` + HNSW 인덱스 확정
+- 사용자 질의의 **도메인 분류 → 정규화 → 단일 벡터 검색** 파이프라인 확정 (질의 청킹 없음)
+
+### 1.5.1 스키마 변경 개요
+
+```mermaid
+flowchart LR
+    subgraph BEFORE["변경 전"]
+        A1["medicine_info<br/>+ embedding TEXT"]
+    end
+
+    subgraph AFTER["변경 후"]
+        B1["medicine_info<br/>(embedding 제거 +<br/>chart / material_name /<br/>valid_term / pack_unit /<br/>atc_code / ee_doc_url /<br/>ud_doc_url / nb_doc_url 추가)"]
+        B2["medicine_chunk<br/>(1:N, vector(768) + HNSW)"]
+        B3["medicine_ingredient<br/>(1:N, 주성분 상세)"]
+    end
+
+    A1 -. "embedding DROP +<br/>컬럼 추가 + 자식 테이블 분리" .-> B1
+    B1 --> B2
+    B1 --> B3
+```
+
+### 1.5.2 변경: `medicine_info`
+
+| 동작 | 필드 | 타입 | 근거 |
+|------|------|------|------|
+| DROP | `embedding` | TEXT | 청크 테이블로 이관 (약 1건 ≠ 1벡터) |
+| ADD | `chart` | TEXT nullable | `CHART` (성상/형태) — 약 식별 질의 |
+| ADD | `material_name` | TEXT nullable | `MATERIAL_NAME` (총량/분량) |
+| ADD | `valid_term` | VARCHAR(64) nullable | `VALID_TERM` (유효기간) |
+| ADD | `pack_unit` | VARCHAR(256) nullable | `PACK_UNIT` (포장단위) |
+| ADD | `atc_code` | VARCHAR(32) nullable | `ATC_CODE` (WHO 분류, 카테고리 보조) |
+| ADD | `ee_doc_url` | VARCHAR(256) nullable | `EE_DOC_ID` (효능 PDF 원본) |
+| ADD | `ud_doc_url` | VARCHAR(256) nullable | `UD_DOC_ID` (용법 PDF 원본) |
+| ADD | `nb_doc_url` | VARCHAR(256) nullable | `NB_DOC_ID` (주의사항 PDF 원본) |
+
+### 1.5.3 신규: `medicine_chunk`
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `id` | BIGINT PK | 내부키 |
+| `medicine_info_id` | INT FK | `medicine_info.id`, ON DELETE CASCADE |
+| `section` | VARCHAR(48) | 청크 타입 (아래 enum) |
+| `chunk_index` | INT default 0 | ARTICLE이 128토큰 초과 시 분할 순번 |
+| `content` | TEXT not null | 헤더 프리픽스 포함 최종 임베딩 대상 문자열 |
+| `token_count` | INT | 모니터링용 |
+| `embedding` | VECTOR(768) | `jhgan/ko-sroberta-multitask` |
+| `model_version` | VARCHAR(64) | 재임베딩 추적용 (예: `ko-sroberta-multitask-v1`) |
+| `created_at` | TIMESTAMPTZ | |
+| `updated_at` | TIMESTAMPTZ | |
+
+**Unique**: `(medicine_info_id, section, chunk_index)`
+**Index**: `embedding` HNSW `vector_cosine_ops` (m=16, ef_construction=64)
+
+**`section` enum (13종 고정)**:
+```
+efficacy | usage | storage | ingredient |
+precaution_warning | precaution_contraindication | precaution_caution |
+adverse_reaction | precaution_general |
+precaution_pregnancy | precaution_pediatric | precaution_elderly |
+precaution_overdose
+```
+
+### 1.5.4 신규: `medicine_ingredient` (1:N 주성분)
+
+| 필드 | 타입 | API 매핑 |
+|------|------|----------|
+| `id` | BIGINT PK | - |
+| `medicine_info_id` | INT FK | `ITEM_SEQ`로 조인 |
+| `mtral_sn` | INT | `MTRAL_SN` |
+| `mtral_code` | VARCHAR(16) | `MTRAL_CODE` (M040702 등) |
+| `mtral_name` | VARCHAR(128) | `MTRAL_NM` (포도당) |
+| `main_ingr_eng` | VARCHAR(256) | `MAIN_INGR_ENG` (Glucose) |
+| `quantity` | VARCHAR(32) | `QNT` |
+| `unit` | VARCHAR(16) | `INGD_UNIT_CD` (그램 등) |
+| `created_at` | TIMESTAMPTZ | |
+
+**Unique**: `(medicine_info_id, mtral_sn)`
+**Index**: `mtral_name`
+
+### 1.5.5 Aerich 마이그레이션 설계
+
+Aerich는 pgvector/HNSW를 자동 생성하지 못하므로 **수동 SQL 블록 병합**이 필수입니다.
+
+```mermaid
+flowchart TD
+    A["1. aerich migrate --name add_rag_chunk_schema"] --> B["2. 자동 생성된 upgrade/downgrade 확인"]
+    B --> C["3. 수동 SQL 삽입<br/>(pgvector 관련)"]
+    C --> D["4. dry-run: aerich upgrade (stg)"]
+    D --> E{정상 반영?}
+    E -->|Yes| F["5. db_schema.dbml 동기화"]
+    E -->|No| G["롤백 + 수정"]
+    F --> H["6. PR 생성 + 팀원 공유"]
+```
+
+**upgrade() 수동 삽입 SQL** (Aerich 자동 생성 구문 앞/뒤에 덧붙임):
+```sql
+-- pgvector 확장은 이미 설치되어 있지만 idempotent 보장
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- medicine_info.embedding DROP (팀원이 사전 백업 확인 예정)
+ALTER TABLE medicine_info DROP COLUMN IF EXISTS embedding;
+
+-- medicine_chunk.embedding 컬럼 추가 (Aerich가 vector 타입을 모름)
+ALTER TABLE medicine_chunk
+  ADD COLUMN embedding vector(768);
+
+-- HNSW 인덱스
+CREATE INDEX IF NOT EXISTS idx_medicine_chunk_embedding_hnsw
+  ON medicine_chunk
+  USING hnsw (embedding vector_cosine_ops)
+  WITH (m = 16, ef_construction = 64);
+```
+
+**downgrade()**:
+```sql
+DROP INDEX IF EXISTS idx_medicine_chunk_embedding_hnsw;
+-- medicine_chunk 테이블 자체는 Aerich가 drop
+ALTER TABLE medicine_info ADD COLUMN embedding TEXT;
+```
+
+### 1.5.6 문서 청킹 파이프라인 (일괄 배치 + 증분)
+
+```mermaid
+flowchart TD
+    A["medicine_info row<br/>(sync 완료 후)"] --> B["EE/UD/NB_DOC_DATA XML 파싱<br/>(xml.etree 또는 lxml)"]
+    B --> C["ARTICLE 단위 추출"]
+    C --> D["HTML 잔재 제거<br/>(&lt;sub&gt;, &amp;#13;, CDATA 정리)"]
+    D --> E["공백 / 줄바꿈 정규화"]
+    E --> F{ARTICLE<br/>토큰 수}
+    F -->|≤ 128| G["헤더 프리픽스 부착<br/>'{medicine_name} {section_ko}: ...'"]
+    F -->|> 128| H["문장 단위 분할<br/>(20% overlap)"]
+    H --> G
+    G --> I["section enum 매핑<br/>(ARTICLE title → enum)"]
+    I --> J["ko-sroberta-multitask<br/>임베딩 생성 (batch=32)"]
+    J --> K["medicine_chunk<br/>bulk UPSERT"]
+    K --> L["medicine_info.storage_method 등<br/>메타 기반 청크도 합성"]
+    L --> M["model_version 기록"]
+```
+
+**ARTICLE title → section 매핑 규칙** (NB_DOC 기준):
+| ARTICLE title 시작 패턴 | section enum |
+|---|---|
+| `1. 경고` | `precaution_warning` |
+| `2. 다음 환자에는 투여하지 말 것` / `투여 금지` | `precaution_contraindication` |
+| `3. 다음 환자에는 신중히 투여` / `신중히 투여` | `precaution_caution` |
+| `4. 이상반응` / `부작용` | `adverse_reaction` |
+| `5. 일반적 주의` / `상호작용` / `적용상의 주의` | `precaution_general` |
+| `6. 임부` / `수유부` | `precaution_pregnancy` |
+| `7. 소아` | `precaution_pediatric` |
+| `8. 고령자` | `precaution_elderly` |
+| `9. 과량투여` | `precaution_overdose` |
+| 그 외 | `precaution_general` (fallback) |
+
+EE_DOC → `efficacy`, UD_DOC → `usage`. **텍스트 20자 미만 ARTICLE은 스킵**.
+
+### 1.5.7 쿼리 파이프라인 (실시간)
+
+```mermaid
+flowchart TD
+    A["사용자 질의"] --> B["키워드 블랙리스트 체크<br/>(프롬프트 인젝션 차단)"]
+    B --> C["도메인 분류<br/>(drug / health / mypage / other)"]
+    C --> D{분류 결과}
+    D -->|other| E["고정 응답 반환<br/>'답변할 수 없습니다'<br/>(임베딩 호출 X)"]
+    D -->|mypage| F["DB 직접 조회<br/>(medications, intake_log)<br/>(임베딩 호출 X)"]
+    D -->|drug / health| G["질의 정규화<br/>(동의어 치환, 공백/영문 통일)"]
+    G --> H["Redis 캐시 확인<br/>(query_hash → embedding)"]
+    H --> I{캐시 hit?}
+    I -->|Yes| K["pgvector top-k 검색<br/>(cosine, k=5, threshold=0.7)"]
+    I -->|No| J["ko-sroberta-multitask 임베딩<br/>+ Redis 캐시 저장 (TTL 7d)"]
+    J --> K
+    K --> L["컨텍스트 조합<br/>(medicine_info + chunks)"]
+    L --> M["LLM 호출 (GPT-4o)"]
+```
+
+**도메인 분류는 초기 룰 기반**으로 시작(키워드 + 정규식), 오탐이 나오면 gpt-4o-mini 분류기로 승격. 임베딩 단계까지 가지 않고 초기에 컷하는 것이 핵심.
+
+### 1.5.8 예상 질의 카테고리 (테스트 케이스 기반)
+
+| 카테고리 | 예시 | 라우팅 |
+|---|---|---|
+| 약 정보 | "타이레놀 효능", "아스피린이 뭐야" | drug → `medicine_chunk` (efficacy, ingredient) |
+| 부작용 | "이부프로펜 부작용" | drug → `adverse_reaction` |
+| 복용법 | "공복에 먹어도 돼?" | drug → `usage`, `precaution_general` |
+| 상호작용 | "타이레놀 맥주 같이" | drug → `precaution_general` + LLM |
+| 보관 | "냉장고 넣어야 해?" | drug → `storage` |
+| 증상→약 | "두통에 뭐 먹어?" | drug → `efficacy` 역검색 |
+| 마이페이지 | "어제 먹은 약", "다음 복용시간" | mypage → DB 직접 조회 |
+| OCR 후속 | "방금 찍은 처방전의 약" | drug → Redis 캐시 + `medicine_info` |
+| 일상 잡담 | "새 봤어", "밥 뭐 먹지" | other → 고정 거절 |
+| 의료 행위 | "암일까?", "약 바꿔도 돼?" | other → 전문가 상담 안내 |
+
+### 1.5.9 Affected Files
+
+| 파일 | 변경 내용 | 상태 |
+|------|----------|------|
+| `docs/db_schema.dbml` | medicine_info 컬럼 추가/embedding 제거 + medicine_chunk / medicine_ingredient 신규 | 수정 |
+| `app/models/medicine_info.py` | 컬럼 추가(chart, material_name, valid_term, pack_unit, atc_code, ee_doc_url, ud_doc_url, nb_doc_url) + embedding 제거 | 수정 |
+| `app/models/medicine_chunk.py` | 신규 Tortoise 모델 (section enum, chunk_index, content, token_count, model_version) | 신규 |
+| `app/models/medicine_ingredient.py` | 신규 Tortoise 모델 (1:N 주성분) | 신규 |
+| `app/db/databases.py` | MODELS 리스트에 medicine_chunk, medicine_ingredient 추가 | 수정 |
+| `app/db/migrations/models/8_YYYYMMDD_add_rag_chunk_schema.py` | Aerich 자동 생성 + pgvector 수동 SQL 병합 | 신규 |
+| `app/repositories/medicine_chunk_repository.py` | 청크 bulk upsert + 벡터 검색 쿼리 | 신규 |
+| `app/repositories/medicine_ingredient_repository.py` | 주성분 bulk upsert | 신규 |
+| `app/services/medicine_data_service.py` | API 수집 이후 ingredient upsert 단계 추가 | 수정 |
+| `ai_worker/utils/chunker.py` | XML 파싱 + ARTICLE 청킹 + 헤더 프리픽스 | 수정 (기존 JSON 로더 로직 교체) |
+| `ai_worker/utils/embedder.py` | ko-sroberta-multitask 배치 임베딩 래퍼 | 신규 |
+| `ai_worker/tasks/embedding_tasks.py` | 초기 배치 + 증분 업서트 RQ 태스크 | 신규 |
+| `scripts/embedding/build_medicine_chunks.py` | 43k 건 초기 임베딩 CLI | 신규 |
+
+### 1.5.10 TDD Steps
+
+#### Step 1: 스키마 & 마이그레이션
+- [ ] Red: `app/tests/test_medicine_chunk_model.py` — section enum, unique(medicine_info_id, section, chunk_index), FK CASCADE
+- [ ] Red: `app/tests/test_medicine_ingredient_model.py` — 1:N 조인, mtral_sn unique
+- [ ] Green: 모델 3종 작성 + Aerich 마이그레이션 + 수동 SQL 병합
+- [ ] Refactor: `docs/db_schema.dbml` 동기화
+
+#### Step 2: Repository
+- [ ] Red: `test_medicine_chunk_repository.py` — bulk_upsert, `search_by_vector(vec, k, filter_section)` 반환 형태·정렬·threshold
+- [ ] Green: Repository 구현 (tortoise raw SQL + 파라미터 바인딩)
+- [ ] Refactor: N+1 방지 `prefetch_related`
+
+#### Step 3: 청킹 & 임베딩
+- [ ] Red: `ai_worker/tests/test_chunker.py` — XML 파싱, HTML 태그 제거, ARTICLE enum 매핑, 128토큰 분할, 20자 미만 스킵
+- [ ] Red: `test_embedder.py` — 배치 입출력 shape, model_version 기록, GPU/CPU fallback
+- [ ] Green: chunker.py 재작성 + embedder.py 신규
+- [ ] Refactor: 에러 핸들링 + 로깅
+
+#### Step 4: 증분 파이프라인 통합
+- [ ] Red: `test_embedding_tasks.py` — 증분 sync 이후 변경된 item_seq만 재임베딩
+- [ ] Green: embedding_tasks.py 구현 (RQ)
+- [ ] Refactor: model_version 불일치 시 재임베딩 로직
+
+#### Step 5: 쿼리 파이프라인 (실시간)
+- [ ] Red: `test_domain_classifier.py` — other/mypage/drug/health 분기
+- [ ] Red: `test_query_pipeline.py` — 캐시 hit/miss, pgvector 호출 횟수
+- [ ] Green: 분류기 + 정규화 + 검색 조립
+
+#### Step 6: CLI 스크립트
+- [ ] `scripts/embedding/build_medicine_chunks.py` — 초기 43k 배치 (진행률 로그, resume 지원)
+
+### 1.5.11 Trade-off Decisions
+
+| 항목 | 선택 | 대안 | 이유 |
+|------|------|------|------|
+| 청킹 단위 | ARTICLE (XML 자연경계) | 고정 토큰 sliding window | 의미 단위 보존, 토큰 낭비 최소 |
+| 벡터 컬럼 위치 | `medicine_chunk` 분리 | `medicine_info` 그대로 | 128토큰 초과 정보가 인코딩에서 버려짐, 섹션별 검색 정확도 향상 |
+| 인덱스 | HNSW | IVFFlat | 20만 벡터 규모에서 HNSW가 재현율·지연 모두 유리 (pgvector 0.5+) |
+| 질의 임베딩 | 단일 벡터 | HyDE / MQR | 초기 구현 단순화, 정확도 이슈 발생 시 HyDE 승격 |
+| 도메인 분류 | 룰 기반 선행 | LLM 분류기 즉시 도입 | 비용·지연·남용 방지, 오탐 발생 시 gpt-4o-mini 승격 |
+| 질의 임베딩 캐시 | Redis (TTL 7d) | `query_embedding_cache` 테이블 | 초기엔 Redis로 충분, 장기 분석 필요 시 테이블로 승격 |
+| pgvector 확장 설치 | 사전 설치 확인됨 | 마이그레이션에서 최초 설치 | idempotent `CREATE EXTENSION IF NOT EXISTS`만 남겨 안전망 확보 |
+| `medicine_info.embedding` drop | 담당자 사전 백업 확인 후 drop | 컬럼 유지하고 deprecated 표시 | 스키마 오염 제거, 담당자가 백업 확인 예정 |
+
+### 1.5.12 팀원 전달 패키지 (완료 후 공유 대상)
+
+1. [docs/db_schema.dbml](docs/db_schema.dbml) — single source of truth
+2. [app/models/medicine_info.py](app/models/medicine_info.py), `medicine_chunk.py`, `medicine_ingredient.py`
+3. `app/db/migrations/models/8_*_add_rag_chunk_schema.py` (수동 SQL 포함)
+4. 스키마 락 3조항:
+   - `vector(768)` — 모델명 `jhgan/ko-sroberta-multitask` 기준 (오타 확인 완료)
+   - `section` enum 13종
+   - `model_version` 컬럼 — 재임베딩 트리거
+
+---
+
 ## Phase 2: OCR 파이프라인 (약봉투 → 약품 정보)
 
 ### 2.1 OCR 전체 흐름
