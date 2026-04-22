@@ -2,13 +2,13 @@
 // Project Downforce - Database Schema
 // AI 기반 복약 관리 시스템
 // PostgreSQL 15+
-// Updated: 2026-04-16
+// Updated: 2026-04-21
 // ============================================================
 
 Project downforce {
   database_type: 'PostgreSQL'
   Note: '''
-  AI 복약 관리 시스템 - 10개 테이블
+  AI 복약 관리 시스템 - 14개 테이블
 
   PK 전략:
   - 비즈니스 엔티티: UUID (보안, 외부 노출 시 예측 불가)
@@ -250,6 +250,133 @@ Table refresh_tokens {
   - 토큰 원본이 아닌 SHA-256 해시값 저장 (보안)
   - 로그아웃 시 is_revoked = true로 즉시 무효화
   - 다중 기기 로그인 지원 (계정당 여러 토큰)
+  '''
+}
+
+// ============================================================
+// DATA - 약품 정보 지식 베이스
+// ============================================================
+
+Table medicine_info {
+  id int [pk, increment, note: '약품 정보 레코드 ID']
+  item_seq varchar(20) [unique, null, note: '품목기준코드 (공공API UPSERT 키)']
+  medicine_name varchar(200) [unique, not null, note: '약품명 (한글)']
+  item_eng_name varchar(256) [null, note: '약품 영문명']
+  entp_name varchar(128) [null, note: '제조업체명']
+  product_type varchar(64) [null, note: '제품 유형 분류 코드']
+  spclty_pblc varchar(32) [null, note: '전문/일반의약품 구분']
+  permit_date varchar(8) [null, note: '허가일자 (YYYYMMDD)']
+  cancel_name varchar(16) [null, note: '상태 (정상/취소)']
+  main_item_ingr text [null, note: '유효성분 (표준코드 포함)']
+  storage_method text [null, note: '저장 방법']
+  edi_code varchar(256) [null, note: '보험코드 (쉼표 구분)']
+  bizrno varchar(16) [null, note: '사업자등록번호']
+  change_date varchar(8) [null, note: 'API 마지막 변경일자 (YYYYMMDD)']
+  category varchar(64) [null, note: '약품 분류 (검색 필터용)']
+  efficacy text [null, note: '효능/효과']
+  side_effects text [null, note: '부작용']
+  precautions text [null, note: '주의사항']
+  chart text [null, note: '성상 (색/형태) - API CHART']
+  material_name text [null, note: '총량/분량 원본 문자열 - API MATERIAL_NAME']
+  valid_term varchar(64) [null, note: '유효기간 - API VALID_TERM']
+  pack_unit varchar(256) [null, note: '포장단위 - API PACK_UNIT']
+  atc_code varchar(32) [null, note: 'WHO ATC 분류 코드 - API ATC_CODE']
+  ee_doc_url varchar(256) [null, note: '효능효과 PDF 원본 URL - API EE_DOC_ID']
+  ud_doc_url varchar(256) [null, note: '용법용량 PDF 원본 URL - API UD_DOC_ID']
+  nb_doc_url varchar(256) [null, note: '사용상주의사항 PDF 원본 URL - API NB_DOC_ID']
+  last_synced_at timestamptz [null, note: '마지막 공공API 동기화 시각']
+  created_at timestamptz [not null, default: `now()`, note: '생성 일시']
+  updated_at timestamptz [not null, default: `now()`, note: '수정 일시']
+
+  indexes {
+    item_seq [unique, name: 'uq_medicine_info_item_seq', note: '품목기준코드 유니크']
+    medicine_name [unique, name: 'uq_medicine_info_name', note: '약품명 유니크']
+  }
+
+  Note: '''
+  약품 정보 지식 베이스 테이블
+  - 식약처 공공데이터 API (DrugPrdtPrmsnInfoService07)에서 수집
+  - 월 1회 증분 업데이트 (start_change_date 기반)
+  - item_seq 기준 UPSERT로 데이터 동기화
+  - 벡터 임베딩은 medicine_chunk 테이블로 분리 (섹션별 1:N 청크)
+  - 주성분 1:N 상세는 medicine_ingredient 테이블로 분리
+  '''
+}
+
+Table medicine_chunk {
+  id bigint [pk, increment, note: '청크 레코드 ID']
+  medicine_info_id int [not null, ref: > medicine_info.id, note: '부모 약품 FK (ON DELETE CASCADE)']
+  section varchar(48) [not null, note: '청크 섹션 타입 (enum 13종: efficacy | usage | storage | ingredient | precaution_warning | precaution_contraindication | precaution_caution | adverse_reaction | precaution_general | precaution_pregnancy | precaution_pediatric | precaution_elderly | precaution_overdose)']
+  chunk_index int [not null, default: 0, note: 'ARTICLE 128토큰 초과 분할 시 순번']
+  content text [not null, note: '헤더 프리픽스 포함 최종 임베딩 대상 문자열']
+  token_count int [null, note: '토큰 수 (모니터링용)']
+  embedding text [null, note: 'pgvector VECTOR(768) - Aerich migration 수동 SQL로 실제 타입은 vector(768)']
+  model_version varchar(64) [not null, note: '임베딩 모델 버전 (재임베딩 트리거, 예: ko-sroberta-multitask-v1)']
+  created_at timestamptz [not null, default: `now()`, note: '생성 일시']
+  updated_at timestamptz [not null, default: `now()`, note: '수정 일시']
+
+  indexes {
+    (medicine_info_id, section, chunk_index) [unique, name: 'uq_medicine_chunk_section', note: '약품+섹션+순번 유니크']
+    medicine_info_id [name: 'idx_medicine_chunk_parent']
+    section [name: 'idx_medicine_chunk_section']
+    model_version [name: 'idx_medicine_chunk_model_version']
+  }
+
+  Note: '''
+  약품 섹션별 임베딩 청크 (RAG 벡터 검색 대상)
+  - 임베딩 모델: jhgan/ko-sroberta-multitask (768차원)
+  - pgvector HNSW 인덱스: USING hnsw (embedding vector_cosine_ops) WITH (m=16, ef_construction=64)
+  - embedding 컬럼은 Aerich 마이그레이션에서 수동 SQL로 vector(768) 타입 적용
+  - 청킹 단위: 공공데이터 API XML의 DOC > SECTION > ARTICLE 자연경계
+  - 증분 재임베딩: model_version 불일치 또는 medicine_info.change_date 변경 시
+  '''
+}
+
+Table medicine_ingredient {
+  id bigint [pk, increment, note: '주성분 레코드 ID']
+  medicine_info_id int [not null, ref: > medicine_info.id, note: '부모 약품 FK (ON DELETE CASCADE)']
+  mtral_sn int [not null, note: '주성분 순번 - API MTRAL_SN']
+  mtral_code varchar(16) [null, note: '성분 코드 (M040702 등) - API MTRAL_CODE']
+  mtral_name varchar(128) [not null, note: '성분명 (포도당 등) - API MTRAL_NM']
+  main_ingr_eng varchar(256) [null, note: '영문 성분명 (Glucose 등) - API MAIN_INGR_ENG']
+  quantity varchar(32) [null, note: '분량 - API QNT']
+  unit varchar(16) [null, note: '단위 (그램, 밀리그램 등) - API INGD_UNIT_CD']
+  created_at timestamptz [not null, default: `now()`, note: '생성 일시']
+
+  indexes {
+    (medicine_info_id, mtral_sn) [unique, name: 'uq_medicine_ingredient_sn', note: '약품+성분순번 유니크']
+    mtral_name [name: 'idx_medicine_ingredient_name']
+    mtral_code [name: 'idx_medicine_ingredient_code']
+  }
+
+  Note: '''
+  약품 주성분 1:N 상세 (공공데이터 주성분 상세정보 API)
+  - 약품 1개 = 주성분 N개 구조 (예: 포도당생리식염액 → 포도당 + 염화나트륨)
+  - UPSERT 키: (medicine_info_id, mtral_sn)
+  - 성분명 기반 검색/조회 시 mtral_name 인덱스 활용
+  '''
+}
+
+Table data_sync_log {
+  id bigint [pk, increment, note: '동기화 로그 ID']
+  sync_type varchar(32) [not null, note: '동기화 대상 (medicine_info)']
+  sync_date timestamptz [not null, note: '동기화 실행 시각']
+  total_fetched int [not null, default: 0, note: 'API에서 수집한 총 건수']
+  total_inserted int [not null, default: 0, note: '신규 삽입 건수']
+  total_updated int [not null, default: 0, note: '업데이트 건수']
+  status varchar(16) [not null, note: '결과 상태 (SUCCESS / FAILED)']
+  error_message text [null, note: '실패 시 에러 메시지']
+  created_at timestamptz [not null, default: `now()`, note: '로그 생성 일시']
+
+  indexes {
+    (sync_type, status) [name: 'ix_data_sync_log_type_status', note: '유형+상태별 조회']
+  }
+
+  Note: '''
+  데이터 동기화 이력 테이블
+  - 공공 API 동기화 실행 결과 기록
+  - 증분 업데이트 시 마지막 성공 시각 참조
+  - 실패 시 에러 메시지 포함하여 디버깅 지원
   '''
 }
 

@@ -1,23 +1,192 @@
+"""Medicine information model module.
+
+This module defines the MedicineInfo model for the pharmaceutical
+knowledge base, integrating public API data and acting as the parent
+record for RAG embedding chunks (medicine_chunk) and active-ingredient
+details (medicine_ingredient).
+"""
+
 from tortoise import fields, models
 
-class MedicineInfo(models.Model):
-    """
-    RAG를 위한 약학 정보 지식 베이스 테이블
-    """
-    id = fields.IntField(pk=True)
-    medicine_name = fields.CharField(max_length=128, unique=True, note="약품명")
-    category = fields.CharField(max_length=64, null=True, note="약품 분류")
-    efficacy = fields.TextField(null=True, note="효능/효과")
-    side_effects = fields.TextField(null=True, note="부작용")
-    precautions = fields.TextField(null=True, note="주의사항")
-    
-    # pgvector 전용: 실제 DB에는 'vector(1536)' 타입으로 수동 생성 필요 (OpenAI Embedding 기준)
-    # Tortoise에서는 TextField로 선언하되, Raw SQL로 처리하거나 가상 필드로 활용
-    embedding = fields.TextField(null=True, note="OpenAI 텍스트 임베딩 데이터 (JSON 형태 저장 또는 Raw SQL 처리)")
 
+class MedicineInfo(models.Model):
+    """Pharmaceutical knowledge base parent row.
+
+    Stores drug permit data from the Food and Drug Safety public API
+    (DrugPrdtPrmsnInfoService07). Dense vector embeddings for RAG
+    are stored in the child `medicine_chunk` table. Active ingredient
+    1:N details are stored in the child `medicine_ingredient` table.
+
+    Attributes:
+        id: Auto-increment primary key.
+        item_seq: Unique drug product code from public API (UPSERT key).
+        medicine_name: Drug product name in Korean.
+        item_eng_name: Drug product name in English.
+        entp_name: Manufacturer name.
+        product_type: Product classification code.
+        spclty_pblc: Professional/OTC drug classification.
+        permit_date: Permit date in YYYYMMDD format.
+        cancel_name: Current status (normal/cancelled).
+        main_item_ingr: Active ingredients with standard codes (raw string).
+        storage_method: Storage instructions.
+        edi_code: Insurance billing codes.
+        bizrno: Business registration number.
+        change_date: Last change date from API in YYYYMMDD format.
+        category: Drug category for search filtering.
+        efficacy: Drug efficacy and effects.
+        side_effects: Known side effects.
+        precautions: Usage precautions.
+        chart: Physical appearance description (CHART).
+        material_name: Total/portion raw string (MATERIAL_NAME).
+        valid_term: Shelf-life description (VALID_TERM).
+        pack_unit: Packaging unit description (PACK_UNIT).
+        atc_code: WHO ATC classification code (ATC_CODE).
+        ee_doc_url: Efficacy PDF source URL (EE_DOC_ID).
+        ud_doc_url: Usage PDF source URL (UD_DOC_ID).
+        nb_doc_url: Precaution PDF source URL (NB_DOC_ID).
+        last_synced_at: Last sync timestamp from public API.
+        created_at: Record creation timestamp.
+        updated_at: Record update timestamp.
+    """
+
+    id = fields.IntField(pk=True)
+
+    # ── 공공데이터 API 필드 (getDrugPrdtPrmsnDtlInq06에서 수집) ──────────
+    # item_seq를 UPSERT 기준 키로 사용하여 증분 업데이트 시 중복 방지
+    item_seq = fields.CharField(
+        max_length=20,
+        unique=True,
+        null=True,
+        description="Drug product code from public API (UPSERT key)",
+    )
+    medicine_name = fields.CharField(
+        max_length=200,
+        unique=True,
+        description="Drug product name in Korean",
+    )
+    item_eng_name = fields.CharField(
+        max_length=256,
+        null=True,
+        description="Drug product name in English",
+    )
+    entp_name = fields.CharField(
+        max_length=128,
+        null=True,
+        description="Manufacturer name",
+    )
+    product_type = fields.CharField(
+        max_length=64,
+        null=True,
+        description="Product classification code",
+    )
+    spclty_pblc = fields.CharField(
+        max_length=32,
+        null=True,
+        description="Professional or OTC drug classification",
+    )
+    permit_date = fields.CharField(
+        max_length=8,
+        null=True,
+        description="Permit date in YYYYMMDD format",
+    )
+    cancel_name = fields.CharField(
+        max_length=16,
+        null=True,
+        description="Current status (normal or cancelled)",
+    )
+    main_item_ingr = fields.TextField(
+        null=True,
+        description="Active ingredients with standard codes",
+    )
+    storage_method = fields.TextField(
+        null=True,
+        description="Storage method and instructions",
+    )
+    edi_code = fields.CharField(
+        max_length=256,
+        null=True,
+        description="Insurance billing codes (comma-separated)",
+    )
+    bizrno = fields.CharField(
+        max_length=16,
+        null=True,
+        description="Business registration number",
+    )
+    change_date = fields.CharField(
+        max_length=8,
+        null=True,
+        description="Last change date from API in YYYYMMDD format",
+    )
+
+    # ── RAG 지식 베이스 필드 (LLM 호출 또는 수동 큐레이션으로 채워짐) ───
+    category = fields.CharField(
+        max_length=64,
+        null=True,
+        description="Drug category for search filtering",
+    )
+    efficacy = fields.TextField(
+        null=True,
+        description="Drug efficacy and effects",
+    )
+    side_effects = fields.TextField(
+        null=True,
+        description="Known side effects",
+    )
+    precautions = fields.TextField(
+        null=True,
+        description="Usage precautions",
+    )
+
+    # ── 공공데이터 API 추가 메타 필드 (RAG 품질 강화용) ─────────────────
+    # CHART / MATERIAL_NAME / VALID_TERM / PACK_UNIT / ATC_CODE
+    # EE_DOC_ID / UD_DOC_ID / NB_DOC_ID 원본 URL
+    chart = fields.TextField(
+        null=True,
+        description="Physical appearance (CHART)",
+    )
+    material_name = fields.TextField(
+        null=True,
+        description="Total/portion raw string (MATERIAL_NAME)",
+    )
+    valid_term = fields.CharField(
+        max_length=64,
+        null=True,
+        description="Shelf-life description (VALID_TERM)",
+    )
+    pack_unit = fields.CharField(
+        max_length=256,
+        null=True,
+        description="Packaging unit description (PACK_UNIT)",
+    )
+    atc_code = fields.CharField(
+        max_length=32,
+        null=True,
+        description="WHO ATC classification code (ATC_CODE)",
+    )
+    ee_doc_url = fields.CharField(
+        max_length=256,
+        null=True,
+        description="Efficacy PDF source URL (EE_DOC_ID)",
+    )
+    ud_doc_url = fields.CharField(
+        max_length=256,
+        null=True,
+        description="Usage PDF source URL (UD_DOC_ID)",
+    )
+    nb_doc_url = fields.CharField(
+        max_length=256,
+        null=True,
+        description="Precaution PDF source URL (NB_DOC_ID)",
+    )
+
+    # ── 동기화 추적 및 타임스탬프 ──────────────────────────────────────
+    last_synced_at = fields.DatetimeField(
+        null=True,
+        description="Last synchronization timestamp from public API",
+    )
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)
 
     class Meta:
         table = "medicine_info"
-        table_description = "RAG 검색을 위한 표준 약학 정보"
+        table_description = "Pharmaceutical knowledge base for RAG search and public API data"
