@@ -119,7 +119,9 @@ class SentenceTransformerProvider:
         processed = self.preprocess(text)
         loop = asyncio.get_event_loop()
         embedding = await loop.run_in_executor(None, self.model.encode, processed)
-        return self._normalize(embedding.tolist())
+        vector = self._normalize(embedding.tolist())
+        logger.info("[RAG] embedded: dim=%d chars=%d", len(vector), len(processed))
+        return vector
 
     async def encode_batch(self, texts: list[str], batch_size: int = 32) -> list[list[float]]:
         """Encode multiple texts in batches.

@@ -4,6 +4,8 @@ This module provides business logic for chat message management operations
 including creation, AI response generation, and ownership verification.
 """
 
+import logging
+import time
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -12,6 +14,14 @@ from app.models.messages import ChatMessage
 from app.repositories.chat_session_repository import ChatSessionRepository
 from app.repositories.message_repository import MessageRepository
 from app.services.rag import get_rag_pipeline
+
+logger = logging.getLogger(__name__)
+
+
+def _preview(text: str, limit: int = 80) -> str:
+    """Return a single-line preview of `text` capped at `limit` characters."""
+    collapsed = " ".join(text.split())
+    return collapsed if len(collapsed) <= limit else collapsed[:limit] + "..."
 
 
 class MessageService:
@@ -187,6 +197,10 @@ class MessageService:
         Raises:
             HTTPException: If AI response generation fails.
         """
+        sid = str(session_id)[:8]
+        start = time.perf_counter()
+        logger.info("[RAG] session=%s q=%r", sid, _preview(content))
+
         user_msg = await self.repository.create_user_message(session_id, content)
 
         # Get recent messages (returned in newest-first order)
@@ -221,6 +235,8 @@ class MessageService:
             ) from e
 
         assistant_msg = await self.repository.create_assistant_message(session_id, reply)
+        took_ms = int((time.perf_counter() - start) * 1000)
+        logger.info("[RAG] session=%s reply=%r len=%d took=%dms", sid, _preview(reply), len(reply), took_ms)
         return user_msg, assistant_msg
 
     async def ask_and_reply_with_owner_check(

@@ -85,10 +85,11 @@ class RAGPipeline:
 
         # Step 1: Classify intent
         intent = self.intent_classifier.classify(question)
-        logger.info("Intent classified as: %s", intent)
+        logger.info("[RAG] intent=%s history=%dturns", intent.value, len(history))
 
         # Step 2: Handle out-of-scope directly
         if intent == IntentType.OUT_OF_SCOPE:
+            logger.info("[RAG] path=out_of_scope")
             return RAGResponse(
                 answer=_OUT_OF_SCOPE_REPLY,
                 sources=[],
@@ -100,6 +101,7 @@ class RAGPipeline:
         # Step 3: Handle general chat directly
         if intent == IntentType.GENERAL_CHAT:
             messages = [*history, {"role": "user", "content": question}]
+            logger.info("[RAG] path=general_chat llm_msgs=%d", len(messages))
             answer = await self.rag_generator.generate_chat_response(messages, system_prompt=system_prompt)
             return RAGResponse(
                 answer=answer,
@@ -111,6 +113,7 @@ class RAGPipeline:
 
         # Step 4: RAG retrieval for knowledge-based intents
         if intent in _RAG_INTENTS:
+            logger.info("[RAG] path=retrieve+llm encoding query...")
             query_embedding = await self.embedding_provider.encode_single(question)
             filters = SearchFilters()
 
@@ -121,10 +124,17 @@ class RAGPipeline:
                 limit=max_sources,
             )
 
+            if search_results:
+                summary = ", ".join(f"{r.medicine.name}({r.final_score:.2f})" for r in search_results)
+                logger.info("[RAG] retrieved=%d: %s", len(search_results), summary)
+            else:
+                logger.info("[RAG] retrieved=0 (no matches above threshold)")
+
             context = self._build_context(search_results)
             messages = [*history, {"role": "user", "content": question}]
             prompt = system_prompt or self._default_system_prompt(context)
 
+            logger.info("[RAG] llm msgs=%d ctx_chars=%d", len(messages) + 1, len(prompt))
             answer = await self.rag_generator.generate_chat_response(messages, system_prompt=prompt)
             confidence = self._calculate_confidence(search_results)
             sources = self._build_sources(search_results)
@@ -138,6 +148,7 @@ class RAGPipeline:
             )
 
         # Step 5: Tool-based intents (MY_SCHEDULE, NEARBY_HOSPITAL, WEATHER, etc.)
+        logger.info("[RAG] path=tool intent=%s", intent.value)
         answer = await self.tool_router.execute(
             intent=intent,
             query=question,

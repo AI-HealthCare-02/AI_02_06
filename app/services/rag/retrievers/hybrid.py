@@ -145,6 +145,7 @@ class HybridRetriever:
         params.append(limit)
 
         rows = await connection.execute_query_dict(sql, params)
+        logger.info("[RAG] pgvector: %d rows (threshold=%.2f)", len(rows), similarity_threshold)
         results: list[tuple[MedicineInfo, float]] = []
         for row in rows:
             distance = row.pop("distance")
