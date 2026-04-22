@@ -1,18 +1,21 @@
 """Medicine information model module.
 
 This module defines the MedicineInfo model for the pharmaceutical
-knowledge base, integrating public API data and supporting RAG search.
+knowledge base, integrating public API data and acting as the parent
+record for RAG embedding chunks (medicine_chunk) and active-ingredient
+details (medicine_ingredient).
 """
 
 from tortoise import fields, models
 
 
 class MedicineInfo(models.Model):
-    """Pharmaceutical knowledge base for RAG search and public API data.
+    """Pharmaceutical knowledge base parent row.
 
     Stores drug permit data from the Food and Drug Safety public API
-    (getDrugPrdtPrmsnDtlInq06) and supports vector similarity search
-    via pgvector for the RAG pipeline.
+    (DrugPrdtPrmsnInfoService07). Dense vector embeddings for RAG
+    are stored in the child `medicine_chunk` table. Active ingredient
+    1:N details are stored in the child `medicine_ingredient` table.
 
     Attributes:
         id: Auto-increment primary key.
@@ -24,7 +27,7 @@ class MedicineInfo(models.Model):
         spclty_pblc: Professional/OTC drug classification.
         permit_date: Permit date in YYYYMMDD format.
         cancel_name: Current status (normal/cancelled).
-        main_item_ingr: Active ingredients with standard codes.
+        main_item_ingr: Active ingredients with standard codes (raw string).
         storage_method: Storage instructions.
         edi_code: Insurance billing codes.
         bizrno: Business registration number.
@@ -33,7 +36,14 @@ class MedicineInfo(models.Model):
         efficacy: Drug efficacy and effects.
         side_effects: Known side effects.
         precautions: Usage precautions.
-        embedding: Vector embedding for similarity search.
+        chart: Physical appearance description (CHART).
+        material_name: Total/portion raw string (MATERIAL_NAME).
+        valid_term: Shelf-life description (VALID_TERM).
+        pack_unit: Packaging unit description (PACK_UNIT).
+        atc_code: WHO ATC classification code (ATC_CODE).
+        ee_doc_url: Efficacy PDF source URL (EE_DOC_ID).
+        ud_doc_url: Usage PDF source URL (UD_DOC_ID).
+        nb_doc_url: Precaution PDF source URL (NB_DOC_ID).
         last_synced_at: Last sync timestamp from public API.
         created_at: Record creation timestamp.
         updated_at: Record update timestamp.
@@ -127,10 +137,46 @@ class MedicineInfo(models.Model):
         description="Usage precautions",
     )
 
-    # ── 벡터 검색용 임베딩 (pgvector 확장으로 실제 벡터 연산 수행) ──────
-    embedding = fields.TextField(
+    # ── 공공데이터 API 추가 메타 필드 (RAG 품질 강화용) ─────────────────
+    # CHART / MATERIAL_NAME / VALID_TERM / PACK_UNIT / ATC_CODE
+    # EE_DOC_ID / UD_DOC_ID / NB_DOC_ID 원본 URL
+    chart = fields.TextField(
         null=True,
-        description="OpenAI text embedding data for vector similarity search",
+        description="Physical appearance (CHART)",
+    )
+    material_name = fields.TextField(
+        null=True,
+        description="Total/portion raw string (MATERIAL_NAME)",
+    )
+    valid_term = fields.CharField(
+        max_length=64,
+        null=True,
+        description="Shelf-life description (VALID_TERM)",
+    )
+    pack_unit = fields.CharField(
+        max_length=256,
+        null=True,
+        description="Packaging unit description (PACK_UNIT)",
+    )
+    atc_code = fields.CharField(
+        max_length=32,
+        null=True,
+        description="WHO ATC classification code (ATC_CODE)",
+    )
+    ee_doc_url = fields.CharField(
+        max_length=256,
+        null=True,
+        description="Efficacy PDF source URL (EE_DOC_ID)",
+    )
+    ud_doc_url = fields.CharField(
+        max_length=256,
+        null=True,
+        description="Usage PDF source URL (UD_DOC_ID)",
+    )
+    nb_doc_url = fields.CharField(
+        max_length=256,
+        null=True,
+        description="Precaution PDF source URL (NB_DOC_ID)",
     )
 
     # ── 동기화 추적 및 타임스탬프 ──────────────────────────────────────

@@ -20,6 +20,8 @@ TORTOISE_APP_MODELS: list[str] = [
     "app.models.profiles",
     "app.models.medication",
     "app.models.medicine_info",
+    "app.models.medicine_chunk",
+    "app.models.medicine_ingredient",
     "app.models.challenge",
     "app.models.chat_sessions",
     "app.models.messages",
