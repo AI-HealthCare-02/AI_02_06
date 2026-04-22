@@ -41,5 +41,11 @@ def setup_logger(
     return logger
 
 
-# Global logger for the application
+# Global loggers for the application.
+# The FastAPI process also imports modules from `ai_worker/*` (e.g. the
+# RAG generator at `ai_worker.utils.rag`), so we register an INFO-level
+# handler for that namespace as well. Without this, `ai_worker.*` INFO
+# logs propagate to the Python root logger (default level WARNING) and
+# get filtered out, while WARNING/ERROR still show with a bare format.
 default_logger = setup_logger()
+_ai_worker_logger = setup_logger("ai_worker")
