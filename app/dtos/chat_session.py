@@ -11,14 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ChatSessionCreate(BaseModel):
-    """Chat session creation request model.
-
-    Used for creating new chat sessions with optional
-    medication-specific consultation context.
-    """
+    """Chat session creation request model."""
 
     profile_id: UUID = Field(..., description="Connected profile ID")
-    medication_id: UUID | None = Field(None, description="Specific medication ID for medication-related consultation")
     title: str | None = Field(None, max_length=64, description="Session title")
 
 
@@ -55,7 +50,6 @@ class ChatSessionResponse(BaseModel):
     id: UUID = Field(..., description="Session unique ID")
     account_id: UUID = Field(..., description="Connected account ID")
     profile_id: UUID = Field(..., description="Connected profile ID")
-    medication_id: UUID | None = Field(None, description="Connected medication ID")
     title: str | None = Field(None, description="Session title")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")

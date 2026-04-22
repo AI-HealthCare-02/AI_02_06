@@ -56,7 +56,6 @@ async def create_chat_session(
     session = await service.create_session_with_owner_check(
         account_id=current_account.id,
         profile_id=data.profile_id,
-        medication_id=data.medication_id,
         title=data.title,
     )
     return ChatSessionResponse.model_validate(session)

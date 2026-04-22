@@ -131,7 +131,6 @@ class ChatSessionService:
         self,
         account_id: UUID,
         profile_id: UUID,
-        medication_id: UUID | None = None,
         title: str | None = None,
     ) -> ChatSession:
         """Create new chat session.
@@ -139,7 +138,6 @@ class ChatSessionService:
         Args:
             account_id: Account UUID.
             profile_id: Profile UUID.
-            medication_id: Optional medication UUID.
             title: Optional session title.
 
         Returns:
@@ -148,7 +146,6 @@ class ChatSessionService:
         return await self.repository.create(
             account_id=account_id,
             profile_id=profile_id,
-            medication_id=medication_id,
             title=title,
         )
 
@@ -156,7 +153,6 @@ class ChatSessionService:
         self,
         account_id: UUID,
         profile_id: UUID,
-        medication_id: UUID | None = None,
         title: str | None = None,
     ) -> ChatSession:
         """Create chat session with ownership verification.
@@ -164,7 +160,6 @@ class ChatSessionService:
         Args:
             account_id: Account UUID.
             profile_id: Profile UUID.
-            medication_id: Optional medication UUID.
             title: Optional session title.
 
         Returns:
@@ -174,7 +169,6 @@ class ChatSessionService:
         return await self.create_session(
             account_id=account_id,
             profile_id=profile_id,
-            medication_id=medication_id,
             title=title,
         )
 
