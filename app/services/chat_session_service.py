@@ -191,6 +191,29 @@ class ChatSessionService:
         session = await self.get_session(session_id)
         return await self.repository.update(session, title=title)
 
+    async def update_session_title_with_owner_check(
+        self,
+        session_id: UUID,
+        account_id: UUID,
+        title: str,
+    ) -> ChatSession:
+        """Update chat session title after ownership verification.
+
+        Args:
+            session_id: Session UUID.
+            account_id: Account UUID required to own the session.
+            title: New session title (caller is expected to have validated
+                length/whitespace via the DTO).
+
+        Returns:
+            ChatSession: Updated chat session.
+
+        Raises:
+            HTTPException: 404 if session not found, 403 if not owned by account.
+        """
+        session = await self.get_session_with_owner_check(session_id, account_id)
+        return await self.repository.update(session, title=title)
+
     async def delete_session(self, session_id: UUID) -> None:
         """Delete chat session (soft delete).
 

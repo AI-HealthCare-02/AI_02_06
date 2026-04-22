@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 
 from app.dependencies.security import get_current_account
-from app.dtos.chat_session import ChatSessionCreate, ChatSessionResponse
+from app.dtos.chat_session import ChatSessionCreate, ChatSessionResponse, ChatSessionUpdate
 from app.models.accounts import Account
 from app.services.chat_session_service import ChatSessionService
 
@@ -111,6 +111,36 @@ async def list_chat_sessions(
     else:
         sessions = await service.get_sessions_by_account(current_account.id)
     return [ChatSessionResponse.model_validate(s) for s in sessions]
+
+
+@router.patch(
+    "/{session_id}",
+    response_model=ChatSessionResponse,
+    summary="Update chat session title",
+)
+async def update_chat_session(
+    session_id: UUID,
+    data: ChatSessionUpdate,
+    current_account: CurrentAccount,
+    service: ChatSessionServiceDep,
+) -> ChatSessionResponse:
+    """Update a chat session's title (only title is mutable).
+
+    Args:
+        session_id: Chat session ID to update.
+        data: Fields to update; only `title` is currently supported.
+        current_account: Current authenticated account.
+        service: Chat session service instance.
+
+    Returns:
+        ChatSessionResponse: Updated chat session.
+    """
+    session = await service.update_session_title_with_owner_check(
+        session_id=session_id,
+        account_id=current_account.id,
+        title=data.title,
+    )
+    return ChatSessionResponse.model_validate(session)
 
 
 @router.delete(
