@@ -159,7 +159,10 @@ class RAGPipeline:
                     limit=max_sources,
                 )
                 if search_results:
-                    summary = ", ".join(f"{r.medicine.name}({r.final_score:.2f})" for r in search_results)
+                    summary = ", ".join(
+                        f"{r.medicine.medicine_name}({r.final_score:.2f}, {len(r.matched_chunks)}chunks)"
+                        for r in search_results
+                    )
                     logger.info("[RAG] retrieved=%d: %s", len(search_results), summary)
                 else:
                     logger.info("[RAG] retrieved=0 (no matches above threshold)")
@@ -238,16 +241,20 @@ class RAGPipeline:
         parts: list[str] = []
         for r in search_results:
             m = r.medicine
-            drugs = ", ".join(m.contraindicated_drugs or []) or "해당 없음"
-            foods = ", ".join(m.contraindicated_foods or []) or "해당 없음"
-            parts.append(
-                f"[{m.name}]\n"
-                f"주성분: {m.ingredient}\n"
-                f"용도: {m.usage}\n"
-                f"주의사항: {m.disclaimer}\n"
-                f"병용 금기 약물: {drugs}\n"
-                f"병용 금기 음식: {foods}"
-            )
+            header_lines = [f"[{m.medicine_name}]"]
+            if m.category:
+                header_lines.append(f"분류: {m.category}")
+            if m.entp_name:
+                header_lines.append(f"제조사: {m.entp_name}")
+            header = "\n".join(header_lines)
+
+            # Chunk-based body: render each matched chunk with its section tag.
+            # Section code (e.g. "efficacy") is kept as-is for LLM since it
+            # maps 1:1 to the public API ARTICLE structure the team settled on.
+            chunk_lines = [f"  - [{cm.chunk.section}] {cm.chunk.content}" for cm in r.matched_chunks]
+            body = "\n".join(chunk_lines) if chunk_lines else "  (매칭된 청크 없음)"
+
+            parts.append(f"{header}\n{body}")
         return "\n\n".join(parts)
 
     def _default_system_prompt(self, context: str) -> str:
@@ -279,7 +286,10 @@ class RAGPipeline:
         if not search_results:
             return 0.0
         avg = sum(r.final_score for r in search_results) / len(search_results)
-        diversity = min(len({r.medicine.usage for r in search_results}) * 0.1, 0.3)
+        # Diversity bonus now keyed by medicine_info.category (main schema);
+        # the old MedicineInfo.usage field no longer exists.
+        categories = {r.medicine.category for r in search_results if r.medicine.category}
+        diversity = min(len(categories) * 0.1, 0.3)
         return min(avg + diversity, 1.0)
 
     def _clarify_system_prompt(self) -> str:
@@ -304,8 +314,8 @@ class RAGPipeline:
             return RetrievalMetadata()
         top = search_results[0]
         return RetrievalMetadata(
-            medicine_names=[r.medicine.name for r in search_results],
-            medicine_usages=[r.medicine.usage for r in search_results if r.medicine.usage],
+            medicine_names=[r.medicine.medicine_name for r in search_results],
+            medicine_usages=[r.medicine.category for r in search_results if r.medicine.category],
             top_similarity=top.vector_score,
             vector_score=top.vector_score,
             keyword_score=top.keyword_score,
@@ -323,9 +333,10 @@ class RAGPipeline:
         """
         return [
             {
-                "name": r.medicine.name,
-                "usage": r.medicine.usage,
-                "ingredient": r.medicine.ingredient,
+                "name": r.medicine.medicine_name,
+                "item_seq": r.medicine.item_seq,
+                "category": r.medicine.category,
+                "matched_sections": [cm.chunk.section for cm in r.matched_chunks],
                 "relevance_score": round(r.final_score, 3),
             }
             for r in search_results
