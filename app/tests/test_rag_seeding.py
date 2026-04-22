@@ -1,7 +1,8 @@
-"""RAG Seeding Script Tests.
+"""Tests for the medicine_info RAG seeding script.
 
-This module contains tests for the RAG data seeding functionality
-that loads medicines.json into pgvector database.
+Covers pure helpers (chunk text, content hash, JSON load, embedding
+normalization) and the DB-touching `seed_medicine_to_db` flow mocked
+against the MedicineInfo model.
 """
 
 import hashlib
@@ -13,16 +14,17 @@ import pytest
 from scripts.seed_rag_data import (
     build_chunk_text,
     compute_content_hash,
+    generate_embedding,
     load_medicines_json,
     seed_medicine_to_db,
 )
 
 
 class TestChunkTextFormat:
-    """Tests for chunk text generation."""
+    """Tests for chunk text generation from medicine dicts."""
 
     def test_build_chunk_text_with_all_fields(self) -> None:
-        """Test chunk text format with all fields populated."""
+        """Chunk text must embed every relevant field."""
         medicine = {
             "id": 1,
             "name": "타이레놀정 500mg",
@@ -44,7 +46,7 @@ class TestChunkTextFormat:
         assert "술(알코올)" in result
 
     def test_build_chunk_text_with_no_contraindications(self) -> None:
-        """Test chunk text with '해당 없음' contraindications."""
+        """'해당 없음' contraindications must be rendered verbatim."""
         medicine = {
             "id": 26,
             "name": "후시딘",
@@ -62,7 +64,7 @@ class TestChunkTextFormat:
         assert "해당 없음" in result
 
     def test_build_chunk_text_with_multiple_contraindicated_drugs(self) -> None:
-        """Test chunk text with multiple contraindicated drugs."""
+        """Multiple contraindicated items must be joined by comma + space."""
         medicine = {
             "id": 4,
             "name": "게보린정",
@@ -83,7 +85,7 @@ class TestLoadMedicinesJson:
     """Tests for JSON file loading."""
 
     def test_load_medicines_json_success(self) -> None:
-        """Test successful loading of medicines.json."""
+        """medicines.json must load and contain the 50 seeded entries."""
         medicines = load_medicines_json()
 
         assert isinstance(medicines, list)
@@ -91,7 +93,7 @@ class TestLoadMedicinesJson:
         assert medicines[0]["name"] == "타이레놀정 500mg"
 
     def test_load_medicines_json_structure(self) -> None:
-        """Test that loaded JSON has correct structure."""
+        """Every entry must carry the required MedicineInfo-mapped keys."""
         medicines = load_medicines_json()
 
         required_keys = {
@@ -108,7 +110,7 @@ class TestLoadMedicinesJson:
             assert required_keys.issubset(medicine.keys())
 
     def test_load_medicines_json_file_not_found(self) -> None:
-        """Test handling of missing JSON file."""
+        """Missing file must return an empty list, not raise."""
         with patch.object(Path, "exists", return_value=False):
             result = load_medicines_json(Path("/nonexistent/path.json"))
             assert result == []
@@ -118,30 +120,24 @@ class TestContentHash:
     """Tests for content hash computation."""
 
     def test_compute_content_hash(self) -> None:
-        """Test content hash computation."""
+        """Hash must match Python's stdlib SHA-256 hexdigest."""
         content = "테스트 컨텐츠"
         expected = hashlib.sha256(content.encode()).hexdigest()
 
-        result = compute_content_hash(content)
-
-        assert result == expected
+        assert compute_content_hash(content) == expected
 
     def test_compute_content_hash_deterministic(self) -> None:
-        """Test that hash is deterministic."""
+        """Same input must always yield the same hash."""
         content = "동일한 컨텐츠"
-
-        hash1 = compute_content_hash(content)
-        hash2 = compute_content_hash(content)
-
-        assert hash1 == hash2
+        assert compute_content_hash(content) == compute_content_hash(content)
 
 
 class TestSeedMedicineToDb:
-    """Tests for database seeding logic."""
+    """Tests for DB seeding with the MedicineInfo model (mocked)."""
 
     @pytest.mark.asyncio
-    async def test_seed_medicine_creates_document(self) -> None:
-        """Test that seeding creates PharmaceuticalDocument."""
+    async def test_seed_medicine_creates_medicine_info_row(self) -> None:
+        """Seeding must upsert a single MedicineInfo row per medicine."""
         medicine = {
             "id": 1,
             "name": "타이레놀정 500mg",
@@ -155,31 +151,25 @@ class TestSeedMedicineToDb:
         mock_embedding = [0.1] * 768
 
         with (
-            patch("scripts.seed_rag_data.PharmaceuticalDocument") as mock_doc_cls,
-            patch("scripts.seed_rag_data.DocumentChunk") as mock_chunk_cls,
+            patch("scripts.seed_rag_data.MedicineInfo") as mock_model,
             patch(
                 "scripts.seed_rag_data.generate_embedding",
                 new_callable=AsyncMock,
                 return_value=mock_embedding,
             ),
         ):
-            mock_doc = MagicMock()
-            mock_doc.id = 1
-            mock_doc_cls.create = AsyncMock(return_value=mock_doc)
-            mock_chunk_cls.create = AsyncMock()
-            # Mock filter().first() chain for existence check
             mock_filter = MagicMock()
             mock_filter.first = AsyncMock(return_value=None)
-            mock_chunk_cls.filter = MagicMock(return_value=mock_filter)
+            mock_model.filter = MagicMock(return_value=mock_filter)
+            mock_model.create = AsyncMock()
 
             await seed_medicine_to_db(medicine)
 
-            mock_doc_cls.create.assert_called_once()
-            mock_chunk_cls.create.assert_called_once()
+            mock_model.create.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_seed_medicine_creates_chunk_with_embedding(self) -> None:
-        """Test that seeding creates DocumentChunk with embedding."""
+    async def test_seed_medicine_stores_embedding_and_fields(self) -> None:
+        """Seeding must pass the embedding and every medicine field to the model."""
         medicine = {
             "id": 2,
             "name": "까스활명수큐",
@@ -193,81 +183,102 @@ class TestSeedMedicineToDb:
         mock_embedding = [0.5] * 768
 
         with (
-            patch("scripts.seed_rag_data.PharmaceuticalDocument") as mock_doc_cls,
-            patch("scripts.seed_rag_data.DocumentChunk") as mock_chunk_cls,
+            patch("scripts.seed_rag_data.MedicineInfo") as mock_model,
             patch(
                 "scripts.seed_rag_data.generate_embedding",
                 new_callable=AsyncMock,
                 return_value=mock_embedding,
             ),
         ):
-            mock_doc = MagicMock()
-            mock_doc.id = 1
-            mock_doc_cls.create = AsyncMock(return_value=mock_doc)
-            mock_chunk_cls.create = AsyncMock()
-            # Mock filter().first() chain for existence check
             mock_filter = MagicMock()
             mock_filter.first = AsyncMock(return_value=None)
-            mock_chunk_cls.filter = MagicMock(return_value=mock_filter)
+            mock_model.filter = MagicMock(return_value=mock_filter)
+            mock_model.create = AsyncMock()
 
             await seed_medicine_to_db(medicine)
 
-            call_kwargs = mock_chunk_cls.create.call_args.kwargs
-            assert call_kwargs["embedding"] == mock_embedding
-            assert len(call_kwargs["embedding"]) == 768
+            kwargs = mock_model.create.call_args.kwargs
+            assert kwargs["name"] == "까스활명수큐"
+            assert kwargs["ingredient"] == "현삼, 육계, 정향"
+            assert kwargs["usage"] == "소화불량"
+            assert kwargs["disclaimer"] == "임부 및 수유부는 의사 상의 요망"
+            assert kwargs["contraindicated_drugs"] == ["위장운동 조절제"]
+            assert kwargs["contraindicated_foods"] == ["매운 음식", "탄산음료"]
+            assert kwargs["embedding"] == mock_embedding
+            assert kwargs["embedding_normalized"] is True
+            assert len(kwargs["embedding"]) == 768
 
     @pytest.mark.asyncio
-    async def test_seed_medicine_extracts_keywords(self) -> None:
-        """Test that seeding extracts keywords from contraindications."""
+    async def test_seed_medicine_skips_existing(self) -> None:
+        """Existing name must cause an early skip with no create call."""
         medicine = {
-            "id": 4,
-            "name": "게보린정",
-            "ingredient": "아세트아미노펜, 이소프로필안티피린",
-            "disclaimer": "공복 복용 피할 것",
-            "contraindicated_drugs": ["진정제", "다른 진통제"],
-            "contraindicated_foods": ["술", "고카페인"],
-            "usage": "강한 진통",
+            "id": 1,
+            "name": "타이레놀정 500mg",
+            "ingredient": "아세트아미노펜",
+            "disclaimer": "일일 최대 4,000mg 초과 금지",
+            "contraindicated_drugs": ["간독성 유발 약물"],
+            "contraindicated_foods": ["술(알코올)"],
+            "usage": "해열진통",
         }
 
-        mock_embedding = [0.2] * 768
-
         with (
-            patch("scripts.seed_rag_data.PharmaceuticalDocument") as mock_doc_cls,
-            patch("scripts.seed_rag_data.DocumentChunk") as mock_chunk_cls,
+            patch("scripts.seed_rag_data.MedicineInfo") as mock_model,
             patch(
                 "scripts.seed_rag_data.generate_embedding",
                 new_callable=AsyncMock,
-                return_value=mock_embedding,
+                return_value=[0.1] * 768,
             ),
         ):
-            mock_doc = MagicMock()
-            mock_doc.id = 1
-            mock_doc_cls.create = AsyncMock(return_value=mock_doc)
-            mock_chunk_cls.create = AsyncMock()
-            # Mock filter().first() chain for existence check
             mock_filter = MagicMock()
-            mock_filter.first = AsyncMock(return_value=None)
-            mock_chunk_cls.filter = MagicMock(return_value=mock_filter)
+            mock_filter.first = AsyncMock(return_value=MagicMock())  # existing row
+            mock_model.filter = MagicMock(return_value=mock_filter)
+            mock_model.create = AsyncMock()
 
             await seed_medicine_to_db(medicine)
 
-            call_kwargs = mock_chunk_cls.create.call_args.kwargs
-            keywords = call_kwargs["keywords"]
-            assert "진정제" in keywords
-            assert "술" in keywords
+            mock_model.create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_seed_medicine_dry_run_does_not_touch_db(self) -> None:
+        """`dry_run=True` must skip existence check and create call."""
+        medicine = {
+            "id": 3,
+            "name": "아로나민 골드",
+            "ingredient": "활성비타민 B군",
+            "disclaimer": "뇨색 변색 가능성 있음",
+            "contraindicated_drugs": ["레보도파"],
+            "contraindicated_foods": ["차(탄닌 함유)"],
+            "usage": "피로회복",
+        }
+
+        with (
+            patch("scripts.seed_rag_data.MedicineInfo") as mock_model,
+            patch(
+                "scripts.seed_rag_data.generate_embedding",
+                new_callable=AsyncMock,
+                return_value=[0.2] * 768,
+            ),
+        ):
+            mock_model.create = AsyncMock()
+            mock_model.filter = MagicMock()
+
+            await seed_medicine_to_db(medicine, dry_run=True)
+
+            mock_model.create.assert_not_called()
+            mock_model.filter.assert_not_called()
 
 
 class TestEmbeddingGeneration:
-    """Tests for embedding generation."""
+    """Tests for embedding generation and L2 normalization."""
 
     @pytest.mark.asyncio
-    async def test_generate_embedding_returns_768_dimensions(self) -> None:
-        """Test that embedding generation returns 768-dimensional vector."""
+    async def test_generate_embedding_returns_configured_dimensions(self) -> None:
+        """Generated embedding length must match EMBEDDING_DIMENSIONS."""
         import numpy as np
 
-        from scripts.seed_rag_data import generate_embedding
+        from app.services.rag.config import EMBEDDING_DIMENSIONS
 
-        mock_embedding = np.array([0.1] * 768)
+        mock_embedding = np.array([0.1] * EMBEDDING_DIMENSIONS)
 
         with patch("scripts.seed_rag_data.get_embedding_model") as mock_get_model:
             mock_model = MagicMock()
@@ -276,17 +287,14 @@ class TestEmbeddingGeneration:
 
             result = await generate_embedding("테스트 텍스트")
 
-            assert len(result) == 768
+            assert len(result) == EMBEDDING_DIMENSIONS
             mock_model.encode.assert_called_once_with("테스트 텍스트")
 
     @pytest.mark.asyncio
     async def test_generate_embedding_returns_normalized_vector(self) -> None:
-        """Test that embedding is L2-normalized."""
+        """Output vector must have L2 norm approximately 1."""
         import numpy as np
 
-        from scripts.seed_rag_data import generate_embedding
-
-        # Non-normalized vector
         mock_embedding = np.array([3.0, 4.0] + [0.0] * 766)
 
         with patch("scripts.seed_rag_data.get_embedding_model") as mock_get_model:
@@ -296,6 +304,5 @@ class TestEmbeddingGeneration:
 
             result = await generate_embedding("테스트 텍스트")
 
-            # Check L2 norm is approximately 1
             norm = np.linalg.norm(result)
             assert abs(norm - 1.0) < 0.001
