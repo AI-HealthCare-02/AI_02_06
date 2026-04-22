@@ -540,4 +540,3 @@ def has_medication_changed(snapshot: list[dict], current: list[dict]) -> bool:
 
 ---
 
-*`go` 명령어를 입력하시면 Step 0 브랜치 생성부터 시작합니다.*
