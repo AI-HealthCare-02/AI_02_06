@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Trash2 } from 'lucide-react'
-import BottomNav from '@/components/BottomNav'
+import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
 
 // 로딩 스켈레톤 UI
@@ -37,6 +37,7 @@ function OcrResultContent() {
 
   const [isLoading, setIsLoading] = useState(true)
   const [meds, setMeds] = useState([])
+  const [prescriptionDate, setPrescriptionDate] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
@@ -51,7 +52,11 @@ function OcrResultContent() {
       try {
         // API 인스턴스로 조회
         const response = await api.get(`/api/v1/ocr/draft/${draftId}`)
-        setMeds(response.data.medicines)
+        const medicines = response.data.medicines
+        setMeds(medicines)
+        // 첫 번째 약품에서 처방일 초기값 설정 (처방전 전체 공통)
+        const firstDate = medicines[0]?.dispensed_date || ''
+        setPrescriptionDate(firstDate)
       } catch (err) {
         // 데이터가 만료(10분 경과)되었거나 서버 에러 시 튕겨냅니다.
         alert('데이터가 만료되었거나 불러올 수 없습니다. 다시 촬영해주세요.')
@@ -87,13 +92,18 @@ function OcrResultContent() {
 
     setIsSubmitting(true)
     try {
+      // 처방일을 모든 약품에 공통 적용
+      const confirmedMedicines = meds.map(med => ({
+        ...med,
+        dispensed_date: prescriptionDate || null,
+      }))
       await api.post('/api/v1/ocr/confirm', {
         draft_id: draftId,
-        confirmed_medicines: meds
+        confirmed_medicines: confirmedMedicines,
       }, { timeout: 60000 })
 
       alert('저장 완료! 복약 목록에서 확인해보세요.')
-      router.push('/main')
+      router.push('/medication')
 
     } catch (error) {
       alert('저장 중 오류가 발생했습니다.')
@@ -122,6 +132,20 @@ function OcrResultContent() {
             <p className="font-semibold text-blue-800 text-sm">확인해주세요!</p>
             <p className="text-blue-600 text-xs">AI가 인식한 결과입니다. 틀린 글자는 터치해서 고칠 수 있어요.</p>
           </div>
+        </div>
+
+        {/* 처방일 (처방전 전체 공통) */}
+        <div className="bg-white rounded-2xl p-5 border border-gray-200 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-bold text-gray-900">처방일</p>
+            <p className="text-xs text-gray-400 mt-0.5">처방전에 적힌 날짜를 확인해주세요</p>
+          </div>
+          <input
+            type="date"
+            value={prescriptionDate}
+            onChange={(e) => setPrescriptionDate(e.target.value)}
+            className="text-sm font-bold text-gray-700 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50"
+          />
         </div>
 
         {/* 약물 리스트 카드 (수정 가능한 Input UI 적용) */}

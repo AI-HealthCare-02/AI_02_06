@@ -76,13 +76,22 @@ jobs:
             echo "=== [2/5] Stop containers ==="
             docker compose -f docker-compose.prod.yml down || true
 
-            echo "=== [3/5] Build and start ==="
+            echo "=== [3/6] Build and start ==="
             docker compose -f docker-compose.prod.yml up -d --build
 
-            echo "=== [4/5] Wait 45s ==="
-            sleep 45
+            echo "=== [4/6] Wait for DB ready ==="
+            sleep 30
 
-            echo "=== [5/5] Status ==="
+            echo "=== [5/6] Run migrations ==="
+            # Check if there are pending migrations and apply them
+            docker compose -f docker-compose.prod.yml exec -T fastapi aerich upgrade || {
+              echo "Migration failed, checking status..."
+              docker compose -f docker-compose.prod.yml exec -T fastapi aerich status
+              exit 1
+            }
+            echo "Migrations completed successfully"
+
+            echo "=== [6/6] Status ==="
             docker compose -f docker-compose.prod.yml ps
             echo "--- FastAPI Logs ---"
             docker compose -f docker-compose.prod.yml logs fastapi --tail=15 || true

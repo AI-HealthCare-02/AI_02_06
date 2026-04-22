@@ -63,6 +63,21 @@ class IntakeLogRepository:
         """
         return await IntakeLog.filter(medication_id=medication_id).all()
 
+    async def get_taken_dates_by_profile(self, profile_id: UUID) -> set[date]:
+        """Get all dates with at least one taken intake log for a profile.
+
+        Args:
+            profile_id: Profile UUID.
+
+        Returns:
+            set[date]: Set of dates with at least one TAKEN log.
+        """
+        dates = await IntakeLog.filter(
+            profile_id=profile_id,
+            intake_status="TAKEN",
+        ).values_list("scheduled_date", flat=True)
+        return set(dates)
+
     async def get_pending_by_profile(self, profile_id: UUID) -> list[IntakeLog]:
         """Get pending intake logs for a profile.
 

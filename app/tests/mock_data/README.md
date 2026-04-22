@@ -37,12 +37,12 @@
 
 | scenario | 인가코드 | 토큰교환 | 유저정보 | DB조회 | 최종 결과 |
 |---|---|---|---|---|---|
-| `existing_user` | ✅ | ✅ 200 | ✅ 200 | ✅ 존재 + is_active=true | **로그인 성공 → JWT 발급** |
-| `new_user` | ✅ | ✅ 200 | ✅ 200 | ❌ 없음 | **회원가입 프로세스 진입** |
-| `no_email_user` | ✅ | ✅ 200 | ⚠️ email 없음 | - | **400 이메일 필수값 누락** |
-| `unlinked_user` | ✅ | ✅ 200 | ❌ 401 | - | **401 카카오 연결 끊김** |
-| `deactivated_user` | ✅ | ✅ 200 | ✅ 200 | ✅ 존재 + is_active=false | **423 비활성화 계정** |
-| `expired_code` | ✅ | ❌ 400 KOE320 | - | - | **400 인가코드 만료** |
+| `existing_user` | | 200 | 200 | 존재 + is_active=true | **로그인 성공 → JWT 발급** |
+| `new_user` | | 200 | 200 | 없음 | **회원가입 프로세스 진입** |
+| `no_email_user` | | 200 | email 없음 | - | **400 이메일 필수값 누락** |
+| `unlinked_user` | | 200 | 401 | - | **401 카카오 연결 끊김** |
+| `deactivated_user` | | 200 | 200 | 존재 + is_active=false | **423 비활성화 계정** |
+| `expired_code` | | 400 KOE320 | - | - | **400 인가코드 만료** |
 
 ---
 

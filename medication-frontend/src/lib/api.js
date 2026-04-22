@@ -7,7 +7,7 @@ import { config } from '@/config/env';
 import { parseApiError, ERROR_CODE_MESSAGES, HTTP_STATUS_MESSAGES } from './errors';
 
 const api = axios.create({
-  baseURL: config.API_BASE_URL,
+  baseURL: config.API_BASE_URL, // 이미 cleanApiUrl로 처리됨
   withCredentials: true,
   timeout: 60000,
 });
@@ -24,6 +24,11 @@ api.interceptors.response.use(
     const originalRequest = error.config;
     const status = error.response?.status;
 
+    // AuthGuard에서 인터셉터 비활성화 요청 시 바로 에러 반환
+    if (originalRequest.skipAuthInterceptor) {
+      return Promise.reject(error);
+    }
+
     // 401 Unauthorized - 토큰 갱신 시도
     if (status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
@@ -33,7 +38,7 @@ api.interceptors.response.use(
       }
 
       try {
-        const { refreshToken } = await import('./tokenManager');
+        const { refreshToken } = await import('./authManager');
         const refreshed = await refreshToken();
 
         if (refreshed) {

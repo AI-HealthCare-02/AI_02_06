@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { X, Send, RefreshCw, Plus, Pencil, Trash2, Check } from 'lucide-react'
+import PropTypes from 'prop-types'
 import api, { showError } from '@/lib/api'
 
 /**
@@ -407,4 +408,12 @@ export default function ChatModal({ onClose, profileId }) {
       </div>
     </div>
   )
+}
+
+ChatModal.propTypes = {
+  onClose: PropTypes.func.isRequired,
+  profileId: PropTypes.oneOfType([
+    PropTypes.string,
+    PropTypes.number
+  ]).isRequired
 }

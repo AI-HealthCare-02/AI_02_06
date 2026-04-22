@@ -1,12 +1,13 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { User, Activity, Users, Home, Trash2, X, Check, Plus, FileText, LogOut } from 'lucide-react'
-import EmptyState from '@/components/EmptyState'
-import BottomNav from '@/components/BottomNav'
-import LogoutModal, { useLogout, DeleteAccountModal, useDeleteAccount } from '@/components/LogoutModal'
+import EmptyState from '@/components/common/EmptyState'
+import BottomNav from '@/components/layout/BottomNav'
+import LogoutModal, { useLogout, DeleteAccountModal, useDeleteAccount } from '@/components/auth/LogoutModal'
 import api, { handleApiError } from '@/lib/api'
 import toast from 'react-hot-toast'
+import { useProfile } from '@/contexts/ProfileContext'
 
 // --- 모달 컴포넌트들 (main의 UI 유지, donghoon의 데이터 필드 반영) ---
 function Modal({ title, children, onClose, onSave }) {
@@ -216,28 +217,54 @@ function MyPageSkeleton() {
 
 export default function MyPage() {
   const router = useRouter()
+  const { selectedProfileId: profileId, selectedProfile } = useProfile()
+  const isInitialLoad = useRef(true)
   const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [activeMenu, setActiveMenu] = useState('기본정보')
   const [userProfile, setUserProfile] = useState(null)
   const [family, setFamily] = useState([])
   const [ongoingCount, setOngoingCount] = useState(0)
+  const [streakDays, setStreakDays] = useState(0)
   const [modalType, setModalType] = useState(null)
   const [selectedFamilyMember, setSelectedFamilyMember] = useState(null)
 
   const relationLabels = { SELF: '본인', PARENT: '부모님', CHILD: '자녀', SPOUSE: '배우자', OTHER: '기타' }
 
-  useEffect(() => { fetchData() }, [])
+  useEffect(() => {
+    if (!profileId) return
+    fetchData()
+  }, [profileId])
+
+  // 프로필이 OTHER로 바뀌었는데 가족관리 탭이 활성화되어 있으면 기본정보로 초기화
+  useEffect(() => {
+    if (selectedProfile?.relation_type === 'OTHER' && activeMenu === '가족관리') {
+      setActiveMenu('기본정보')
+    }
+  }, [selectedProfile?.relation_type])
 
   const fetchData = async () => {
-    try {
+    if (isInitialLoad.current) {
       setIsLoading(true)
-      const res = await api.get('/api/v1/profiles')
-      const self = res.data.find(p => p.relation_type === 'SELF') || res.data[0]
-      setUserProfile(self)
-      setFamily(res.data.filter(p => p.relation_type !== 'SELF'))
-      const challengeRes = await api.get('/api/v1/challenges')
+    } else {
+      setIsRefreshing(true)
+    }
+    try {
+      const [profileRes, listRes, challengeRes, streakRes] = await Promise.all([
+        api.get(`/api/v1/profiles/${profileId}`),
+        api.get('/api/v1/profiles'),
+        api.get(`/api/v1/challenges?profile_id=${profileId}`),
+        api.get(`/api/v1/intake-logs/streak?profile_id=${profileId}`),
+      ])
+      setUserProfile(profileRes.data)
+      setFamily(listRes.data.filter(p => p.relation_type !== 'SELF'))
       setOngoingCount(challengeRes.data.length)
-    } catch (err) { handleApiError(err) } finally { setIsLoading(false) }
+      setStreakDays(streakRes.data.streak_days ?? 0)
+    } catch (err) { handleApiError(err) } finally {
+      setIsLoading(false)
+      setIsRefreshing(false)
+      isInitialLoad.current = false
+    }
   }
 
   const handleSaveBasic = async (newData) => {
@@ -296,16 +323,16 @@ export default function MyPage() {
   const { showLogoutModal, setShowLogoutModal, handleLogout } = useLogout()
   const { showDeleteModal, setShowDeleteModal, handleDeleteAccount } = useDeleteAccount()
 
-  if (isLoading) return <MyPageSkeleton />
+  if (isLoading || !profileId) return <MyPageSkeleton />
 
   const menuItems = [
     { id: '기본정보', label: '기본 정보', icon: <User size={18} /> },
     { id: '건강정보', label: '건강 정보', icon: <Activity size={18} /> },
-    { id: '가족관리', label: '가족 관리', icon: <Users size={18} /> },
+    ...(selectedProfile?.relation_type !== 'OTHER' ? [{ id: '가족관리', label: '가족 관리', icon: <Users size={18} /> }] : []),
   ]
 
   return (
-    <main className="max-w-[1400px] mx-auto w-full px-8 py-12 min-h-screen bg-slate-50 relative">
+    <main className={`max-w-[1400px] mx-auto w-full px-8 py-12 min-h-screen bg-slate-50 relative transition-opacity duration-200 ${isRefreshing ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
       <div className="flex justify-between items-end mb-10 bg-white p-10 rounded-[40px] shadow-sm border border-gray-100">
         <div>
           <p className="text-gray-400 text-sm font-bold mb-2">내 설정 및 관리</p>
@@ -327,7 +354,7 @@ export default function MyPage() {
               <div className="grid grid-cols-2 gap-3 w-full">
                 <div className="bg-gray-50 p-4 rounded-[24px] border border-gray-100">
                   <p className="text-[10px] font-black text-gray-500 mb-1">연속 복약</p>
-                  <p className="text-lg font-black text-gray-800">3일째 🔥</p>
+                  <p className="text-lg font-black text-gray-800">{streakDays}일째 🔥</p>
                 </div>
                 <div className="bg-orange-50 p-4 rounded-[24px] border border-orange-100">
                   <p className="text-[10px] font-black text-orange-500 mb-1">진행 챌린지</p>

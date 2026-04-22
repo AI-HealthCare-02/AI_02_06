@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, status
 
 from app.dependencies.security import get_current_account
 from app.dtos.drug_info import DrugInfoResponse
-from app.dtos.medication import MedicationCreate, MedicationResponse, MedicationUpdate
+from app.dtos.medication import MedicationCreate, MedicationResponse, MedicationUpdate, PrescriptionDateItem
 from app.models.accounts import Account
 from app.services.medication_service import MedicationService
 
@@ -76,10 +76,10 @@ async def list_medications(
         service: Medication service instance.
         profile_id: Optional profile ID to filter by.
         active_only: Whether to return only active medications.
-        inactive_only: Whether to return only inactive medications.
+        inactive_only: Whether to return only inactive (completed/expired) medications.
 
     Returns:
-        List[MedicationResponse]: List of medications.
+        list[MedicationResponse]: List of medications.
     """
     if profile_id:
         # Verify profile ownership and retrieve medications
@@ -93,6 +93,29 @@ async def list_medications(
         # Retrieve medications for all profiles of the account
         medications = await service.get_medications_by_account(current_account.id)
     return [MedicationResponse.model_validate(med) for med in medications]
+
+
+@router.get(
+    "/prescription-dates",
+    response_model=list[PrescriptionDateItem],
+    summary="List prescription dates",
+)
+async def list_prescription_dates(
+    profile_id: UUID,
+    current_account: CurrentAccount,
+    service: MedicationServiceDep,
+) -> list[PrescriptionDateItem]:
+    """Get prescription date summary grouped by date and department.
+
+    Args:
+        profile_id: Profile UUID to retrieve prescription dates for.
+        current_account: Current authenticated account.
+        service: Medication service instance.
+
+    Returns:
+        list[PrescriptionDateItem]: Prescription dates sorted by date descending.
+    """
+    return await service.get_prescription_dates_with_owner_check(profile_id, current_account.id)
 
 
 @router.get(

@@ -4,10 +4,25 @@ This module contains data transfer objects for medication intake log operations
 including creation, updates, and response serialization.
 """
 
+import zoneinfo
 from datetime import date, datetime, time
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# DTO 경계에서 naive datetime 유입을 차단하기 위한 KST 타임존 상수
+_KST = zoneinfo.ZoneInfo("Asia/Seoul")
+
+
+def _make_aware(v: datetime | None) -> datetime | None:
+    """Return timezone-aware datetime; assume KST if tzinfo is missing.
+
+    tzinfo가 없는 naive datetime은 KST로 간주하여 aware datetime으로 변환합니다.
+    이미 aware datetime이면 그대로 반환합니다.
+    """
+    if v is None:
+        return v
+    return v if v.tzinfo is not None else v.replace(tzinfo=_KST)
 
 
 class BaseIntakeLog(BaseModel):
@@ -25,6 +40,12 @@ class BaseIntakeLog(BaseModel):
         description="Intake status (e.g., SCHEDULED, TAKEN, MISSED)",
     )
     taken_at: datetime | None = Field(None, description="Actual intake completion time")
+
+    @field_validator("taken_at", mode="before")
+    @classmethod
+    def ensure_aware_taken_at(cls, v: datetime | None) -> datetime | None:
+        """Reject naive datetime; assume KST when tzinfo is absent."""
+        return _make_aware(v)
 
 
 class IntakeLogCreate(BaseIntakeLog):
@@ -49,6 +70,21 @@ class IntakeLogUpdate(BaseModel):
     scheduled_time: time | None = Field(None, description="Scheduled intake time")
     intake_status: str | None = Field(None, max_length=16, description="Intake status")
     taken_at: datetime | None = Field(None, description="Actual intake completion time")
+
+    @field_validator("taken_at", mode="before")
+    @classmethod
+    def ensure_aware_taken_at(cls, v: datetime | None) -> datetime | None:
+        """Reject naive datetime; assume KST when tzinfo is absent."""
+        return _make_aware(v)
+
+
+class StreakResponse(BaseModel):
+    """Medication streak response model.
+
+    Used for returning consecutive medication days count for a profile.
+    """
+
+    streak_days: int = Field(..., description="Number of consecutive days with at least one taken medication")
 
 
 class IntakeLogResponse(BaseIntakeLog):

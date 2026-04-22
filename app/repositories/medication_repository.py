@@ -4,11 +4,14 @@ This module provides data access layer for the medications table,
 handling prescription medication management operations.
 """
 
-from datetime import UTC, date, datetime
+from collections import defaultdict
+from datetime import date, datetime
 from uuid import UUID, uuid4
 
 from tortoise.expressions import Q
 
+from app.core import config
+from app.dtos.medication import PrescriptionDateItem
 from app.models.medication import Medication
 
 
@@ -68,8 +71,7 @@ class MedicationRepository:
         Returns:
             list[Medication]: List of active medications.
         """
-        today = datetime.now(tz=UTC).date()
-
+        today = datetime.now(tz=config.TIMEZONE).date()
         return (
             await Medication
             .filter(
@@ -82,8 +84,15 @@ class MedicationRepository:
         )
 
     async def get_inactive_by_profile(self, profile_id: UUID) -> list[Medication]:
-        """프로필의 복용 완료된 약품 조회 (수동 완료 처리 or end_date 경과)"""
-        today = datetime.now(tz=UTC).date()
+        """Get completed or expired medications for a profile.
+
+        Args:
+            profile_id: Profile UUID.
+
+        Returns:
+            list[Medication]: List of inactive medications (manually completed or past end_date).
+        """
+        today = datetime.now(tz=config.TIMEZONE).date()
         return (
             await Medication
             .filter(
@@ -92,6 +101,37 @@ class MedicationRepository:
             )
             .filter(Q(is_active=False) | Q(end_date__lt=today, end_date__isnull=False))
             .all()
+        )
+
+    async def get_prescription_dates_by_profile(self, profile_id: UUID) -> list[PrescriptionDateItem]:
+        """Get prescription date summary grouped by date and department for a profile.
+
+        Uses dispensed_date if available, falls back to start_date.
+        Results are sorted by date descending.
+
+        Args:
+            profile_id: Profile UUID.
+
+        Returns:
+            list[PrescriptionDateItem]: Grouped and sorted prescription date items.
+        """
+        medications = await Medication.filter(
+            profile_id=profile_id,
+            deleted_at__isnull=True,
+        ).all()
+
+        counts: defaultdict[tuple[date, str | None], int] = defaultdict(int)
+        for med in medications:
+            key_date = med.dispensed_date or med.start_date
+            counts[(key_date, med.department)] += 1
+
+        return sorted(
+            [
+                PrescriptionDateItem(prescription_date=key_date, department=dept, count=cnt)
+                for (key_date, dept), cnt in counts.items()
+            ],
+            key=lambda item: item.prescription_date,
+            reverse=True,
         )
 
     async def create(
@@ -145,6 +185,21 @@ class MedicationRepository:
             is_active=True,
         )
 
+    async def decrement_remaining_count(self, medication: Medication) -> Medication:
+        """Decrement remaining intake count by one (minimum 0).
+
+        Args:
+            medication: Medication to update.
+
+        Returns:
+            Medication: Updated medication.
+        """
+        if medication.remaining_intake_count <= 0:
+            return medication
+        medication.remaining_intake_count -= 1
+        await medication.save()
+        return medication
+
     async def update(self, medication: Medication, **kwargs) -> Medication:
         """Update medication information.
 
@@ -167,8 +222,6 @@ class MedicationRepository:
         Returns:
             Medication: Soft deleted medication.
         """
-        from app.core import config
-
         medication.deleted_at = datetime.now(tz=config.TIMEZONE)
         await medication.save()
         return medication

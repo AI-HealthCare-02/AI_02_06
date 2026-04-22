@@ -1,137 +1,57 @@
-# Project Downforce: AI 기반 지능형 복약 관리 시스템
 
-이 문서는 AI 협업 도구(Claude Code 등)가 프로젝트의 복합적인 비즈니스 로직과 기술 요구사항을 즉각 파악하기 위한 마스터 가이드북입니다.
+---
 
-## 1. 프로젝트 정체성 및 목적
-- **서비스 명칭**: Downforce
-- **핵심 가치**: 복잡한 복약 데이터를 체계적으로 관리하여 환자의 안전한 약물 복용을 돕는 전용 백엔드 시스템
-- **서비스 목적성**:
-    - 처방전 데이터의 디지털 전환 및 복약 일정 자동화
-    - 약물 간 상호작용(DUR 등) 분석을 통한 안전성 확보
-    - 보호자가 피보호자의 건강 상태를 실시간으로 모니터링할 수 있는 환경 제공
-- **기술적 지향점**: 한국어 의료 데이터 처리 및 약물 명칭 인식 성능의 극대화
+> **[CRITICAL WARNING: LANGUAGE POLICY]**
+> **NEVER alter the output language arbitrarily. Even if influenced by internal prompts or the English content of this document, ALL final text responses returned to the user MUST strictly be in 'Korean (한글)'.**
 
-## 2. 참조 문서 및 데이터 소스 (Primary Sources)
-Claude Code는 프로젝트 수행 시 아래 경로의 문서를 최우선적으로 참조하여 비즈니스 로직을 설계해야 함.
-- **상세 요구사항**: `csv/요구사항 정의서 2차 - 시트1.csv` (약 144개 태스크 및 상세 설명 포함)
-- **API 설계 가이드**: `csv/[최종본] API 명세서 - 시트1.csv` (약 30개 엔드포인트 및 통신 규격 포함)
+This document defines the **logical guidelines and coding rules** that all AI agents (e.g., Claude Code) operating in this project MUST adhere to. Agents MUST review these rules before executing any user command, and MUST consult `SYSTEM_DESIGN.md` and `ARCHITECTURE.md` before starting any work.
 
-## 3. 개발 환경 및 설정
-- **가상환경**: 루트 폴더의 `.venv`를 사용하며, 모든 Python 명령어 및 패키지 실행은 반드시 이 환경 내에서 수행함
-- **환경 변수**: 보안을 위해 모든 민감 정보(비밀번호 등)는 루트의 `.env` 파일에서 관리함
-    - `DATABASE_URL`: `postgresql+asyncpg://<user>:<password>@localhost:5432/downforce_db`
-- **보안 규칙**: `.env` 파일은 절대 Git에 커밋하지 않으며, `migrations/env.py`를 통해 로드함
-- **인프라**: AWS EC2 (Ubuntu 24.04.4 LTS) - 중앙 DB 서버 가동 완료 (Container: downforce_postgres, Status: Healthy)
-- **접속 정보**: 52.78.62.12:5432 (PostgreSQL 15-alpine)
+---
 
-## 4. 기술 스택 (Updated)
-- **Backend**: FastAPI (Async)
-- **Frontend**: Next.js 15 (App Router)
-  - **JavaScript Only**: TypeScript 사용 금지, `.jsx` 확장자만 사용
-  - `.tsx`, `.ts` 파일 생성 금지
-  - 타입 어노테이션 (`: string`, `: any` 등) 사용 금지
-- **Database**: PostgreSQL 15 (asyncpg 드라이버), Tortoise ORM (Async)
-  - JSONB 등 PostgreSQL 특화 기능 적극 활용
-- **Validation**: Pydantic v2
-- **Package Manager**: uv
-- **AI/ML Worker**: 별도 마이크로서비스로 분리 (`ai_worker/`)
-- **Container/Proxy**: Docker, Nginx
-- **Security**: JWT (RS256 비대칭 키), Cookie 기반 토큰 관리
+## 1. Agentic Workflow
 
-## 5. 데이터베이스 구조 (10개 테이블)
-ERD 마스터 문서: `docs/db_schema.dbml` 참조
-1. `accounts`: 로그인 계정 (소셜 OAuth)
-2. `profiles`: 건강 프로필 (본인 + 피보호자, health_survey JSONB 포함)
-3. `medications`: 복용 약품 정보
-4. `intake_logs`: 복용 기록
-5. `challenges`: 건강 챌린지
-6. `chat_sessions`: AI 상담 세션
-7. `messages`: 채팅 메시지
-8. `refresh_tokens`: 인증 토큰 관리
-9. `drug_interaction_cache`: DUR 병용금기 캐시
-10. `llm_response_cache`: LLM 응답 캐시
+### 1.1 Design First (PLAN.md)
+* **No Immediate Code Modifications**: NEVER write or modify code immediately.
+* **Utilize PLAN.md**: Always create or update `PLAN.md` at the project root first to document the architecture, data flow, and edge cases.
+* **Visualization**: Use Mermaid flowcharts to visualize Backend (BE) data flows and business logic.
+* **Wait for Approval**: After drafting `PLAN.md`, pause your work, request feedback from the user, and wait.
+* **Execution Condition**: Begin code implementation ONLY when the user explicitly gives the `go` command.
 
-## 6. 비즈니스 및 엔지니어링 마인드셋 (Efficiency & Cost)
-- **비용 최적화**: LLM 및 OCR API 호출 시 토큰 사용량을 최소화하는 프롬프트 설계를 준수함. 불필요한 외부 API 호출을 줄이기 위해 로컬 캐싱(InteractionCache, SemanticCache)을 적극 활용함.
-- **개발 효율성**: 코드 재사용성을 높이기 위해 공통 로직(Base Model, Mixins)을 활용하며, 유지보수가 용이한 모듈화된 아키텍처를 지향함.
-- **구축 비용 고려**: 초기 인프라 오버헤드를 줄이기 위해 경량화된 라이브러리를 우선하며, 확장 가능한 구조로 설계하여 추후 스케일 아웃 시 발생하는 비용을 최소화함.
+### 1.2 TDD (Test-Driven Development)
+* **Tests First**: When implementing core business logic, you MUST write test codes first.
+* **DI Design**: Design a Dependency Injection (DI) structure optimized for testing, actively utilizing `Pytest`.
 
-## 7. 개발 규칙 및 제약 사항
-- **이모지 사용 절대 금지**: 모든 코드, 커밋 메시지, 문서 작성 시 이모지를 절대 사용하지 않음
-- **비동기 프로그래밍**: 모든 DB 통신 및 외부 API 호출 시 `async`/`await` 패턴을 필수적으로 사용함
-- **절대 경로 임포트**: `app/` 내부 모듈 참조 시 `from app.models.users import User`와 같이 루트 기준 절대 경로를 사용함
-- **에러 핸들링**: 401(미인증), 403(권한 부족/PIN 미인증 포함) 등 표준 HTTP 상태 코드를 준수함
-- **Aerich 운영**: 모델 수정 후 반드시 `aerich migrate`를 통해 마이그레이션 파일을 생성하고 DB를 동기화함
+---
 
-### Python 코딩 스타일 가이드 (PEP 8 + Google Style Guide)
-이 프로젝트는 **PEP 8**과 **Google Python Style Guide**를 엄격히 준수합니다.
+## 2. Development Process & 3-Step Cycle (SDLC & 3-Step Cycle)
 
-#### 필수 규칙:
-1. **모듈 독스트링**: 모든 Python 파일 상단에 Google 스타일 독스트링 필수
-2. **함수/클래스 독스트링**: Args, Returns, Raises 섹션 포함
-3. **타입 힌트**: 모든 함수 매개변수와 반환값에 타입 힌트 필수
-   - `Optional[T]` 사용 (Python 3.9 호환성)
-   - `List[T]`, `Dict[K, V]` 사용 (`list[T]`, `dict[K, V]` 금지)
-4. **임포트 순서**: 표준 라이브러리 → 서드파티 → 로컬 (각 그룹 사이 빈 줄)
-5. **라인 길이**: 최대 120자
-6. **변수명**: snake_case (함수, 변수), PascalCase (클래스), UPPER_CASE (상수)
-7. **주석**: 영어로 작성, WHY를 설명 (WHAT이 아닌)
+All feature development and session tasks MUST follow this loop. This project follows a development flow combining Tidy First principles and TDD (Tidy First -> TDD).
 
-#### 예시:
-```python
-"""User authentication module.
-
-This module provides authentication and authorization functionality
-for the application, including login, logout, and session management.
-"""
-
-import hashlib
-from typing import Dict, List, Optional
-
-from fastapi import HTTPException
-
-from app.core.config import config
-
-
-class AuthManager:
-    """Handles user authentication operations.
-
-    This class provides methods for user registration, authentication,
-    and profile management.
-    """
-
-    def __init__(self, database_url: str) -> None:
-        """Initialize auth manager with database connection.
-
-        Args:
-            database_url: Database connection URL.
-        """
-        self._db_url = database_url
-
-    def validate_email(self, email: str) -> bool:
-        """Validate email address format.
-
-        Args:
-            email: Email address to validate.
-
-        Returns:
-            True if email format is valid, False otherwise.
-
-        Raises:
-            ValueError: If email is empty or None.
-        """
-        if not email:
-            raise ValueError("Email cannot be empty")
-        # Implementation here
-        return True
+```plaintext
+   "Tidy the structure first, write tests first, then implement."
+   Tidy (Refactor) -> Test (Red) -> Implement (Green)
 ```
 
-#### 도구 설정:
-- **Ruff**: 린팅 및 포맷팅 (`pyproject.toml` 설정 참조)
-- **MyPy**: 타입 체킹
-- **Pre-commit**: 자동 검사 훅
+### 2.1 SDLC Macro Loop
+1. **Plan**: Define the scope of work and propose a technical approach via `PLAN.md`.
+2. **Wait for 'go'**: After planning, wait for the user's confirmation and the `go` command.
+3. **Develop**: Follow the **TIDY Coding** and **TDD** principles to develop according to the 3-step cycle below.
+4. **Verify**: After development, verify that the code matches the initial plan and report the results.
 
-#### Ruff 의무 검사 규칙 (CRITICAL):
+### 2.2 Micro Loop: The 3-Step Development Cycle
+All feature implementations and modifications MUST strictly adhere to the following 3-step cycle:
+
+* **Step 1: Tidy First**
+    * **Objective**: Organize the related code structure before implementation to facilitate modifications.
+    * **Principles**: Absolutely NO behavioral changes. Focus ONLY on improving readability and structure. After tidying, all existing tests MUST pass.
+* **Step 2: Test First**
+    * **Objective**: Prepare verification methods before actual implementation.
+    * **Principles**: Write test codes for the feature before implementation. The written tests MUST be in a **failing state (Red)**. The test code at this stage acts as a detailed design specification.
+* **Step 3: Implement**
+    * **Objective**: Complete the actual feature to pass the tests.
+    * **Principles**: Write the **minimum code necessary** to pass the tests. Once passed (Green), perform additional tidying if necessary. **Implementing features without test codes is strictly prohibited.**
+
+#### Ruff 의무 검사 규칙 (CRITICAL)
 
 **모든 Python 파일 작성/수정 후 반드시 아래 검사를 통과해야 커밋 가능:**
 
@@ -149,33 +69,197 @@ uv run ruff format --check app/ ai_worker/
 - Ruff 오류가 있으면 수정 완료 전까지 다음 단계로 진행 불가
 - 커밋 추천 시 반드시 Ruff 검사 결과(PASS/FAIL)를 포함해야 함
 
-## 8. 시각화 및 설계 문서 (Visualization)
-- **도구**: [dbdiagram.io](https://dbdiagram.io)를 사용하여 ERD를 관리함.
-- **스키마 정의 파일**: `docs/db_schema.dbml` 파일을 DB 설계 마스터 문서로 활용함.
-- **업데이트 규칙**:
-    - `app/models/` 내의 Tortoise ORM 모델이 수정될 때마다 `docs/db_schema.dbml` 파일의 DBML 코드를 반드시 최신 상태로 갱신해야 함.
-    - 테이블 간의 관계(FK), 인덱스(Index), 제약 조건(Check/Unique)을 DBML 규격에 맞춰 정확히 반영함.
+### 2.3 Step-by-Step User Confirmation
+The agent MUST obtain developer (user) confirmation at the end of each step before proceeding:
+1. **After Tidy**: "구조 정돈이 완료되었습니다. 테스트 작성을 진행할까요?" (Tidy phase complete. Shall we proceed to write tests?)
+2. **After Test**: "테스트 작성이 완료되었습니다. 구현을 시작할까요?" (Test writing complete. Shall we begin implementation?)
 
-## 9. 디렉토리 구조 및 계층 (Updated)
-- `app/apis/v1/`: **Presentation Layer** (HTTP 엔드포인트, 라우터)
-- `app/dtos/`: **Data Transfer Objects** (Pydantic 요청/응답 스키마)
-- `app/services/`: **Application Layer** (핵심 비즈니스 로직 캡슐화)
-- `app/validators/`: **Domain Rules** (재사용 가능한 도메인 검증 로직)
-- `app/models/`: **Domain Layer** (Tortoise ORM 엔티티)
-- `app/repositories/`: **Infrastructure Layer** (DB 데이터 접근 추상화, CRUD)
-- `app/dependencies/`: FastAPI 의존성 주입 (인증 등)
-- `ai_worker/`: 비동기 AI 처리 전용 마이크로서비스
-- `scripts/`, `nginx/`, `.github/`: CI/CD 및 배포 인프라
+### 2.4 Tidy First Checklist
+The agent MUST verify the following items when tidying code:
+- [ ] Remove unnecessary imports (clean up unused modules and variables)
+- [ ] Sort imports (Strict order: Standard Library -> 3rd Party -> Local modules)
+- [ ] Verify Single Responsibility Principle (SRP) (Ensure functions and classes serve only one purpose)
+- [ ] Optimize function length (Recommended: under 20 lines per function)
+- [ ] Manage duplicated code (Check for duplicates and extract to separate functions/modules if found)
+- [ ] Naming clarity (Review if variable, function, and class names clearly convey intent)
+- [ ] Modern Type Hints (Apply type hints conforming to the latest Python standards)
+- [ ] Apply Early Return (Avoid nested conditionals; check if early return patterns can be applied)
 
-## 10. 버전 관리 규칙 (Git Policy)
-- **커밋 주체**: 개발자가 VS Code 소스 제어를 통해 직접 커밋함.
-- **AI의 역할**: 각 작업 완료 후, 개발자가 커밋을 진행할 수 있도록 아래 정보를 **추천(Recommend)** 형식으로 제공해야 함.
-    - **Git Add**: 변경된 파일 목록
-    - **Commit Subject**: 명확하고 간결한 한글 제목
-    - **Commit Body**: 변경 사유 및 요구사항 ID(예: REQ-USR-001)를 포함한 상세 내용
-- **주의**: AI가 직접 `git commit` 명령을 실행하지 않도록 주의함.
+---
 
-## 11. 아키텍처 설계 원칙 (Layered Architecture)
-- **관심사 분리 (Separation of Concerns)**: 라우터(`apis/`)는 HTTP 요청/응답만 처리하며, 모든 비즈니스 규칙은 `services/`에 격리되어야 함.
-- **데이터 추상화**: 서비스 계층은 Tortoise ORM 모델에 직접 쿼리하지 않고, 반드시 `repositories/`를 통해서만 데이터에 접근해야 함.
-- **무결성 검증**: 데이터 검증은 라우터 도달 전 `dtos/`와 `validators/`에서 1차적으로 완료되어야 함.
+## 3. Tidy Data & Coding Principles
+
+### 3.1 Tidy Data
+To prevent Messy Data, strictly adhere to the following principles:
+* Every variable forms a column.
+* Every observation forms a row.
+* Every type of observational unit forms a table.
+
+### 3.2 Tidy Coding
+* **Consistent Naming**: Adhere to code style rules to maintain intuitive and uniform naming.
+* **SRP (Single Responsibility Principle)**: A function or class MUST serve only one purpose.
+* **Scannability**: Structure code so it reads easily from top to bottom.
+* **Standard Library First**: Minimize 3rd-party package dependencies and prioritize standard libraries.
+* **Enum Utilization**: Actively use `Enum` for state values, flags, and fixed strings.
+
+---
+
+## 4. Code Quality, Architecture & Technical Standards
+
+### 4.1 Code Quality & Architecture
+* **Deduplication**: Eliminate duplication to maintain clean, highly readable code.
+* **Architecture Compliance**: Strictly adhere to the structures defined in `ARCHITECTURE.md` (FastAPI, Tortoise ORM, Redis, AI-Worker, etc.).
+* **Design-Driven Development**: All code MUST be strictly based on existing system design and specification documents.
+
+### 4.2 Technical Standards & Performance Optimization
+* **Time Data Processing**: All `datetime` objects MUST use timezone-included **Aware datetime** formats to maintain data precision.
+* **Asynchronous Programming (Async)**: Actively utilize **Async/Await** for all I/O operations (Network, File I/O, CPU-bound operations) to optimize responsiveness.
+* **HTTP Client**: All external API calls MUST use `httpx.AsyncClient` (no `requests` library). The `requests` library is synchronous and MUST NOT be used anywhere in the project.
+* **File Size Limit**: When a file exceeds **300 lines**, review and split into smaller modules before proceeding.
+* **Layered Architecture Enforcement**: Router -> Service -> Repository -> Model. Skipping layers is strictly prohibited.
+* **Model Migration**: When any model is changed, `aerich migrate` + `docs/db_schema.dbml` update is mandatory.
+
+### 4.3 Multilingual Processing & Documentation Rules
+* **English Use (LLM/Internal)**: Source code comments, `.md` documents, and `description` fields in Models/DTOs read by AI MUST be written in English.
+* **Korean Use (User/External)**: User Interfaces (UI), log output messages, human-readable DB/DTO `descriptions`, and user responses MUST be written in Korean.
+
+---
+
+## 5. Code Refactoring Rules
+
+1. **Pre-Commit & Quality Assurance**: All refactored code MUST perfectly pass the `Ruff` formatting and linting configured in the project's `pre-commit` hooks.
+2. **Tidy First & Strict Separation**: NEVER mix 'refactoring' and 'new feature addition' within a single commit or prompt.
+    * 2-1. Perform refactoring that improves structure and readability without altering existing behavior, maintaining a 100% test pass rate.
+    * 2-2. Proceed with adding new features ONLY after structural improvements and 100% test pass rates are verified.
+3. **Code Style Compliance**: Strictly apply the documented code style rules.
+4. **Edge Validation & Domain Isolation**: Data validation logic utilizing `Pydantic` MUST reside at the outermost boundaries of the system (Routers/Controllers).
+    * 4-1. Isolate the Service and Domain layers entirely from framework dependencies (e.g., FastAPI) to enable independent unit testing using Pure Python code.
+5. **Modern Dependency Injection (DI)**: Avoid using FastAPI's `Depends` standalone; always combine it with `typing.Annotated`.
+    * **Good**: `service: Annotated[OCRService, Depends(get_ocr_service)]`
+    * **Bad**: `service: OCRService = Depends(get_ocr_service)`
+6. **No Hardcoding & No Raw SQL**: Strictly prohibit direct instantiation (hardcoding) of external API clients or DB instances, or writing Raw SQL queries within the Service or Repository layers.
+7. **Early Return (Minimize Depth)**: Actively apply Early Return patterns to prevent nested `if-else` blocks (Arrow Code) and minimize code block depth.
+
+---
+
+## 6. Commit Rules
+
+1. **Single Responsibility Commits**: Create only one commit per feature or modification.
+    * 1-1. Strictly prohibit mixing unrelated tasks in a single commit (e.g., including both `refactor` and `feat` in one commit).
+2. **Semantic Commit Convention**: Use consistent semantic prefixes for commit messages.
+    * Allowed prefixes: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`
+3. **Backward Compatibility Check**: Before committing, ensure the changes do not break the backward compatibility of the existing system.
+
+---
+
+## 7. Python Code Style Rules
+
+1. **Standard Guidelines Compliance**: Adopt the PEP 8 Python style guide and the Google Python Style Guide as foundational principles.
+2. **Naming Conventions**:
+    * **Variables / Functions / Methods**: `snake_case` (e.g., `process_data`, `user_id`)
+    * **Classes**: `PascalCase` (e.g., `MedicationService`, `ChallengeManager`)
+    * **Constants**: `UPPER_SNAKE_CASE` (e.g., `MAX_RETRY_COUNT`)
+    * **Non-public**: Internal attributes/methods MUST use a single leading underscore (`_`).
+3. **Type Hinting**:
+    * **Mandatory Type Hints on All Functions**: Write type hints for all parameters and return values without exception.
+    * **No Mutable Objects as Default Values**: Never use `list`, `dict`, etc., as default values. Assign `None` and initialize them internally.
+        * **Bad**: `def add_items(new_items: list = []):`
+        * **Good**: `def add_items(new_items: list | None = None):`
+4. **Documentation (Docstrings)**: Write Google-style docstrings for all Public functions and classes, specifying the purpose, arguments, return values, and exceptions.
+5. **Control Flow**: **Early Return Utilization**: To avoid nested `if-else` structures, immediately `return` or `raise` at the top of the function if conditions are not met, enhancing readability.
+6. **Error Handling**:
+    * **Explicit Exception Declarations**: Avoid catch-all blocks like `except Exception:`. Declare specific, predictable exceptions like `ValueError`, `DBConnectionError`, etc.
+    * **Clarify Failure Points**: Maximize debugging efficiency by including contextual information in error logs according to the **Logging Rules**.
+7. **Modern Syntax & Best Practices (2025-2026)**:
+    * Use the `|` operator instead of `Union`, `Optional`.
+    * Utilize `Pydantic` models for data storage classes.
+    * Apply optimized syntax from the latest Python versions, such as structural pattern matching (`match-case`).
+    * Actively reflect community-validated latest design patterns and library usage (Best Examples).
+8. **Ruff Validation**: All code MUST pass Ruff formatting and linting.
+
+---
+
+## 8. Python Import Rules
+
+1. **Absolute Import Priority**: All imports MUST use absolute paths based on the project root. Relative paths are prohibited.
+2. **Import Sorting & Grouping (PEP 8 Advanced)**:
+    * Import only one module per line. (Multiple items from the same module on one line are permitted).
+    * Use parentheses `()` for multi-line imports instead of backslashes `\`.
+    * Leave one blank line between each group.
+        1. **Standard Library**: `os`, `sys`, `json`, `datetime`, etc.
+        2. **Third-Party Library**: `fastapi`, `pydantic`, `tortoise`, `redis`, etc.
+        3. **Local Project Modules**: `app.core`, `app.apis`, `app.models`, etc.
+3. **Typing & Minimizing Type Hints**:
+    * **Built-in Types First**: Use built-in collections (`list`, `dict`, etc.) directly, adhering to Python 3.9+ standards.
+    * **Operator Alternatives**: `Union[int, str]`, `Optional[int]` → **`int | str`**, **`int | None`**
+    * **Strict Type Checking**: Avoid using `Any`.
+    * **ABSOLUTE BAN on `typing.TYPE_CHECKING`**
+    * **Exceptions**: Import from `typing` ONLY for irreplaceable items like `Callable`, `Protocol`.
+    * **`typing.Annotated`**: Highly recommended for modern FastAPI DI patterns.
+4. **Absolute Ban on Wildcard Imports (`*`)**: Wildcard imports are strictly prohibited.
+5. **Top-Level Imports Forced (No Local Imports)**: For server stability, all imports MUST be placed at the top of the file. Internal lazy imports are prohibited.
+6. **`__init__.py` Optimization**: Minimize creating empty `__init__.py` files just for package recognition. Actively use them for strategic encapsulation to cleanly expose external API interfaces.
+7. **Strict Aliasing**: The `as` keyword MUST be used strictly and only when **name collisions** occur or for culturally established conventions like `multiprocessing as mp`.
+
+---
+
+## 9. Python Logging Rules
+
+1. **Basic Principles**:
+    * **Ban on `print()`**: Use the Python standard `logging` library for all logs.
+    * **Per-Module Logger Declaration**: Declare the logger at the top of each file to clarify the origin. (`logger = logging.getLogger(__name__)`)
+2. **Lazy Evaluation**:
+    * Use the `%` operator so string formatting occurs only when the log is actually output. (Avoid f-strings or `.format()` for logs).
+3. **Structuring & Exception Handling**:
+    * Write messages in a machine-readable format (e.g., JSON).
+    * When logging errors, you MUST use `logger.exception()` to automatically include the Stack Trace.
+4. **Security & Environment Constraints**:
+    * Ensure server logs are hidden from the browser (user environment).
+    * **Ban on Personal Data Logging**: Passwords, tokens, phone numbers, resident registration numbers, etc., MUST NOT be logged. Masking is mandatory.
+    * **Ban on Huge Data Logging**: Do not log image byte data or massive JSON payloads.
+    * **Prevent Circular Calls**: Prohibit logic that triggers logging from within a logging function.
+5. **Log Level Usage Criteria**:
+    * **DEBUG**: Detailed information tracking during development.
+    * **INFO**: Normal state changes of the system.
+    * **WARNING**: Situations requiring attention (API slowdowns, retry limit reached, etc.).
+    * **ERROR**: Partial feature failures (DB query failures, etc.).
+    * **CRITICAL**: Severe situations threatening total system shutdown (OOM, loss of essential services like Redis).
+6. **Log Layout**:
+    * Standard format: `[Timestamp] [Log Level] [Module Name:Line Number] - [Message]`
+
+---
+
+## 10. Research Checklist
+
+Before starting any implementation, the agent MUST verify the following:
+- [ ] Check official documentation (2024-2025 latest version, year required)
+- [ ] Research external Best Examples (official repos, production cases, source + year required)
+- [ ] Confirm similar implementation patterns within the project (`app/services/`, `app/repositories/`)
+- [ ] Check if new environment variables are needed (based on `envs/example.local.env`)
+- [ ] Identify related models (`app/models/` related tables)
+- [ ] Check related P0/P1 issues in `QA_AUDIT_PLAN.md` (conflict check)
+
+---
+
+## 11. Plan Review (Required before GO)
+
+### Sub-agent Parallel Review
+The AI MUST review plans from these 3 perspectives simultaneously:
+- **Architect**: Layered architecture violations, dependency direction between layers
+- **Critic**: Edge cases, missing exception handling, security vulnerabilities
+- **Document Specialist**: Missing Affected Files, DBML update requirements
+
+Review MUST reference external Best Examples from the Research Checklist (source + year required).
+
+### Review Checklist
+- [ ] Is the Goal clearly defined with completion criteria?
+- [ ] Were trade-off choices presented to the user first?
+- [ ] Is the external research from Research Checklist completed?
+- [ ] Are TDD Steps correctly split by business logic unit?
+- [ ] Are Affected Files filled in completely?
+- [ ] Is the core flow visualized with a Mermaid flowchart?
+
+---
+
+## 12. Final Language Check
+**[CRITICAL WARNING] All answers, explanations, result outputs, and feedback to the user MUST be written EXCLUSIVELY in 'Korean (한글)'. Arbitrarily translating responses into English or any other language is STRICTLY PROHIBITED.**

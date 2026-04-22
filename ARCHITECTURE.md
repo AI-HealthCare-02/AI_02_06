@@ -1,52 +1,156 @@
-# Architecture
+# AI Healthcare System Architecture
 
-## 전체 시스템 구성
+## Overall System Architecture Diagram
 
 ```
-                        ┌─────────────────────────────────────────────┐
-                        │               Docker Network (ws)            │
-                        │                                              │
-  Client ──── :80 ───▶  │  Nginx  ──── /api/* ────▶  FastAPI (:8000)  │
-                        │                                │             │
-                        │                           Tortoise ORM       │
-                        │                                │             │
-                        │  AI Worker ◀── Redis ──────────┤             │
-                        │                                │             │
-                        │                             PostgreSQL       │
-                        └─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                                AI Healthcare System                                 │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────────────────────┐
+│   User Browser  │────│  Vercel (CDN)   │────│        ai-02-06.duckdns.org        │
+│                 │    │   Next.js 15    │    │         + Let's Encrypt SSL         │
+└─────────────────┘    │   React 19      │    └─────────────────────────────────────┘
+                       │   TypeScript    │                        │
+                       └─────────────────┘                        │
+                                                                  │
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                            AWS EC2 (t3.medium)                                     │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
+│  │                          Docker Network                                    │   │
+│  │                                                                             │   │
+│  │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                    │   │
+│  │  │    Nginx    │────│   FastAPI   │────│ PostgreSQL  │                    │   │
+│  │  │ :80, :443   │    │    :8000    │    │    :5432    │                    │   │
+│  │  │ Reverse     │    │ Python 3.13 │    │ Primary DB  │                    │   │
+│  │  │ Proxy       │    │ Uvicorn     │    │ Tortoise    │                    │   │
+│  │  │ HTTPS       │    │ ASGI        │    │ ORM         │                    │   │
+│  │  └─────────────┘    └─────────────┘    └─────────────┘                    │   │
+│  │                              │                                             │   │
+│  │                              │         ┌─────────────┐                    │   │
+│  │                              └─────────│    Redis    │                    │   │
+│  │                                        │    :6379    │                    │   │
+│  │                                        │ Message     │                    │   │
+│  │                                        │ Broker      │                    │   │
+│  │                                        │ Cache       │                    │   │
+│  │                                        └─────────────┘                    │   │
+│  │                                                │                           │   │
+│  │                                        ┌─────────────┐                    │   │
+│  │                                        │ AI Worker   │                    │   │
+│  │                                        │ OCR + RAG   │                    │   │
+│  │                                        │ Pipeline    │                    │   │
+│  │                                        │ Background  │                    │   │
+│  │                                        │ Jobs        │                    │   │
+│  │                                        └─────────────┘                    │   │
+│  └─────────────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                    ┌───────────────────┼───────────────────┐
+                    │                   │                   │
+          ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+          │ NAVER CLOVA OCR │  │  OpenAI GPT-4o  │  │ Kakao OAuth 2.0 │
+          │ Prescription    │  │ Medication      │  │   Social        │
+          │ Text Extraction │  │ Guide Generator │  │   Authentication│
+          └─────────────────┘  └─────────────────┘  └─────────────────┘
 ```
 
-## 서비스 레이어
+---
 
-| 서비스 | 역할 | 기술 |
-|---|---|---|
-| Nginx | 리버스 프록시, `/api/*` 요청 라우팅 | nginx:latest |
-| FastAPI | REST API 서버, 인증/비즈니스 로직 처리 | FastAPI + Uvicorn |
-| AI Worker | 모델 추론/학습 비동기 처리 | Python Worker |
-| PostgreSQL | 영구 데이터 저장 | PostgreSQL 15 |
-| Redis | 메시지 브로커 / 캐싱 | Redis Alpine |
+## Deployment Environment Configuration
 
-## FastAPI 내부 구조
+### Frontend (Vercel)
+- **Platform**: Vercel (Next.js optimized)
+- **Framework**: Next.js 15 + React 19 + TypeScript
+- **Deployment**: Automatic deployment on Git push
+- **Domain**: Vercel-provided domain + custom domain integration
 
+### Backend (AWS EC2)
+- **Instance**: t3.medium (2 vCPU, 4GB RAM, 30GB EBS)
+- **OS**: Ubuntu 22.04 LTS
+- **Domain**: `ai-02-06.duckdns.org` (DuckDNS free domain)
+- **SSL**: Let's Encrypt automatic renewal
+- **Deployment**: GitHub Actions CI/CD
+
+---
+
+## Docker Container Configuration
+
+### Production Stack (`docker-compose.prod.yml`)
+
+| Service | Image | Port | Role | Resource Limit |
+|---------|-------|------|------|----------------|
+| **nginx** | nginx:alpine | 80, 443 | Reverse proxy, HTTPS termination | 64MB |
+| **fastapi** | custom | 8000 | REST API server | 300MB |
+| **ai-worker** | custom | - | AI inference background processing | 300MB |
+| **postgres** | postgres:15-alpine | 5432 | Primary database | 256MB |
+| **redis** | redis:alpine | 6379 | Message broker, cache | 128MB |
+
+### Network Configuration
+- **frontend**: nginx ↔ fastapi, ai-worker (external API access)
+- **backend**: fastapi ↔ postgres, redis ↔ ai-worker (internal communication)
+
+---
+
+## FastAPI Backend Architecture
+
+### Directory Structure
 ```
 app/
-├── apis/v1/          # 라우터 (auth, user)
-├── services/         # 비즈니스 로직
-│   └── rag/          # RAG 파이프라인 (의도 분류 → 검색 → 응답)
-├── repositories/     # DB 접근 계층
-├── models/           # Tortoise ORM 테이블 정의 (medicine_info 포함)
-├── dtos/             # 요청/응답 Pydantic 스키마
-├── dependencies/     # FastAPI 의존성 (JWT 인증)
-├── utils/jwt/        # JWT 토큰 발급·검증
-├── validators/       # 입력값 검증
-├── core/             # 설정(pydantic-settings), 로거
-└── db/               # DB 초기화, Aerich 마이그레이션, VectorField
+├── apis/v1/              # API routers (RESTful endpoints)
+│   ├── health_routers.py     # Health check
+│   ├── oauth_routers.py      # Kakao OAuth authentication
+│   ├── profile_routers.py    # User profile management
+│   ├── medication_routers.py # Medication management
+│   ├── intake_log_routers.py # Medication intake logs
+│   ├── ocr_routers.py        # Prescription OCR
+│   ├── chat_session_routers.py # Chat sessions
+│   ├── message_routers.py    # Message management
+│   └── challenge_routers.py  # Medication adherence challenges
+├── core/                 # Core configuration
+│   ├── config.py            # Pydantic Settings
+│   └── logger.py            # Structured logging
+├── middlewares/          # Middleware
+│   ├── security.py          # Security (XSS, Path Traversal protection)
+│   └── rate_limit.py        # IP-based request limiting
+├── models/               # Tortoise ORM models
+├── dtos/                 # Pydantic schemas (request/response)
+├── services/             # Business logic
+│   └── rag/                 # RAG pipeline (intent → rewrite → retrieval → generation)
+├── repositories/         # Data access layer
+├── dependencies/         # FastAPI dependency injection
+├── utils/                # Utilities (JWT, security)
+├── validators/           # Input validation
+└── db/                   # DB initialization, migrations
+    └── migrations/          # Aerich migration files
 ```
 
-요청 흐름: `Router → Service → Repository → DB`
+### Request Processing Flow
+```
+Client Request
+    ↓
+Nginx (HTTPS, Rate Limiting)
+    ↓
+FastAPI Middlewares
+    ├── SecurityMiddleware (Attack pattern detection)
+    ├── RateLimitMiddleware (IP-based request limiting)
+    └── CORSMiddleware (CORS policy)
+    ↓
+API Router (v1)
+    ↓
+Service Layer (Business logic)
+    ↓
+Repository Layer (DB abstraction)
+    ↓
+Tortoise ORM
+    ↓
+PostgreSQL Database
+```
 
-## RAG 레이어 (app/services/rag/)
+---
 
+## RAG Layer (app/services/rag/)
+
+### Pipeline Flow
 ```
 ChatModal
    │ POST /api/v1/messages/ask
@@ -54,69 +158,270 @@ ChatModal
 MessageService.ask_and_reply_with_owner_check
    │
    ▼
-RAGPipeline.ask  ───────────────────────────────┐
-   │                                             │
-   ├─(1) IntentClassifier       키워드·규칙 기반 │
-   │                                             │
-   ├─(2) EmbeddingProvider      SentenceTransformer (768d)
-   │                                             │
-   ├─(3) HybridRetriever        pgvector cosine 0.7 + 키워드 0.3
-   │        │                                   │
-   │        ▼                                   │
-   │    medicine_info           HNSW + GIN      │
-   │                                             │
-   └─(4) RAGGenerator           OpenAI GPT-4o-mini ──► 응답
+RAGPipeline.ask
+   │
+   ├─(1) IntentClassifier       키워드·규칙 기반 (LLM 미사용)
+   │
+   ├─(2) RAGGenerator.rewrite_query   history 포함, self-contained 쿼리 생성
+   │                                    (OK / UNRESOLVABLE / FALLBACK)
+   │
+   ├─(3) EmbeddingProvider      SentenceTransformer (768d, ko-sroberta-multitask)
+   │
+   ├─(4) HybridRetriever        pgvector cosine 0.7 + 키워드 0.3
+   │        │                   (검색 대상: medicine_chunk, medicine_info FK join)
+   │        ▼
+   │    medicine_chunk          HNSW(vector_cosine_ops, m=16, ef_construction=64)
+   │
+   └─(5) RAGGenerator.generate_chat_response
+          OpenAI GPT-4o-mini (최근 3턴 history + 검색 context) → 응답
 ```
 
-### 구성 요소
+### Components
 
-| 파일 | 역할 |
+| File | Role |
 |---|---|
-| `pipeline.py` | 4단계 오케스트레이션 (의도 → 임베딩 → 검색 → 응답) |
-| `config.py` | `EMBEDDING_MODEL_NAME`, `EMBEDDING_DIMENSIONS` 단일 소스 상수 |
-| `intent/classifier.py` | 키워드 기반 IntentType 분류 (LLM 미사용) |
-| `providers/sentence_transformer.py` | 로컬 한국어 임베딩 (L2 정규화) |
-| `retrievers/hybrid.py` | pgvector + 키워드 하이브리드 검색 (medicine_info 대상) |
-| `tools/` | 의도별 도구 라우팅 (DB 조회 / 외부 API) |
+| `pipeline.py` | 5-stage orchestration (intent → rewrite → embed → retrieve → generate) |
+| `config.py` | `EMBEDDING_MODEL_NAME`, `EMBEDDING_DIMENSIONS` single source constants |
+| `intent/classifier.py` | Keyword-rule based IntentType classification |
+| `providers/sentence_transformer.py` | Local Korean embedding (L2 normalized) |
+| `retrievers/hybrid.py` | pgvector + keyword hybrid search |
+| `tools/` | Intent-specific tool routing (DB lookup / external API) |
 
-### 모델 교체 절차
+### Medicine Data Schema
 
-1. `app/services/rag/config.py`의 두 상수 수정
-2. `medicine_info.embedding`의 `vector(N)` 차원을 바꾸는 Aerich 마이그레이션 추가
-3. `scripts/seed_rag_data.py`로 재시딩
+- `medicine_info`: Base drug data sourced from public API (DrugPrdtPrmsnInfoService07).
+  Monthly incremental sync keyed by `item_seq` (UPSERT key).
+- `medicine_chunk`: Section-level embedding chunks (13-value section enum).
+  `embedding vector(768)` with HNSW cosine index.
+- `medicine_ingredient`: Active-ingredient 1:N detail (public ingredient API).
+- `data_sync_log`: Sync history tracking (full/incremental, success/failure).
 
-### medicine_info 테이블
+### Model/Dimension Swap Procedure
 
-한 행 = 한 약품. `ai_worker/data/medicines.json` 필드 구조 그대로.
+1. Update both constants in `app/services/rag/config.py`
+2. Add an Aerich migration altering `medicine_chunk.embedding` to the new `vector(N)`
+3. Re-seed via `scripts/crawling/sync_medicine_data.py` and re-embed chunks
 
-- `name` UNIQUE, `ingredient/usage/disclaimer` 텍스트
-- `contraindicated_drugs`, `contraindicated_foods` JSONB (GIN 인덱스)
-- `embedding` `vector(768)` (HNSW cosine 인덱스, L2 정규화)
+---
 
-## 인증 흐름
+## AI Worker Architecture
 
-```
-POST /api/v1/auth/login
-  → JWT Access Token (60분) + Refresh Token (14일) 발급
-  → Access Token은 Authorization 헤더, Refresh Token은 HttpOnly 쿠키
-
-POST /api/v1/auth/token/refresh
-  → Refresh Token 검증 후 새 Access Token 발급
-```
-
-## AI Worker 구조
-
+### Structure
 ```
 ai_worker/
-├── tasks/    # 처리 작업 정의
-├── schemas/  # 입출력 스키마
-└── core/     # 설정, 로거
+├── core/                 # Configuration and logging
+├── tasks/                # Background task definitions
+│   ├── ocr_tasks.py         # OCR processing tasks
+│   └── embedding_tasks.py   # Embedding generation tasks
+├── utils/                # AI utilities
+│   ├── ocr.py              # CLOVA OCR integration
+│   ├── chunker.py          # Data chunking
+│   └── rag.py              # RAG pipeline
+├── data/                 # Static data
+│   └── medicines.json      # Medication information database
+└── main.py               # Worker entry point
 ```
 
-FastAPI와 분리된 독립 프로세스로 실행되며, Redis를 통해 작업 메시지를 수신합니다.
+### RAG Pipeline
+```
+RAG Pipeline Processing Flow:
 
-## 배포 구성
+User        FastAPI      Redis       AI Worker    CLOVA OCR    OpenAI GPT-4o
+ │             │           │             │             │             │
+ │─────────────│──────────▶│             │             │             │
+ │ Prescription│           │             │             │             │
+ │ Image Upload│           │             │             │             │
+ │             │───────────│────────────▶│             │             │
+ │             │ OCR Task  │             │             │             │
+ │             │ Queue Add │             │             │             │
+ │             │           │─────────────│────────────▶│             │
+ │             │           │ Task Receive│             │             │
+ │             │           │             │─────────────│────────────▶│
+ │             │           │             │ Image →     │             │
+ │             │           │             │ Text Convert│             │
+ │             │           │             │◀────────────│─────────────│
+ │             │           │             │ Extracted   │             │
+ │             │           │             │ Medicine    │             │
+ │             │           │             │ Names       │             │
+ │             │           │             │─────────────│────────────▶│
+ │             │           │             │ medicines.  │             │
+ │             │           │             │ json Match  │             │
+ │             │           │             │─────────────│────────────▶│
+ │             │           │             │ Text        │             │
+ │             │           │             │ Chunking    │             │
+ │             │           │             │─────────────│────────────▶│
+ │             │           │             │ Medication  │             │
+ │             │           │             │ Guide       │             │
+ │             │           │             │ Request     │             │
+ │             │           │             │◀────────────│─────────────│
+ │             │           │             │ Personalized│             │
+ │             │           │             │ Medication  │             │
+ │             │           │             │ Guide       │             │
+ │◀────────────│───────────│◀────────────│─────────────│─────────────│
+ │ Medication  │           │ Result      │             │             │
+ │ Guide       │           │ Return      │             │             │
+ │ Response    │           │             │             │             │
+```
 
-- 로컬/개발: `docker-compose.yml` (hot-reload 활성화)
-- 프로덕션: `docker-compose.prod.yml` + `scripts/deployment.sh` (EC2 자동 배포)
-- HTTPS: `scripts/certbot.sh`로 Let's Encrypt 인증서 발급 및 Nginx 설정 갱신
+---
+
+## Security Architecture
+
+### Authentication & Authorization
+```
+Kakao OAuth 2.0 Authentication Flow:
+
+Client          FastAPI         Kakao OAuth      PostgreSQL
+ │                 │                 │               │
+ │─────────────────│────────────────▶│               │
+ │ Kakao Login     │                 │               │
+ │ Request         │                 │               │
+ │                 │─────────────────│──────────────▶│
+ │                 │ OAuth Auth Code │               │
+ │                 │ Exchange        │               │
+ │                 │◀────────────────│───────────────│
+ │                 │ User Info       │               │
+ │                 │ Return          │               │
+ │                 │─────────────────│──────────────▶│
+ │                 │ User Info       │ Store/Update  │
+ │                 │ Store/Update    │               │
+ │◀────────────────│─────────────────│───────────────│
+ │ JWT Access      │                 │               │
+ │ Token (60min) + │                 │               │
+ │ Refresh Token   │                 │               │
+ │ (14 days)       │                 │               │
+ │                 │                 │               │
+ │ ─ ─ ─ ─ ─ ─ ─ ─ Subsequent API Requests ─ ─ ─ ─ ─ ─ ─ ─ │
+ │                 │                 │               │
+ │─────────────────│────────────────▶│               │
+ │ Authorization:  │                 │               │
+ │ Bearer <token>  │                 │               │
+ │                 │─────────────────│──────────────▶│
+ │                 │ JWT Validation  │               │
+ │                 │ & User Identity │               │
+ │◀────────────────│─────────────────│───────────────│
+ │ API Response    │                 │               │
+```
+
+### Security Layers
+1. **Nginx**: HTTPS enforcement, request size limiting (10MB)
+2. **SecurityMiddleware**:
+   - Path Traversal attack prevention
+   - XSS pattern detection and logging
+   - Security header injection
+3. **RateLimitMiddleware**:
+   - GET: 200 req/60s per IP
+   - POST/PATCH/DELETE: 30 req/60s per IP
+   - Auth endpoints: 10 req/60s per IP
+4. **JWT**: Short-lived Access Token + HttpOnly Refresh Token
+
+---
+
+## CI/CD Pipeline
+
+### GitHub Actions Workflow
+```yaml
+# .github/workflows/deploy.yml
+1. Test Phase:
+   - Python 3.13 + PostgreSQL 15 environment
+   - Dependency installation with uv
+   - pytest test execution
+
+2. Deploy Phase:
+   - EC2 SSH connection
+   - Git pull (latest main)
+   - Docker Compose rebuild
+   - Automatic migration execution
+   - Health check verification
+
+3. Health Check Phase:
+   - API endpoint status verification
+   - Nginx proxy status verification
+```
+
+### Deployment Automation Scripts
+- `scripts/deployment.sh`: Docker image build & push & EC2 deployment
+- `scripts/certbot.sh`: Let's Encrypt SSL certificate automatic renewal
+
+---
+
+## Development Environment Setup
+
+### Local Development
+```bash
+# Install dependencies
+uv sync
+
+# Run local stack
+docker-compose up -d
+
+# Run development server
+uv run uvicorn app.main:app --reload
+```
+
+### Environment Variable Management
+- `envs/.local.env`: Local development
+- `envs/.prod.env`: Production (EC2)
+- GitHub Secrets: Sensitive information (API keys, DB passwords)
+
+---
+
+## Monitoring & Logging
+
+### Logging Strategy
+- **Structured Logging**: JSON format output
+- **Level Classification**: DEBUG → INFO → WARNING → ERROR → CRITICAL
+- **Security Considerations**: Personal information masking, token exclusion
+- **Docker Logs**: Size limitations (50MB, 5 files)
+
+### Health Checks
+- **API**: `/api/v1/health` (includes DB connection status)
+- **Nginx**: `/health` (proxy status)
+- **Docker**: Health check configuration for each container
+
+---
+
+## Scalability Considerations
+
+### Current Constraints (t3.medium)
+- **CPU**: 2 vCPU (burstable)
+- **Memory**: 4GB (container-level limits configured)
+- **Storage**: 30GB EBS
+
+### Scaling Strategies
+1. **Vertical Scaling**: Larger EC2 instance types
+2. **Horizontal Scaling**:
+   - Application Load Balancer + multiple EC2 instances
+   - RDS PostgreSQL (managed DB)
+   - ElastiCache Redis (managed cache)
+3. **Microservices**: Separate AI Worker as independent service
+
+---
+
+## Technology Stack Summary
+
+| Layer | Technology | Version | Role |
+|-------|------------|---------|------|
+| **Frontend** | Next.js | 15 | React-based SPA |
+| **Backend** | FastAPI | 0.128+ | Python async API server |
+| **Database** | PostgreSQL | 15 | Relational database |
+| **Cache/Queue** | Redis | Alpine | Message broker, cache |
+| **ORM** | Tortoise ORM | 0.25+ | Async Python ORM |
+| **Web Server** | Nginx | Alpine | Reverse proxy, HTTPS |
+| **Container** | Docker | - | Containerization |
+| **Orchestration** | Docker Compose | - | Multi-container management |
+| **CI/CD** | GitHub Actions | - | Automated deployment |
+| **Monitoring** | Docker Logs | - | Log collection |
+| **SSL** | Let's Encrypt | - | Free SSL certificates |
+| **DNS** | DuckDNS | - | Free dynamic DNS |
+
+---
+
+## Additional Documentation
+
+- [README.md](./README.md): Project overview and execution guide
+- [SYSTEM_DESIGN.md](docs/SYSTEM_DESIGN_KR.md): Technical design specifications
+- [docs/01_DB_MIGRATION_GUIDE.md](./docs/01_DB_MIGRATION_GUIDE.md): Database migration guide
+- [docs/02_ENV_AND_CICD_GUIDE.md](./docs/02_ENV_AND_CICD_GUIDE.md): Environment setup and CI/CD
+- [docs/OCR_FLOW.md](docs/OCR_FLOW.md): OCR processing flow
+- [PLAN.md](./PLAN.md): Development planning and architecture design

@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import api, { parseApiError, showError } from '../../../../lib/api'
+import api, { parseApiError, showError } from '@/lib/api'
 
 // 메인 페이지 스켈레톤 UI
 function MainSkeleton() {

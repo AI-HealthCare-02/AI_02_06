@@ -86,7 +86,7 @@ for choice in $selections; do
   esac
 done
 
-echo "${COLOR_GREEN}모든 선택된 이미지 빌드 & 푸시 완료! 🎉${COLOR_NC}"
+echo "${COLOR_GREEN}모든 선택된 이미지 빌드 & 푸시 완료!${COLOR_NC}"
 echo "${COLOR_BLUE}배포 대상 서비스: ${DEPLOY_SERVICES[*]}${COLOR_NC}"
 echo ""
 
@@ -141,4 +141,4 @@ ssh -i ~/.ssh/${ssh_key_file} ubuntu@${ec2_ip} \
   docker image prune -af
 EOF
 
-echo "✅ Deployment finished."
+echo "Deployment finished."
