@@ -64,18 +64,17 @@ export default function ChatModal({ onClose, profileId }) {
         params: { profile_id: profileId },
       })
 
-      let sessionList = sessionsRes.data || []
+      const sessionList = sessionsRes.data || []
+      setSessions(sessionList)
 
       if (sessionList.length === 0) {
-        const newSessionRes = await api.post('/api/v1/chat-sessions', {
-          profile_id: profileId,
-          title: formatDefaultSessionTitle(),
-        })
-        sessionList = [newSessionRes.data]
+        // Lazy: 첫 메시지 전송 시 세션이 생성된다
+        setActiveSessionId(null)
+        setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
+        return
       }
 
       const currentSessionId = sessionList[0].id
-      setSessions(sessionList)
       setActiveSessionId(currentSessionId)
       await loadMessagesForSession(currentSessionId)
     } catch (err) {
@@ -187,15 +186,16 @@ export default function ChatModal({ onClose, profileId }) {
       setSessions(remaining)
       setConfirmDeleteId(null)
 
-      // 활성 세션을 지운 경우: 다음(이전에 대화한) 세션으로 전환
+      // 활성 세션을 지운 경우: 다음(이전에 대화한) 세션으로 전환.
+      // 남은 세션이 없으면 빈 상태 유지 (첫 메시지 전송 시 lazy 생성).
       if (sessionId === activeSessionId) {
         if (remaining.length > 0) {
           const nextId = remaining[0].id
           setActiveSessionId(nextId)
           await loadMessagesForSession(nextId)
         } else {
-          // 남은 세션이 없으면 자동으로 신규 생성
-          await handleCreateSession()
+          setActiveSessionId(null)
+          setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
         }
       }
     } catch (err) {
@@ -207,15 +207,28 @@ export default function ChatModal({ onClose, profileId }) {
 
   const handleSend = async () => {
     const message = input.trim()
-    if (!message || isLoading || !activeSessionId) return
+    if (!message || isLoading || isInitializing) return
 
     setInput('')
     setMessages(prev => [...prev, { role: 'user', content: message }])
     setIsLoading(true)
 
     try {
+      // Lazy session creation: 아직 세션이 없으면 여기서 생성한다
+      let sid = activeSessionId
+      if (!sid) {
+        const createRes = await api.post('/api/v1/chat-sessions', {
+          profile_id: profileId,
+          title: formatDefaultSessionTitle(),
+        })
+        const newSession = createRes.data
+        sid = newSession.id
+        setSessions(prev => [newSession, ...prev])
+        setActiveSessionId(sid)
+      }
+
       const res = await api.post('/api/v1/messages/ask', {
-        session_id: activeSessionId,
+        session_id: sid,
         content: message,
       })
       const assistantContent = res.data.assistant_message?.content || '응답을 받지 못했습니다.'
@@ -252,7 +265,7 @@ export default function ChatModal({ onClose, profileId }) {
           </div>
           <div className="flex-1 overflow-y-auto">
             {sessions.length === 0 && !isInitializing && (
-              <div className="p-4 text-xs text-gray-400 text-center">세션이 없습니다.</div>
+              <div className="p-4 text-xs text-gray-400 text-center">사용 중인 채팅창이 없습니다.</div>
             )}
             <ul>
               {sessions.map(session => {
@@ -376,13 +389,13 @@ export default function ChatModal({ onClose, profileId }) {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyUp={(e) => { if (e.key === 'Enter') handleSend() }}
-                  disabled={isInitializing || !activeSessionId}
-                  placeholder={isInitializing ? '연결 중...' : (!activeSessionId ? '연결 실패' : '메시지를 입력하세요')}
+                  disabled={isInitializing}
+                  placeholder={isInitializing ? '연결 중...' : '메시지를 입력하세요'}
                   className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-gray-400 transition-all disabled:opacity-50"
                 />
                 <button
                   onClick={handleSend}
-                  disabled={isLoading || !input.trim() || isInitializing || !activeSessionId}
+                  disabled={isLoading || !input.trim() || isInitializing}
                   className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-900 text-white hover:bg-gray-700 disabled:bg-gray-100 disabled:text-gray-300 active:scale-95 transition-all cursor-pointer"
                 >
                   <Send size={16} />
