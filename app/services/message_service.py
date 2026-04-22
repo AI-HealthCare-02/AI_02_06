@@ -185,7 +185,13 @@ class MessageService:
         return await self.repository.create_assistant_message(session_id, content)
 
     async def ask_and_reply(self, session_id: UUID, content: str) -> tuple[ChatMessage, ChatMessage]:
-        """Save user message, generate RAG-based response, and return both messages.
+        """Run RAG pipeline, then persist both turns with their metadata.
+
+        Saving order: user message + assistant message are persisted only AFTER
+        the RAG pipeline succeeds so that each row carries the matching
+        debug/audit metadata (intent, medicine_names, retrieval scores on the
+        user turn; LLM token usage on the assistant turn). If the pipeline
+        fails, nothing is persisted.
 
         Args:
             session_id: Session UUID.
@@ -201,30 +207,17 @@ class MessageService:
         start = time.perf_counter()
         logger.info("[RAG] session=%s q=%r", sid, _preview(content))
 
-        user_msg = await self.repository.create_user_message(session_id, content)
-
-        # Get recent messages (returned in newest-first order)
+        # Get recent messages (returned in newest-first order). The current
+        # user turn is not persisted yet, so it won't appear in `recent`.
         recent = await self.repository.get_recent_by_session(session_id, limit=10)
-
-        # Build history in chronological order (oldest first) by reversing
         history = [
-            {"role": "user" if m.sender_type == "USER" else "assistant", "content": m.content}
-            for m in reversed(recent)
-            if m.id != user_msg.id
+            {"role": "user" if m.sender_type == "USER" else "assistant", "content": m.content} for m in reversed(recent)
         ]
 
         try:
-            # Get RAG pipeline (async factory ensures initialization)
             pipeline = await get_rag_pipeline()
-
-            # Generate response through RAG pipeline with intent classification
-            response = await pipeline.ask(
-                question=content,
-                history=history,
-            )
-            reply = response.answer
+            response = await pipeline.ask(question=content, history=history)
         except Exception as e:
-            await self.repository.soft_delete(user_msg)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={
@@ -234,9 +227,35 @@ class MessageService:
                 },
             ) from e
 
-        assistant_msg = await self.repository.create_assistant_message(session_id, reply)
+        user_metadata = {
+            "intent": response.intent,
+            "query_keywords": response.query_keywords,
+            "retrieval": response.retrieval.model_dump(),
+        }
+        assistant_metadata: dict = {"intent": response.intent}
+        if response.token_usage is not None:
+            assistant_metadata["llm"] = response.token_usage.model_dump()
+
+        user_msg = await self.repository.create_user_message(session_id, content, metadata=user_metadata)
+        assistant_msg = await self.repository.create_assistant_message(
+            session_id, response.answer, metadata=assistant_metadata
+        )
+
         took_ms = int((time.perf_counter() - start) * 1000)
-        logger.info("[RAG] session=%s reply=%r len=%d took=%dms", sid, _preview(reply), len(reply), took_ms)
+        usage = response.token_usage
+        usage_log = (
+            f"tokens={usage.total_tokens}(p{usage.prompt_tokens}+c{usage.completion_tokens})"
+            if usage is not None
+            else "tokens=?"
+        )
+        logger.info(
+            "[RAG] session=%s reply=%r len=%d %s took=%dms",
+            sid,
+            _preview(response.answer),
+            len(response.answer),
+            usage_log,
+            took_ms,
+        )
         return user_msg, assistant_msg
 
     async def ask_and_reply_with_owner_check(
