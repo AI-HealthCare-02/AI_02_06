@@ -150,6 +150,28 @@ class TestRewriteQueryFallback:
         assert result.token_usage is None
 
 
+@pytest.fixture
+def _enable_ai_worker_propagation() -> object:
+    """Temporarily allow ai_worker.* logs to reach pytest's caplog handler.
+
+    `app/core/logger.py` sets propagate=False on the "ai_worker" logger to
+    stop uvicorn's root handler from double-printing bare-format lines in
+    production. caplog, however, attaches its capture handler on root and
+    relies on propagation, so without this override the log assertions see
+    zero records. Scope is per-test to preserve the production default.
+    """
+    import logging
+
+    logger = logging.getLogger("ai_worker")
+    original = logger.propagate
+    logger.propagate = True
+    try:
+        yield
+    finally:
+        logger.propagate = original
+
+
+@pytest.mark.usefixtures("_enable_ai_worker_propagation")
 class TestRewriteQueryLogging:
     """Key status transitions must emit structured [RAG] log lines."""
 
