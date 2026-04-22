@@ -196,11 +196,24 @@ RAGPipeline.ask
 - `medicine_ingredient`: Active-ingredient 1:N detail (public ingredient API).
 - `data_sync_log`: Sync history tracking (full/incremental, success/failure).
 
+### Data Ingestion Scripts (scripts/crawling/)
+
+| Script | Purpose |
+|---|---|
+| `sync_medicine_data.py` | Production full/incremental sync (all ~43k rows). Runs via CLI `--full` or monthly cron. |
+| `fetch_sample.py` | Local/CI sample loader. `--limit N` (default 50) caps the fetch, generates `medicine_chunk` rows, embeds with SentenceTransformer. `--skip-embed` keeps DB structure only. |
+| `dump_medicine_data.sh` | DB dump helper for backup/share. |
+
+Operational rule: `fetch_sample.py` is **local/CI only** and MUST NOT run on
+production EC2. Production data is populated via `sync_medicine_data.py`.
+
 ### Model/Dimension Swap Procedure
 
 1. Update both constants in `app/services/rag/config.py`
 2. Add an Aerich migration altering `medicine_chunk.embedding` to the new `vector(N)`
-3. Re-seed via `scripts/crawling/sync_medicine_data.py` and re-embed chunks
+3. Re-ingest:
+   - Production: `sync_medicine_data.py --full` + re-embed chunks
+   - Local: `fetch_sample.py --limit N`
 
 ---
 
