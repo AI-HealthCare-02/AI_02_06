@@ -210,13 +210,19 @@ class MessageService:
         # Get recent messages (returned in newest-first order). The current
         # user turn is not persisted yet, so it won't appear in `recent`.
         recent = await self.repository.get_recent_by_session(session_id, limit=10)
+        chronological = list(reversed(recent))
         history = [
-            {"role": "user" if m.sender_type == "USER" else "assistant", "content": m.content} for m in reversed(recent)
+            {"role": "user" if m.sender_type == "USER" else "assistant", "content": m.content} for m in chronological
         ]
+        history_metadata = [m.metadata or {} for m in chronological]
 
         try:
             pipeline = await get_rag_pipeline()
-            response = await pipeline.ask(question=content, history=history)
+            response = await pipeline.ask(
+                question=content,
+                history=history,
+                history_metadata=history_metadata,
+            )
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

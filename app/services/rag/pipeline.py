@@ -15,6 +15,10 @@ from app.dtos.rag import (
 )
 from app.services.rag.intent.classifier import IntentClassifier
 from app.services.rag.intent.intents import IntentType
+from app.services.rag.pronoun_resolver import (
+    collect_recent_medicine_names,
+    has_medicine_reference,
+)
 from app.services.rag.protocols import EmbeddingProvider, Retriever
 
 logger = logging.getLogger(__name__)
@@ -73,6 +77,7 @@ class RAGPipeline:
         system_prompt: str | None = None,
         user_profile_id: int | None = None,
         max_sources: int = 5,
+        history_metadata: list[dict] | None = None,
     ) -> RAGResponse:
         """Process a user question through the full RAG pipeline.
 
@@ -82,6 +87,10 @@ class RAGPipeline:
             system_prompt: Optional custom system prompt for LLM.
             user_profile_id: User profile ID for downstream tool handlers.
             max_sources: Maximum number of medicine sources to retrieve.
+            history_metadata: Per-turn metadata aligned with `history`, used
+                for pronoun / elided-subject resolution. Missing or empty
+                is safe; the pipeline simply falls back to the original
+                query without any history-based rewriting.
 
         Returns:
             RAGResponse with answer, sources, and metadata.
@@ -143,9 +152,43 @@ class RAGPipeline:
             else:
                 logger.info("[RAG] retrieved=0 (no matches above threshold)")
 
+            # Pronoun / elided-subject resolution: if the current query is
+            # ambiguous, rewrite it using the most recent medicine from
+            # history metadata and re-run retrieval once.
+            effective_question = question
+            resolution_note: str | None = None
+            if not has_medicine_reference(search_results):
+                recent_names = collect_recent_medicine_names(history_metadata or [], limit=3)
+                if recent_names:
+                    effective_question = f"{recent_names[0]} {question}"
+                    logger.info(
+                        "[RAG] pronoun_resolve: %r -> %r (history hint=%s)",
+                        question,
+                        effective_question,
+                        recent_names[0],
+                    )
+                    retry_embedding = await self.embedding_provider.encode_single(effective_question)
+                    search_results = await self.retriever.retrieve(
+                        query=effective_question,
+                        query_embedding=retry_embedding,
+                        filters=filters,
+                        limit=max_sources,
+                    )
+                    if search_results:
+                        summary = ", ".join(f"{r.medicine.name}({r.final_score:.2f})" for r in search_results)
+                        logger.info("[RAG] retrieved(retry)=%d: %s", len(search_results), summary)
+                else:
+                    # Policy 2: No anchoring medicine anywhere → LLM should
+                    # ask the user to specify which medicine they mean.
+                    resolution_note = "ambiguous_no_history"
+                    logger.info("[RAG] pronoun_resolve: ambiguous, no history hint; ask-to-clarify")
+
             context = self._build_context(search_results)
             messages = [*history, {"role": "user", "content": question}]
-            prompt = system_prompt or self._default_system_prompt(context)
+            if resolution_note == "ambiguous_no_history":
+                prompt = self._clarify_system_prompt()
+            else:
+                prompt = system_prompt or self._default_system_prompt(context)
 
             logger.info("[RAG] llm msgs=%d ctx_chars=%d", len(messages) + 1, len(prompt))
             completion = await self.rag_generator.generate_chat_response(messages, system_prompt=prompt)
@@ -244,6 +287,19 @@ class RAGPipeline:
         avg = sum(r.final_score for r in search_results) / len(search_results)
         diversity = min(len({r.medicine.usage for r in search_results}) * 0.1, 0.3)
         return min(avg + diversity, 1.0)
+
+    def _clarify_system_prompt(self) -> str:
+        """System prompt used when the query is ambiguous and no history hint exists.
+
+        Instructs the LLM to ask the user which medicine they mean instead
+        of guessing. Keeps the friendly Dayak persona.
+        """
+        return (
+            "당신은 친절하고 전문적인 약사 AI 'Dayak'입니다.\n"
+            "사용자의 질문이 어떤 약에 대한 것인지 불분명하고, 대화 이력에서도 특정 약을 "
+            "유추할 수 없습니다. 어느 약에 대해 궁금한지 구체적인 약품명을 되물어보세요.\n"
+            "일반적인 약학 정보를 먼저 설명하지 말고, 짧고 따뜻한 어투로 약품명을 요청하세요."
+        )
 
     def _build_retrieval_metadata(self, search_results: list[SearchResult]) -> RetrievalMetadata:
         """Summarize retrieval stage for persistence on user-turn metadata.
