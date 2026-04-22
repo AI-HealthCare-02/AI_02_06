@@ -37,3 +37,5 @@ PLAN.md
 
 # SQL문서
 *.sql
+__pycache__/
+*.pyc

@@ -10,6 +10,17 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class PrescriptionDateItem(BaseModel):
+    """Prescription date summary item for left navigation.
+
+    Groups medications by dispensed date and department.
+    """
+
+    prescription_date: date = Field(..., description="Prescription dispensed date (falls back to start_date if absent)")
+    department: str | None = Field(None, description="Prescribing department (e.g. 내과)")
+    count: int = Field(..., description="Number of medications for this date and department")
+
+
 class BaseMedication(BaseModel):
     """Base medication model with common fields.
 

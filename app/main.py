@@ -15,12 +15,14 @@ from app.core.config import Env, config
 from app.db.databases import initialize_tortoise
 from app.middlewares.rate_limit import RateLimitMiddleware
 from app.middlewares.security import SecurityMiddleware
+from app.workers.scheduler import scheduler_lifespan
 
 app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
     redirect_slashes=False,  # Nginx handles trailing slash removal
+    lifespan=scheduler_lifespan,
 )
 
 
