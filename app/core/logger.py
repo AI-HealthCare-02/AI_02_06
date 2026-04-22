@@ -9,7 +9,7 @@ import sys
 
 
 def setup_logger(
-    name: str = "ai_worker",
+    name: str = "app",
     level: int = logging.INFO,
 ) -> logging.Logger:
     """Set up a logger with console output.
