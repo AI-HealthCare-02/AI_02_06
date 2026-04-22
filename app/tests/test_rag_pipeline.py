@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.dtos.rag import ChatCompletion, RAGResponse
+from app.dtos.rag import ChatCompletion, RAGResponse, RewriteResult, RewriteStatus
 from app.services.rag.intent.intents import IntentType
 from app.services.rag.pipeline import RAGPipeline
 
@@ -32,6 +32,9 @@ def _make_pipeline(
     mock_generator = MagicMock()
     mock_generator.generate_chat_response = AsyncMock(
         return_value=ChatCompletion(answer=llm_answer, token_usage=None),
+    )
+    mock_generator.rewrite_query = AsyncMock(
+        return_value=RewriteResult(status=RewriteStatus.OK, query="타이레놀 부작용", token_usage=None),
     )
 
     return RAGPipeline(

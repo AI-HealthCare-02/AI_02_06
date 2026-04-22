@@ -10,12 +10,19 @@ import time
 from app.dtos.rag import (
     RAGResponse,
     RetrievalMetadata,
+    RewriteStatus,
     SearchFilters,
     SearchResult,
 )
 from app.services.rag.intent.classifier import IntentClassifier
 from app.services.rag.intent.intents import IntentType
 from app.services.rag.protocols import EmbeddingProvider, Retriever
+
+# Number of trailing turns (user/assistant alternating) retained verbatim
+# for the answer LLM. The rewrite stage already consumed full history;
+# keeping only recent turns here preserves conversational tone while
+# cutting prompt tokens.
+_ANSWER_HISTORY_TURNS: int = 3
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +80,7 @@ class RAGPipeline:
         system_prompt: str | None = None,
         user_profile_id: int | None = None,
         max_sources: int = 5,
-        history_metadata: list[dict] | None = None,  # noqa: ARG002  (consumed in next commit: LLM rewrite)
+        history_metadata: list[dict] | None = None,  # noqa: ARG002  reserved for Compact phase (session summary injection)
     ) -> RAGResponse:
         """Process a user question through the full RAG pipeline.
 
@@ -131,38 +138,59 @@ class RAGPipeline:
 
         # Step 4: RAG retrieval for knowledge-based intents
         if intent in _RAG_INTENTS:
-            logger.info("[RAG] path=retrieve+llm encoding query...")
-            query_embedding = await self.embedding_provider.encode_single(question)
+            logger.info("[RAG] path=retrieve+llm")
+
+            # Step 4a: LLM-based query rewriting with full history.
+            logger.info("[RAG] rewrite: starting (history=%dturns)", len(history))
+            rewrite = await self.rag_generator.rewrite_query(history=history, current_query=question)
+
+            # Step 4b: Branch on rewrite outcome.
+            unresolvable = rewrite.status == RewriteStatus.UNRESOLVABLE
+            effective_query = rewrite.query  # OK: rewritten; otherwise: original
+            search_results: list[SearchResult] = []
             filters = SearchFilters()
 
-            search_results = await self.retriever.retrieve(
-                query=question,
-                query_embedding=query_embedding,
-                filters=filters,
-                limit=max_sources,
-            )
+            if not unresolvable:
+                query_embedding = await self.embedding_provider.encode_single(effective_query)
+                search_results = await self.retriever.retrieve(
+                    query=effective_query,
+                    query_embedding=query_embedding,
+                    filters=filters,
+                    limit=max_sources,
+                )
+                if search_results:
+                    summary = ", ".join(f"{r.medicine.name}({r.final_score:.2f})" for r in search_results)
+                    logger.info("[RAG] retrieved=%d: %s", len(search_results), summary)
+                else:
+                    logger.info("[RAG] retrieved=0 (no matches above threshold)")
 
-            if search_results:
-                summary = ", ".join(f"{r.medicine.name}({r.final_score:.2f})" for r in search_results)
-                logger.info("[RAG] retrieved=%d: %s", len(search_results), summary)
+            # Step 4c: Build answer-LLM prompt. Clarify path on UNRESOLVABLE.
+            if unresolvable:
+                prompt = self._clarify_system_prompt()
             else:
-                logger.info("[RAG] retrieved=0 (no matches above threshold)")
+                context = self._build_context(search_results)
+                prompt = system_prompt or self._default_system_prompt(context)
 
-            # NOTE: Pronoun / elided-subject resolution is pending a move to
-            # LLM-based query rewriting (see RAGGenerator.rewrite_query).
-            # The rule-based resolver has been removed; this commit
-            # temporarily lacks multi-turn reference handling.
-            context = self._build_context(search_results)
-            messages = [*history, {"role": "user", "content": question}]
-            prompt = system_prompt or self._default_system_prompt(context)
+            # Step 4d: Keep only the last few turns for the answer LLM.
+            # Rewrite already consumed full history, so repeating it here
+            # wastes prompt tokens without benefit.
+            tail_history = history[-_ANSWER_HISTORY_TURNS:] if _ANSWER_HISTORY_TURNS > 0 else []
+            messages = [*tail_history, {"role": "user", "content": effective_query}]
 
-            logger.info("[RAG] llm msgs=%d ctx_chars=%d", len(messages) + 1, len(prompt))
+            logger.info(
+                "[RAG] llm msgs=%d ctx_chars=%d history_turns=%d%s",
+                len(messages) + 1,
+                len(prompt),
+                len(tail_history),
+                " prompt=clarify" if unresolvable else "",
+            )
             completion = await self.rag_generator.generate_chat_response(messages, system_prompt=prompt)
+
             confidence = self._calculate_confidence(search_results)
             sources = self._build_sources(search_results)
             retrieval_metadata = self._build_retrieval_metadata(search_results)
             query_keywords = (
-                self.retriever.extract_keywords(question) if hasattr(self.retriever, "extract_keywords") else []
+                self.retriever.extract_keywords(effective_query) if hasattr(self.retriever, "extract_keywords") else []
             )
 
             return RAGResponse(
