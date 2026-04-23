@@ -20,8 +20,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 # 의존성 파일만 먼저 복사 (캐시 레이어 활용)
 COPY pyproject.toml uv.lock ./
 
-# 의존성 설치 (app 그룹만)
-RUN uv sync --group app --no-dev --frozen
+# 의존성 설치 (app + dev 그룹 — 로컬/개발 이미지. prod는 Dockerfile.prod 사용)
+RUN uv sync --group app --group dev --frozen
 
 # 소스 코드 복사
 COPY app/ ./app/

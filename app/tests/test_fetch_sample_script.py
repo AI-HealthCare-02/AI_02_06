@@ -44,16 +44,9 @@ class TestCliInterface:
 class TestFetchSampleHelpers:
     """Script exposes a few helpers so internals stay testable."""
 
-    def test_build_chunk_text_signature(self) -> None:
-        """build_chunk_text(medicine_info_row, section) -> str."""
-        sig = inspect.signature(fetch_sample.build_chunk_text)
-        params = list(sig.parameters.keys())
-        assert "medicine" in params
-        assert "section" in params
-
-    def test_iter_section_texts_yields_pairs(self) -> None:
-        """iter_section_texts(medicine_info_row) -> Iterable[(section, text)]."""
-        sig = inspect.signature(fetch_sample.iter_section_texts)
+    def test_iter_section_chunks_signature(self) -> None:
+        """iter_section_chunks(medicine) -> list[(section, chunk_index, content)]."""
+        sig = inspect.signature(fetch_sample.iter_section_chunks)
         params = list(sig.parameters.keys())
         assert "medicine" in params
 

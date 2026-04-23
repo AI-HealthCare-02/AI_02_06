@@ -179,6 +179,20 @@ class MedicineInfo(models.Model):
         description="Precaution PDF source URL (NB_DOC_ID)",
     )
 
+    # ── Dtl06 원본 XML 본문 (재임베딩/재청크 시 API 재호출 회피) ──────────
+    ee_doc_data = fields.TextField(
+        null=True,
+        description="Raw EE_DOC_DATA XML (효능효과 원문)",
+    )
+    ud_doc_data = fields.TextField(
+        null=True,
+        description="Raw UD_DOC_DATA XML (용법용량 원문)",
+    )
+    nb_doc_data = fields.TextField(
+        null=True,
+        description="Raw NB_DOC_DATA XML (사용상주의사항 원문)",
+    )
+
     # ── 동기화 추적 및 타임스탬프 ──────────────────────────────────────
     last_synced_at = fields.DatetimeField(
         null=True,

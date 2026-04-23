@@ -5,7 +5,7 @@ Food and Drug Safety public API and synchronizing it with the local
 medicine_info database using incremental update strategy.
 
 Reference:
-    - API Docs: data.go.kr DrugPrdtPrmsnInfoService07 (2025)
+    - API Docs: data.go.kr dDrugPrdtPrmsnInfoService07 (2025)
     - Best Practice: data.go.kr bulk sync pattern with httpx pagination
 """
 
@@ -18,6 +18,7 @@ import httpx
 
 from app.models.data_sync_log import DataSyncLog
 from app.repositories.medicine_info_repository import MedicineInfoRepository
+from app.services.medicine_doc_parser import flatten_doc_plaintext
 
 logger = logging.getLogger(__name__)
 
@@ -239,15 +240,22 @@ class MedicineDataService:
 
     @staticmethod
     def _transform_item(item: dict) -> dict:
-        """Transform raw API item to medicine_info model field format.
+        """Transform raw Dtl06 API item to medicine_info model field format.
+
+        Maps every Dtl06 response field with a corresponding MedicineInfo
+        column. XML document bodies (EE_DOC_DATA, UD_DOC_DATA, NB_DOC_DATA)
+        are intentionally NOT transformed here — they are consumed by a
+        later chunking step that produces medicine_chunk rows.
 
         Args:
             item: Raw API response item dictionary.
 
         Returns:
             Dictionary with model-compatible field names and values.
+            Missing or empty-string API fields are normalized to None.
         """
         return {
+            # 기본 식별
             "item_seq": item.get("ITEM_SEQ", ""),
             "medicine_name": item.get("ITEM_NAME", ""),
             "item_eng_name": item.get("ITEM_ENG_NAME") or None,
@@ -256,10 +264,29 @@ class MedicineDataService:
             "spclty_pblc": item.get("SPCLTY_PBLC") or None,
             "permit_date": item.get("ITEM_PERMIT_DATE") or None,
             "cancel_name": item.get("CANCEL_NAME") or None,
+            # 성분/저장/메타
             "main_item_ingr": item.get("MAIN_ITEM_INGR") or None,
             "storage_method": item.get("STORAGE_METHOD") or None,
             "edi_code": item.get("EDI_CODE") or None,
             "bizrno": item.get("BIZRNO") or None,
+            "change_date": item.get("CHANGE_DATE") or None,
+            "chart": item.get("CHART") or None,
+            "material_name": item.get("MATERIAL_NAME") or None,
+            "valid_term": item.get("VALID_TERM") or None,
+            "pack_unit": item.get("PACK_UNIT") or None,
+            "atc_code": item.get("ATC_CODE") or None,
+            # 허가 문서 PDF URL (EE_DOC_ID/UD_DOC_ID/NB_DOC_ID → *_doc_url)
+            "ee_doc_url": item.get("EE_DOC_ID") or None,
+            "ud_doc_url": item.get("UD_DOC_ID") or None,
+            "nb_doc_url": item.get("NB_DOC_ID") or None,
+            # 원본 DOC XML (재임베딩/재청크 시 API 재호출 회피용 스냅샷)
+            "ee_doc_data": item.get("EE_DOC_DATA") or None,
+            "ud_doc_data": item.get("UD_DOC_DATA") or None,
+            "nb_doc_data": item.get("NB_DOC_DATA") or None,
+            # UI 표시용 평문 효능 (XML 평문화)
+            "efficacy": flatten_doc_plaintext(item.get("EE_DOC_DATA")) or None,
+            # 동기화 타임스탬프 (tz-aware UTC — CLAUDE.md 4.2)
+            "last_synced_at": datetime.now(tz=UTC),
         }
 
     # ── 원본 데이터 JSON 백업 (ai_worker/data/에 타임스탬프 파일) ──

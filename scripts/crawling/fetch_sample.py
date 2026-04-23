@@ -32,7 +32,6 @@ CLI:
 
 import argparse
 import asyncio
-from collections.abc import Iterable
 import logging
 import sys
 
@@ -45,6 +44,11 @@ from app.db.databases import TORTOISE_ORM
 from app.models.medicine_chunk import MedicineChunk, MedicineChunkSection
 from app.models.medicine_info import MedicineInfo
 from app.services.medicine_data_service import MedicineDataService
+from app.services.medicine_doc_parser import (
+    classify_article_section,
+    flatten_doc_plaintext,
+    parse_doc_articles,
+)
 from app.services.rag.config import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL_NAME
 
 logging.basicConfig(
@@ -58,16 +62,23 @@ _BASE_URL = "https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07"
 _DETAIL_ENDPOINT = f"{_BASE_URL}/getDrugPrdtPrmsnDtlInq06"
 _REQUEST_TIMEOUT = 30.0
 
-# Map MedicineChunkSection -> (medicine_info attribute name, short Korean label)
-# Only sections whose source field exists on the current main schema are
-# populated here; the rest remain 13-enum-compatible but unused for now.
-_SECTION_FIELDS: dict[MedicineChunkSection, tuple[str, str]] = {
-    MedicineChunkSection.EFFICACY: ("efficacy", "효능"),
-    MedicineChunkSection.USAGE: ("main_item_ingr", "용법"),
-    MedicineChunkSection.STORAGE: ("storage_method", "저장"),
-    MedicineChunkSection.INGREDIENT: ("material_name", "주성분"),
-    MedicineChunkSection.PRECAUTION_GENERAL: ("precautions", "일반주의"),
-    MedicineChunkSection.ADVERSE_REACTION: ("side_effects", "이상반응"),
+# Human-readable Korean label per MedicineChunkSection for chunk header prefix.
+# Used to prepend "[{medicine_name}] {label}\n" before embedding so the vector
+# captures both drug identity and section category alongside the body text.
+_SECTION_LABELS: dict[MedicineChunkSection, str] = {
+    MedicineChunkSection.EFFICACY: "효능",
+    MedicineChunkSection.USAGE: "용법",
+    MedicineChunkSection.STORAGE: "저장",
+    MedicineChunkSection.INGREDIENT: "주성분",
+    MedicineChunkSection.PRECAUTION_WARNING: "주의(경고)",
+    MedicineChunkSection.PRECAUTION_CONTRAINDICATION: "주의(금기)",
+    MedicineChunkSection.PRECAUTION_CAUTION: "주의(신중투여)",
+    MedicineChunkSection.ADVERSE_REACTION: "이상반응",
+    MedicineChunkSection.PRECAUTION_GENERAL: "주의(일반)",
+    MedicineChunkSection.PRECAUTION_PREGNANCY: "주의(임부/수유)",
+    MedicineChunkSection.PRECAUTION_PEDIATRIC: "주의(소아)",
+    MedicineChunkSection.PRECAUTION_ELDERLY: "주의(고령자)",
+    MedicineChunkSection.PRECAUTION_OVERDOSE: "주의(과량투여)",
 }
 
 
@@ -87,27 +98,56 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def build_chunk_text(medicine: MedicineInfo, section: MedicineChunkSection) -> str:
-    """Build the embedding-target text for one (medicine, section) pair.
+def iter_section_chunks(
+    medicine: MedicineInfo,
+) -> list[tuple[MedicineChunkSection, int, str]]:
+    """Build all (section, chunk_index, content) triples for one medicine.
 
-    Applies a header prefix so the embedding captures both the drug
-    identity and the section category alongside the body text.
+    Chunks are produced from five sources:
+      1. EE_DOC_DATA (평문화) -> single EFFICACY chunk
+      2. UD_DOC_DATA (평문화) -> single USAGE chunk
+      3. NB_DOC_DATA ARTICLE 단위 분해 -> 각 ARTICLE title을 키워드
+         분류기에 통과시켜 9개 PRECAUTION_* / ADVERSE_REACTION /
+         INTERACTION 섹션 중 하나에 할당. 같은 섹션에 ARTICLE이 여러
+         개면 chunk_index가 0부터 증가.
+      4. storage_method 컬럼 -> STORAGE chunk
+      5. material_name (없으면 main_item_ingr) 컬럼 -> INGREDIENT chunk
+
+    Empty bodies are skipped. Header ``[{medicine_name}] {label}`` is
+    prepended before the body so the embedding captures drug identity
+    + section category.
     """
-    attr_name, label = _SECTION_FIELDS[section]
-    body = getattr(medicine, attr_name, None) or ""
-    header = f"[{medicine.medicine_name}] {label}"
-    if medicine.category:
-        header += f" ({medicine.category})"
-    return f"{header}\n{body.strip()}" if body.strip() else header
+    result: list[tuple[MedicineChunkSection, int, str]] = []
+    counts: dict[MedicineChunkSection, int] = {}
 
+    def add(section: MedicineChunkSection, body: str) -> None:
+        body = (body or "").strip()
+        if not body:
+            return
+        label = _SECTION_LABELS[section]
+        header = f"[{medicine.medicine_name}] {label}"
+        content = f"{header}\n{body}"
+        idx = counts.get(section, 0)
+        counts[section] = idx + 1
+        result.append((section, idx, content))
 
-def iter_section_texts(medicine: MedicineInfo) -> Iterable[tuple[MedicineChunkSection, str]]:
-    """Yield (section, chunk_text) pairs for every section that has content."""
-    for section, (attr_name, _label) in _SECTION_FIELDS.items():
-        body = getattr(medicine, attr_name, None) or ""
-        if not body.strip():
-            continue
-        yield section, build_chunk_text(medicine, section)
+    # DOC XML 원본 기반
+    add(MedicineChunkSection.EFFICACY, flatten_doc_plaintext(medicine.ee_doc_data))
+    add(MedicineChunkSection.USAGE, flatten_doc_plaintext(medicine.ud_doc_data))
+
+    for article in parse_doc_articles(medicine.nb_doc_data):
+        section = classify_article_section(article.title)
+        combined = f"{article.title}\n{article.body}".strip() if article.body else article.title.strip()
+        add(section, combined)
+
+    # 단일 평문 컬럼 기반
+    add(MedicineChunkSection.STORAGE, medicine.storage_method or "")
+    add(
+        MedicineChunkSection.INGREDIENT,
+        medicine.material_name or medicine.main_item_ingr or "",
+    )
+
+    return result
 
 
 def normalize_vector(vector: list[float]) -> list[float]:
@@ -167,15 +207,18 @@ async def _embed_and_insert_chunks(medicine: MedicineInfo) -> int:
         model = SentenceTransformer(EMBEDDING_MODEL_NAME)
         _MODEL = model
 
-    pairs = list(iter_section_texts(medicine))
-    if not pairs:
+    triples = iter_section_chunks(medicine)
+    if not triples:
         return 0
 
-    sections, texts = zip(*pairs, strict=True)
+    texts = [content for _section, _idx, content in triples]
     loop = asyncio.get_event_loop()
-    matrix = await loop.run_in_executor(None, lambda: model.encode(list(texts), show_progress_bar=False))
+    matrix = await loop.run_in_executor(
+        None,
+        lambda: model.encode(texts, show_progress_bar=False),
+    )
     chunks: list[MedicineChunk] = []
-    for section, text, raw_vec in zip(sections, texts, matrix, strict=True):
+    for (section, chunk_index, content), raw_vec in zip(triples, matrix, strict=True):
         vector = normalize_vector(raw_vec.tolist())
         if len(vector) != EMBEDDING_DIMENSIONS:
             msg = f"Embedding dim mismatch: got {len(vector)}, expected {EMBEDDING_DIMENSIONS}"
@@ -184,9 +227,9 @@ async def _embed_and_insert_chunks(medicine: MedicineInfo) -> int:
             MedicineChunk(
                 medicine_info_id=medicine.id,
                 section=section.value,
-                chunk_index=0,
-                content=text,
-                token_count=len(text),
+                chunk_index=chunk_index,
+                content=content,
+                token_count=len(content),
                 embedding=vector,
                 model_version=EMBEDDING_MODEL_NAME,
             ),
