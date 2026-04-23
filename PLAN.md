@@ -350,14 +350,16 @@ flowchart LR
 **Unique**: `(medicine_info_id, section, chunk_index)`
 **Index**: `embedding` HNSW `vector_cosine_ops` (m=16, ef_construction=64)
 
-**`section` enum (13종 고정)**:
+**`section` enum (v2 — 6종 고정, 수요자 질문 기준)**:
 ```
-efficacy | usage | storage | ingredient |
-precaution_warning | precaution_contraindication | precaution_caution |
-adverse_reaction | precaution_general |
-precaution_pregnancy | precaution_pediatric | precaution_elderly |
-precaution_overdose
+overview | intake_guide | drug_interaction |
+lifestyle_interaction | adverse_reaction | special_event
 ```
+
+**신규 컬럼 — `interaction_tags jsonb` (v2)**:
+청크에 세분화 필터 태그를 JSONB 배열로 부여한다 (예: `["alcohol", "condition:liver"]`).
+GIN 인덱스로 태그 매칭을 ms 단위 처리. 태그 사전 시드는
+[ai_worker/data/interaction_tags.json](ai_worker/data/interaction_tags.json) 참조.
 
 ### 1.5.4 신규: `medicine_ingredient` (1:N 주성분)
 
@@ -417,40 +419,133 @@ DROP INDEX IF EXISTS idx_medicine_chunk_embedding_hnsw;
 ALTER TABLE medicine_info ADD COLUMN embedding TEXT;
 ```
 
-### 1.5.6 문서 청킹 파이프라인 (일괄 배치 + 증분)
+### 1.5.6 문서 청킹 파이프라인 — 수요자 중심 재설계 (v2)
+
+#### 설계 전환 배경
+
+초기 v1은 공공데이터 API 의 XML 구조(ARTICLE title) 그대로 13종 section enum 을
+정의한 **공급자 중심** 설계였다. 실제 사용자 질의 유형을 역설계해 보니
+"한약이랑 먹어도?", "레이저 시술 받아도?", "커피 마셔도?" 같은 질문이
+`precaution_general` 단일 청크에 뭉뚱그려져 벡터 검색 노이즈가 크게 발생한다.
+
+**v2 방향**: 섹션은 "사용자 질문 카테고리" 기준 **6종으로 축소**하고, 세부
+상호작용은 **`interaction_tags` JSONB 레이어**로 분리한다. 청킹은 PARAGRAPH
+단위까지 쪼갤 수 있으며, 각 청크는 "큰 카테고리(section) + 정밀 필터(tags)"
+이중 색인을 가진다.
+
+#### 청크 6종 (section enum)
+
+| # | section | 포함 내용 | 대표 사용자 질문 | 원본 XML 매핑 |
+|---|---------|----------|----------|--------------|
+| 1 | **`overview`** | 효능·적응증·약의 정체성 | "이 약 뭐야?", "두통에 뭐 먹어?" | `EE_DOC_DATA` 전체 |
+| 2 | **`intake_guide`** | 복용법·타이밍·제형·잊은 경우 대처 | "공복?", "쪼개 먹어도?", "약 까먹었어" | `UD_DOC_DATA` 전체 + 메타 합성 |
+| 3 | **`drug_interaction`** | 약·영양제·한약·건기식 병용 | "홍삼이랑?", "와파린 같이?" | NB_DOC "2. 투여 금지" 약물 문단 + "5. 일반적 주의" 약물 상호작용 |
+| 4 | **`lifestyle_interaction`** | 음식·음주·카페인·운전·운동·햇빛 | "커피?", "술?", "운전?" | NB_DOC "5. 일반적 주의" 음식/행동 문단 |
+| 5 | **`adverse_reaction`** | 흔한 부작용 + 중증 이상반응 + 과량 대처 | "두드러기 나는데?", "토했어" | NB_DOC "4. 이상반응" + "9. 과량투여" |
+| 6 | **`special_event`** | 수술·시술·검사·임신·수유·소아·고령·보관 | "레이저?", "수술 앞두고?", "임신 중" | NB_DOC "6. 임부" + "7. 소아" + "8. 고령자" + 수술 문단 + `STORAGE_METHOD` |
+
+성분(`ingredient`)은 별도 청크로 만들지 않는다. "내 알레르기 성분 포함?"
+류 질문은 `medicine_ingredient` 테이블을 직접 SQL 조회한다.
+
+#### interaction_tags 레이어 (JSONB)
+
+청크 1개에 여러 태그를 붙여 정밀 필터링을 가능케 한다. 예:
+
+```json
+{
+  "medicine_info_id": 42,
+  "section": "lifestyle_interaction",
+  "content": "타이레놀 주의: 음주 시 간독성 증가",
+  "interaction_tags": ["alcohol", "condition:liver"]
+}
+```
+
+태그 카테고리 (10종, 초기 시드):
+
+| prefix | 예시 값 |
+|--------|--------|
+| `food` | `grapefruit`, `dairy`, `vitamin_k`, `high_fiber` |
+| `beverage` | `alcohol`, `caffeine`, `energy_drink` |
+| `drug` | `herbal`, `anticoagulant`, `nsaid`, `statin`, `ssri`, `oral_contraceptive` |
+| `procedure` | `surgery`, `laser`, `imaging_mri`, `imaging_ct`, `dental`, `tattoo`, `vaccination` |
+| `condition` | `pregnancy`, `breastfeeding`, `liver`, `kidney`, `diabetes`, `hypertension`, `glaucoma` |
+| `activity` | `driving`, `exercise`, `swimming`, `heavy_machinery` |
+| `exposure` | `sunlight`, `heat`, `cold` |
+| `timing` | `empty_stomach`, `post_meal`, `bedtime`, `morning` |
+| `demographic` | `pediatric`, `elderly`, `adolescent` |
+| `emergency` | `anaphylaxis`, `overdose`, `severe_allergy` |
+
+태그 사전은 `ai_worker/data/interaction_tags.json` 에 시드로 관리하며,
+청킹 시점에 **규칙 기반 80% + LLM 폴백 20%** 로 자동 부여한다.
+
+#### 배치 파이프라인 (Mermaid)
 
 ```mermaid
 flowchart TD
-    A["medicine_info row<br/>(sync 완료 후)"] --> B["EE/UD/NB_DOC_DATA XML 파싱<br/>(xml.etree 또는 lxml)"]
-    B --> C["ARTICLE 단위 추출"]
-    C --> D["HTML 잔재 제거<br/>(&lt;sub&gt;, &amp;#13;, CDATA 정리)"]
-    D --> E["공백 / 줄바꿈 정규화"]
-    E --> F{ARTICLE<br/>토큰 수}
-    F -->|≤ 128| G["헤더 프리픽스 부착<br/>'{medicine_name} {section_ko}: ...'"]
-    F -->|> 128| H["문장 단위 분할<br/>(20% overlap)"]
-    H --> G
-    G --> I["section enum 매핑<br/>(ARTICLE title → enum)"]
-    I --> J["ko-sroberta-multitask<br/>임베딩 생성 (batch=32)"]
-    J --> K["medicine_chunk<br/>bulk UPSERT"]
-    K --> L["medicine_info.storage_method 등<br/>메타 기반 청크도 합성"]
-    L --> M["model_version 기록"]
+    A["medicine_info row"] --> B["EE/UD/NB_DOC XML 파싱<br/>(xml.etree)"]
+    B --> C["ARTICLE/PARAGRAPH 단위 추출"]
+    C --> D["HTML 잔재 제거<br/>(&lt;sub&gt;, &amp;#13;, CDATA)"]
+    D --> E["공백·줄바꿈 정규화"]
+    E --> F["섹션 분류<br/>(6종 중 매핑)"]
+    F --> G["태거 실행<br/>(ai_worker/utils/tagger.py)"]
+    G --> G1["규칙 기반 키워드 매칭<br/>(interaction_tags.json 사전)"]
+    G1 --> G2{태그 부여됨?}
+    G2 -->|Yes| H["헤더 프리픽스 부착<br/>'{medicine_name} {section_ko}: ...'"]
+    G2 -->|No| G3["LLM 폴백 (선택)<br/>gpt-4o-mini로 태그 추론"]
+    G3 --> H
+    H --> I{토큰 수}
+    I -->|≤ 128| J["단일 청크 확정"]
+    I -->|> 128| K["문장 분할<br/>(20% overlap)"]
+    K --> J
+    J --> L["ko-sroberta-multitask<br/>임베딩 (batch=32, 로컬 배치)"]
+    L --> M["medicine_chunk UPSERT<br/>(section + interaction_tags + embedding)"]
+    M --> N["model_version 기록"]
 ```
 
-**ARTICLE title → section 매핑 규칙** (NB_DOC 기준):
-| ARTICLE title 시작 패턴 | section enum |
-|---|---|
-| `1. 경고` | `precaution_warning` |
-| `2. 다음 환자에는 투여하지 말 것` / `투여 금지` | `precaution_contraindication` |
-| `3. 다음 환자에는 신중히 투여` / `신중히 투여` | `precaution_caution` |
-| `4. 이상반응` / `부작용` | `adverse_reaction` |
-| `5. 일반적 주의` / `상호작용` / `적용상의 주의` | `precaution_general` |
-| `6. 임부` / `수유부` | `precaution_pregnancy` |
-| `7. 소아` | `precaution_pediatric` |
-| `8. 고령자` | `precaution_elderly` |
-| `9. 과량투여` | `precaution_overdose` |
-| 그 외 | `precaution_general` (fallback) |
+#### 섹션 매핑 규칙 (v1 → v2 통합표)
 
-EE_DOC → `efficacy`, UD_DOC → `usage`. **텍스트 20자 미만 ARTICLE은 스킵**.
+| XML 원본 ARTICLE title | v1 enum (13종) | **v2 enum (6종)** |
+|---|---|---|
+| EE_DOC 전체 | `efficacy` | **`overview`** |
+| UD_DOC 전체 | `usage` | **`intake_guide`** |
+| `1. 경고` | `precaution_warning` | **`drug_interaction`**(약물 경고) OR **`adverse_reaction`**(증상 경고) |
+| `2. 투여 금지` | `precaution_contraindication` | **`drug_interaction`**(약물 병용) OR **`special_event`**(생리상태) |
+| `3. 신중히 투여` | `precaution_caution` | **`special_event`** (기저질환·생리상태) |
+| `4. 이상반응` | `adverse_reaction` | **`adverse_reaction`** |
+| `5. 일반적 주의` | `precaution_general` | **`drug_interaction`** 또는 **`lifestyle_interaction`** (내용 따라 분기) |
+| `6. 임부` / `수유부` | `precaution_pregnancy` | **`special_event`** (+ `condition:pregnancy` 태그) |
+| `7. 소아` | `precaution_pediatric` | **`special_event`** (+ `demographic:pediatric` 태그) |
+| `8. 고령자` | `precaution_elderly` | **`special_event`** (+ `demographic:elderly` 태그) |
+| `9. 과량투여` | `precaution_overdose` | **`adverse_reaction`** (+ `emergency:overdose` 태그) |
+| `storage_method` (메타) | `storage` | **`special_event`** |
+
+**"5. 일반적 주의" 분기 규칙**: PARAGRAPH 단위로 쪼갠 뒤, 해당 문단에
+약물 키워드(`와파린`, `항응고제` 등)가 있으면 `drug_interaction`, 음식/음주/
+활동 키워드가 있으면 `lifestyle_interaction` 으로 분류. 둘 다 있으면 **문단을
+분리해 각자 다른 청크로 저장**.
+
+#### 스킵 규칙
+
+- 텍스트 20자 미만 ARTICLE/PARAGRAPH → 스킵
+- `<ARTICLE title="..." />` (자체 종료 태그, 본문 없음) → 스킵
+
+#### 쿼리 시 태그 활용
+
+```sql
+-- 예: "이 약 먹는데 레이저 시술 받아도?" (복용 중 타이레놀)
+SELECT content, embedding <=> :query_vector AS distance
+FROM medicine_chunk
+WHERE medicine_info_id = :tylenol_id
+  AND (section = 'special_event'
+       OR interaction_tags @> '["procedure:laser"]'
+       OR interaction_tags @> '["exposure:sunlight"]')
+ORDER BY distance
+LIMIT 5;
+```
+
+GIN 인덱스(`USING gin (interaction_tags)`)가 태그 필터 단계를
+ms 단위로 처리해주므로, 벡터 검색 전에 **3중 필터(FK → 섹션 → 태그)**
+로 범위를 극적으로 좁힐 수 있다.
 
 ### 1.5.7 쿼리 파이프라인 (실시간)
 
@@ -555,11 +650,20 @@ flowchart TD
 
 1. [docs/db_schema.dbml](docs/db_schema.dbml) — single source of truth
 2. [app/models/medicine_info.py](app/models/medicine_info.py), `medicine_chunk.py`, `medicine_ingredient.py`
-3. `app/db/migrations/models/8_*_add_rag_chunk_schema.py` (수동 SQL 포함)
-4. 스키마 락 3조항:
-   - `vector(768)` — 모델명 `jhgan/ko-sroberta-multitask` 기준 (오타 확인 완료)
-   - `section` enum 13종
-   - `model_version` 컬럼 — 재임베딩 트리거
+3. `app/db/migrations/models/8_*_add_rag_chunk_schema.py` (초기 테이블)
+4. `app/db/migrations/models/9_*_redesign_chunk_schema.py` (v2 재설계 — enum 값 교체 + interaction_tags + GIN)
+5. [ai_worker/data/interaction_tags.json](ai_worker/data/interaction_tags.json) — 태그 시드 사전
+6. [ai_worker/utils/tagger.py](ai_worker/utils/tagger.py) — 규칙 기반 자동 태거
+
+#### 스키마 락 **4조항** (v2 갱신)
+
+- **락 ①** — `vector(768)` 차원, 모델 `jhgan/ko-sroberta-multitask` (변경 없음)
+- **락 ②** — `section` enum **6종 고정** (v1의 13종에서 수요자 중심 6종으로 재설계):
+  `overview` / `intake_guide` / `drug_interaction` / `lifestyle_interaction`
+  / `adverse_reaction` / `special_event`
+- **락 ③** — `model_version` not null (재임베딩 트리거, 변경 없음)
+- **락 ④** — **신규**: `interaction_tags jsonb` 컬럼 + GIN 인덱스. 태그 값은
+  `interaction_tags.json` 사전 기반이며 값 추가·변경 시 팀 공지 필수
 
 ---
 
