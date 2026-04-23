@@ -13,14 +13,23 @@ class Challenge(models.Model):
     This model stores challenge information including title, description,
     target days, completion tracking, and status.
 
+    Challenges can be LLM-generated (guide is set) or manually created
+    by the user (guide is None).
+
     Attributes:
         id: Primary key UUID.
         profile: Foreign key to Profile model.
+        guide: Nullable FK to LifestyleGuide — set when LLM-generated, None when manual.
+        category: Lifestyle category (diet/sleep/exercise/symptom/interaction).
         title: Challenge title (max 64 characters).
         description: Optional detailed description (max 256 characters).
         target_days: Target number of days to complete.
         completed_dates: JSON array of completion dates.
+        difficulty: Challenge difficulty level.
         challenge_status: Current status (default: IN_PROGRESS).
+        is_active: Whether the user has started this challenge.
+        started_at: Datetime when user activated the challenge.
+        completed_at: Datetime when the challenge was fully completed.
         started_date: Challenge start date.
         created_at: Record creation timestamp.
         updated_at: Last update timestamp.
@@ -29,6 +38,21 @@ class Challenge(models.Model):
 
     id = fields.UUIDField(pk=True)
     profile = fields.ForeignKeyField("models.Profile", related_name="challenges")
+
+    # Nullable FK: populated for LLM-generated challenges, None for manual ones
+    guide = fields.ForeignKeyField(
+        "models.LifestyleGuide",
+        related_name="challenges",
+        null=True,
+        description="Source guide — None means user-created challenge",
+    )
+
+    # Lifestyle category — matches GuideCategory enum values
+    category = fields.CharField(
+        max_length=16,
+        null=True,
+        description="Lifestyle category (diet/sleep/exercise/symptom/interaction)",
+    )
 
     title = fields.CharField(max_length=64, description="Challenge title")
     description = fields.CharField(max_length=256, null=True, description="Detailed description")
@@ -39,6 +63,12 @@ class Challenge(models.Model):
 
     difficulty = fields.CharField(max_length=16, null=True, description="난이도 (쉬움/보통/어려움)")
     challenge_status = fields.CharField(max_length=16, default="IN_PROGRESS", description="진행 상태")
+
+    # Activation lifecycle fields
+    is_active = fields.BooleanField(default=False, description="User has started this challenge")
+    started_at = fields.DatetimeField(null=True, description="Datetime when user activated challenge")
+    completed_at = fields.DatetimeField(null=True, description="Datetime when challenge was completed")
+
     started_date = fields.DateField(description="챌린지 시작 날짜")
 
     created_at = fields.DatetimeField(auto_now_add=True)

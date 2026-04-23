@@ -8,8 +8,10 @@ from fastapi import APIRouter
 
 from app.apis.v1.challenge_routers import router as challenge_router
 from app.apis.v1.chat_session_routers import router as chat_session_router
+from app.apis.v1.daily_log_routers import router as daily_log_router
 from app.apis.v1.health_routers import router as health_router
 from app.apis.v1.intake_log_routers import router as intake_log_router
+from app.apis.v1.lifestyle_guide_routers import router as lifestyle_guide_router
 from app.apis.v1.medication_routers import router as medication_router
 from app.apis.v1.message_routers import router as message_router
 from app.apis.v1.mock_oauth_routers import mock_router
@@ -23,7 +25,9 @@ v1_routers = APIRouter(prefix="/api/v1")
 # Include all sub-routers
 v1_routers.include_router(health_router)
 v1_routers.include_router(challenge_router)
+v1_routers.include_router(daily_log_router)
 v1_routers.include_router(intake_log_router)
+v1_routers.include_router(lifestyle_guide_router)
 v1_routers.include_router(medication_router)
 v1_routers.include_router(mock_router)
 v1_routers.include_router(oauth_router)

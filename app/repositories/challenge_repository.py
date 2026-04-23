@@ -4,9 +4,11 @@ This module provides data access layer for the challenges table,
 handling user health challenge tracking operations.
 """
 
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID, uuid4
 
+from app.core import config
+from app.dtos.lifestyle_guide import RecommendedChallenge
 from app.models.challenge import Challenge
 
 
@@ -57,6 +59,20 @@ class ChallengeRepository:
             deleted_at__isnull=True,
         ).all()
 
+    async def get_by_guide_id(self, guide_id: UUID) -> list[Challenge]:
+        """Get all challenges linked to a specific lifestyle guide.
+
+        Args:
+            guide_id: LifestyleGuide UUID.
+
+        Returns:
+            list[Challenge]: List of challenges for the guide.
+        """
+        return await Challenge.filter(
+            guide_id=guide_id,
+            deleted_at__isnull=True,
+        ).all()
+
     async def get_active_by_profile(self, profile_id: UUID) -> list[Challenge]:
         """Get active challenges for a profile.
 
@@ -89,6 +105,7 @@ class ChallengeRepository:
             target_days: Target completion days.
             started_date: Challenge start date.
             description: Optional challenge description.
+            difficulty: Optional difficulty level (쉬움/보통/어려움).
 
         Returns:
             Challenge: Created challenge.
@@ -104,6 +121,44 @@ class ChallengeRepository:
             completed_dates=[],
             challenge_status="IN_PROGRESS",
         )
+
+    async def bulk_create_from_guide(
+        self,
+        guide_id: UUID,
+        profile_id: UUID,
+        challenges: list[RecommendedChallenge],
+    ) -> list[Challenge]:
+        """Bulk create LLM-recommended challenges tied to a guide.
+
+        All created challenges start with is_active=False (pending user activation).
+
+        Args:
+            guide_id: Source LifestyleGuide UUID.
+            profile_id: Owner profile UUID.
+            challenges: Parsed recommended challenge list from LLM response.
+
+        Returns:
+            list[Challenge]: List of created challenge instances.
+        """
+        today = datetime.now(tz=config.TIMEZONE).date()
+        created: list[Challenge] = []
+        for ch in challenges:
+            challenge = await Challenge.create(
+                id=uuid4(),
+                profile_id=profile_id,
+                guide_id=guide_id,
+                category=ch.category,
+                title=ch.title,
+                description=ch.description,
+                target_days=ch.target_days,
+                difficulty=ch.difficulty,
+                started_date=today,
+                completed_dates=[],
+                challenge_status="IN_PROGRESS",
+                is_active=False,
+            )
+            created.append(challenge)
+        return created
 
     async def update(self, challenge: Challenge, **kwargs) -> Challenge:
         """Update challenge information.
@@ -127,10 +182,6 @@ class ChallengeRepository:
         Returns:
             Challenge: Soft deleted challenge.
         """
-        from datetime import datetime
-
-        from app.core import config
-
         challenge.deleted_at = datetime.now(tz=config.TIMEZONE)
         await challenge.save()
         return challenge

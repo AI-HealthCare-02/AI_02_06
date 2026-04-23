@@ -237,6 +237,29 @@ class ChallengeService:
         update_data = data.model_dump(exclude_unset=True)
         return await self.repository.update(challenge, **update_data)
 
+    async def start_challenge_with_owner_check(
+        self,
+        challenge_id: UUID,
+        account_id: UUID,
+    ) -> Challenge:
+        """Activate a challenge after ownership verification.
+
+        Sets is_active=True and records the activation timestamp.
+
+        Args:
+            challenge_id: Challenge UUID to activate.
+            account_id: Account UUID for ownership check.
+
+        Returns:
+            Challenge: Updated challenge with is_active=True and started_at set.
+        """
+        challenge = await self.get_challenge_with_owner_check(challenge_id, account_id)
+        return await self.repository.update(
+            challenge,
+            is_active=True,
+            started_at=datetime.now(tz=config.TIMEZONE),
+        )
+
     async def complete_day(
         self,
         challenge_id: UUID,

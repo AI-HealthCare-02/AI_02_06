@@ -139,6 +139,30 @@ async def update_challenge(
     return ChallengeResponse.model_validate(challenge)
 
 
+@router.patch(
+    "/{challenge_id}/start",
+    response_model=ChallengeResponse,
+    summary="Start challenge",
+)
+async def start_challenge(
+    challenge_id: UUID,
+    current_account: CurrentAccount,
+    service: ChallengeServiceDep,
+) -> ChallengeResponse:
+    """Activate a challenge and record its start time.
+
+    Args:
+        challenge_id: Challenge ID to activate.
+        current_account: Current authenticated account.
+        service: Challenge service instance.
+
+    Returns:
+        ChallengeResponse: Updated challenge with is_active=True.
+    """
+    challenge = await service.start_challenge_with_owner_check(challenge_id, current_account.id)
+    return ChallengeResponse.model_validate(challenge)
+
+
 @router.delete(
     "/{challenge_id}",
     status_code=status.HTTP_204_NO_CONTENT,
