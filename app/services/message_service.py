@@ -224,6 +224,11 @@ class MessageService:
                 history_metadata=history_metadata,
             )
         except Exception as e:
+            # 503 으로 변환하기 전에 진짜 원인을 stack trace 와 함께 남긴다.
+            # 그렇지 않으면 broad except 가 RAG 파이프라인의 모든 예외를 삼켜
+            # 디버깅이 불가능하다. logger.exception 은 traceback 을 자동으로
+            # 첨부하므로 메시지에 ``e`` 를 다시 넣지 않는다 (Ruff TRY401).
+            logger.exception("[RAG] ask pipeline failed")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={

@@ -89,6 +89,9 @@ class Config(BaseSettings):
     DB_CONNECT_TIMEOUT: int = 5
     DB_CONNECTION_POOL_MAXSIZE: int = 10
 
+    # Redis (RAG 임베딩·LLM RQ job 큐 + 세션 캐시)
+    REDIS_URL: str = "redis://redis:6379/0"
+
     # URL settings (auto-configured based on ENV)
     COOKIE_DOMAIN: str | None = None
     API_BASE_URL: str | None = None

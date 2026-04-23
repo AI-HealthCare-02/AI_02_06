@@ -8,10 +8,8 @@ submodule paths:
 
     from app.services.rag.pipeline import RAGPipeline
     from app.services.rag.retrievers.hybrid import HybridRetriever
-    from app.services.rag.providers.sentence_transformer import (
-        SentenceTransformerProvider,
-        get_sentence_transformer_provider,
-    )
+    from app.services.rag.providers.rq_embedding import RQEmbeddingProvider
+    from app.services.rag.providers.rq_llm import RQRAGGenerator
 """
 
 _pipeline: "RAGPipeline | None" = None  # noqa: F821  # forward ref resolved lazily
@@ -20,27 +18,37 @@ _pipeline: "RAGPipeline | None" = None  # noqa: F821  # forward ref resolved laz
 async def get_rag_pipeline() -> "RAGPipeline":  # noqa: F821  # forward ref resolved lazily
     """Get or create the global RAGPipeline instance.
 
-    Builds the pipeline on first call: initializes the embedding model,
-    wires the hybrid retriever, intent classifier, tool router, and
-    RAG generator. Subsequent calls return the cached instance.
+    Wires the RAG pipeline with AI-Worker-backed embedding and LLM
+    providers. FastAPI never loads the embedding model or constructs an
+    OpenAI client; instead both paths enqueue RQ jobs to the "ai" queue
+    and await results.
     """
     global _pipeline
 
     if _pipeline is None:
-        from ai_worker.utils.rag import RAGGenerator
+        import redis
+        from rq import Queue
+
+        from app.core.config import config
         from app.services.rag.intent.classifier import IntentClassifier
         from app.services.rag.pipeline import RAGPipeline
-        from app.services.rag.providers.sentence_transformer import get_sentence_transformer_provider
+        from app.services.rag.providers.rq_embedding import RQEmbeddingProvider
+        from app.services.rag.providers.rq_llm import RQRAGGenerator
         from app.services.rag.retrievers.hybrid import HybridRetriever
         from app.services.rag.tools import ToolRouter
 
-        provider = await get_sentence_transformer_provider()
+        redis_conn = redis.from_url(config.REDIS_URL)
+        ai_queue = Queue("ai", connection=redis_conn)
+
+        embedding_provider = RQEmbeddingProvider(queue=ai_queue)
+        rag_generator = RQRAGGenerator(queue=ai_queue)
+
         _pipeline = RAGPipeline(
-            embedding_provider=provider,
-            retriever=HybridRetriever(embedding_provider=provider),
+            embedding_provider=embedding_provider,
+            retriever=HybridRetriever(embedding_provider=embedding_provider),
             intent_classifier=IntentClassifier(),
             tool_router=ToolRouter(),
-            rag_generator=RAGGenerator(),
+            rag_generator=rag_generator,
         )
 
     return _pipeline

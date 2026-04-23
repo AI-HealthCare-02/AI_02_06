@@ -90,11 +90,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Phase X: FastAPI 는 ML 추론을 하지 않으므로 경량화.
+    # 300M 은 Python 3.13 런타임 + FastAPI + Tortoise ORM + Redis 클라이언트만으로도
+    # 피크 시 빠듯했던 사례가 있어 400M 로 소폭 상향.
     deploy:
       resources:
         limits:
           cpus: '0.5'
-          memory: 300M
+          memory: 400M
         reservations:
           memory: 128M
     logging:
@@ -103,7 +106,7 @@ services:
         max-size: "50m"
         max-file: "5"
 
-  # 4. AI Worker (OCR + LLM API 호출)
+  # 4. AI Worker (RAG 임베딩·LLM 추론·OCR)
   ai-worker:
     container_name: ai-worker
     build:
@@ -120,17 +123,19 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 90s  # 모델 warmup 감안해 start_period 확대
     depends_on:
       redis:
         condition: service_healthy
+    # Phase X: ko-sroberta 모델(420MB) + PyTorch CPU 런타임 + AsyncOpenAI 클라이언트 +
+    # ThreadPoolExecutor 버퍼. 피크 시 1.5GB 내외가 안전.
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 300M
+          cpus: '1.0'
+          memory: 1500M
         reservations:
-          memory: 128M
+          memory: 512M
     logging:
       driver: "json-file"
       options:

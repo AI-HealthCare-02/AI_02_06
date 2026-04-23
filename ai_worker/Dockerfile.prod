@@ -10,7 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --group ai --no-dev --frozen
+# 'app' 그룹도 함께 설치한다. ai_worker.utils.rag → app.dtos.rag → app.models.medicine_*
+# 의존 체인이 Tortoise 모델 클래스를 import 하므로 tortoise-orm 이 필요하다.
+RUN uv sync --group ai --group app --no-dev --frozen
 
 # Stage 2: Final
 FROM python:3.13-slim
@@ -28,10 +30,15 @@ COPY . .
 # PATH 설정
 ENV PATH="/app/.venv/bin:$PATH"
 
+# 임베딩 모델 pre-download (HF → 이미지 캐시). 런타임 네트워크 의존 제거.
+ENV HF_HOME=/app/.cache/huggingface
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('jhgan/ko-sroberta-multitask')"
+
 RUN chown -R appuser:appgroup /app
 USER appuser
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+# 부팅 시 모델 warmup 을 감안해 start_period 를 넉넉히 잡는다.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
     CMD pgrep -f "python" || exit 1
 
 CMD ["python", "-m", "ai_worker.main"]

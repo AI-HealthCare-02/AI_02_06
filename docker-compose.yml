@@ -94,13 +94,14 @@ services:
       redis:
         condition: service_healthy
     # 리소스 제한
+    # Phase X 이후 FastAPI 는 ML 추론을 하지 않으므로 1G → 512M 로 축소.
     deploy:
       resources:
         limits:
           cpus: '1.0'
-          memory: 1G
+          memory: 512M
         reservations:
-          memory: 256M
+          memory: 128M
     # 로깅 설정
     logging:
       driver: "json-file"
@@ -108,7 +109,7 @@ services:
         max-size: "50m"
         max-file: "5"
 
-  # 3. AI Worker (Model 학습 및 추론)
+  # 3. AI Worker (RAG 임베딩·LLM 추론, OCR)
   ai-worker:
     container_name: ai-worker
     build:
@@ -117,6 +118,13 @@ services:
     image: ${DOCKER_USER}/${DOCKER_REPOSITORY}:ai-${AI_WORKER_VERSION}
     env_file:
       - .env
+    # Phase X: 로컬 개발 시 FastAPI 와 코드 공유를 위해 app/scripts 마운트.
+    # ai_worker.providers.llm -> ai_worker.utils.rag -> app.core.config 의존 체인을
+    # 런타임 import 가능하게 한다.
+    volumes:
+      - ./app:/app/app
+      - ./ai_worker:/app/ai_worker
+      - ./scripts:/app/scripts
     networks:
       - frontend  # 외부 API 접근용 (CLOVA OCR, OpenAI)
       - backend   # Redis 통신용
@@ -125,16 +133,16 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 60s
     depends_on:
       redis:
         condition: service_healthy
-    # 리소스 제한 (AI 작업용 대용량)
+    # 리소스 제한: ko-sroberta 모델(420MB) + 임베딩 버퍼 + OpenAI async client
     deploy:
       resources:
         limits:
           cpus: '2.0'
-          memory: 4G
+          memory: 2G
         reservations:
           memory: 1G
     # 로깅 설정
