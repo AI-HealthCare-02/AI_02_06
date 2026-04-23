@@ -19,20 +19,22 @@ flowchart TD
 
     LOADING --> PHASE1
 
-    subgraph PHASE1 ["🖥️ 서버 작업 1단계 — 글자 읽기 · 정보 정리"]
+    subgraph PHASE1 ["🖥️ 서버 작업 1단계 — 글자 읽기 · DB 매칭"]
         OCR["🔍 Clova OCR<br />사진 속 글자를 모두 읽어냄<br />(네이버 AI 서비스 활용)"]
         OCR_FAIL{"글자를<br />읽었나?"}
-        LLM["🤖 GPT-4o-mini<br />읽은 글자에서 약품명·복용법을<br />깔끔하게 정리함<br />(오타도 자동 수정)"]
-        LLM_FAIL{"약품 정보를<br />찾았나?"}
-        REDIS["💾 Redis(임시 창고)에<br />정리된 결과를 저장<br />10분 후 자동 삭제됨"]
+        DB_MATCH["🗄️ 약품 DB와 이름 매칭<br />(OCR 결과 → DB 검색)"]
+        MATCH_RESULT{"DB에서<br />약품을 찾았나?"}
+        USER_INPUT["✏️ 사용자에게 직접 입력 요청<br />(매칭 실패 항목 수동 입력)"]
+        REDIS["💾 Redis(임시 창고)에<br />매칭된 결과를 저장<br />10분 후 자동 삭제됨"]
         DRAFT_ID["🔑 임시 열쇠(draft_id)를<br />사용자에게 돌려줌"]
 
         OCR --> OCR_FAIL
         OCR_FAIL -- "❌ 실패" --> ERR_OCR["⚠️ 오류: 다시 찍어주세요"]
-        OCR_FAIL -- "✅ 성공" --> LLM
-        LLM --> LLM_FAIL
-        LLM_FAIL -- "❌ 약품 없음" --> ERR_OCR
-        LLM_FAIL -- "✅ 성공" --> REDIS
+        OCR_FAIL -- "✅ 성공" --> DB_MATCH
+        DB_MATCH --> MATCH_RESULT
+        MATCH_RESULT -- "❌ 미매칭" --> USER_INPUT
+        MATCH_RESULT -- "✅ 매칭" --> REDIS
+        USER_INPUT --> REDIS
         REDIS --> DRAFT_ID
     end
 
@@ -138,8 +140,8 @@ flowchart LR
     Q["❓ 사용자 질문<br />예: '타이레놀<br />언제 먹어요?'"]
 
     subgraph EMBED ["① 질문 이해하기"]
-        E1["OpenAI<br />text-embedding-3-small"]
-        E2["질문 → 숫자 벡터<br />[0.12, -0.87, 0.34 ...]"]
+        E1["jhgan/ko-sroberta-multitask<br />(로컬 모델, ~420MB)"]
+        E2["질문 → 숫자 벡터 (768차원)<br />[0.12, -0.87, 0.34 ...]"]
         E1 --> E2
     end
 
@@ -174,8 +176,8 @@ flowchart LR
 
 | 단계 | 무슨 일이 일어나나요? | 사용하는 기술 |
 |------|----------------------|--------------|
-| **OCR 1단계** | 처방전 사진 → 글자 읽기 → 약품 정보 정리 | Clova OCR + GPT-4o-mini |
-| **OCR 2단계** | 정리된 결과를 불러와 사용자가 확인·수정 | Redis (임시 저장소) |
+| **OCR 1단계** | 처방전 사진 → 글자 읽기 → 약품 DB 매칭 (미매칭 시 사용자 직접 입력) | Clova OCR + PostgreSQL |
+| **OCR 2단계** | 매칭된 결과를 불러와 사용자가 확인·수정 | Redis (임시 저장소) |
 | **OCR 3단계** | 최종 확정 후 DB 저장 + 복약 가이드 생성 | PostgreSQL + GPT-4o-mini |
 | **챗봇** | 사용자 질문에 약사 AI가 답변 | RAG + GPT-4o-mini |
-| **RAG** | 답하기 전에 실제 약품 DB에서 정보 검색 | OpenAI 임베딩 + pgvector |
+| **RAG** | 답하기 전에 실제 약품 DB에서 정보 검색 | ko-sroberta-multitask (로컬) + pgvector |

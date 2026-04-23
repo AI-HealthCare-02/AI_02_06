@@ -29,11 +29,12 @@ flowchart TD
     S_LOCAL --> OCR["🔍 Clova OCR API 호출<br />원본 이미지 그대로 전달<br />(전처리 없음)"]
     OCR --> OCR_RESULT{"OCR 성공?"}
     OCR_RESULT -- "❌ 실패" --> ERR_OCR["⚠️ 다시 찍어주세요"]
-    OCR_RESULT -- "✅ 성공" --> LLM["🤖 GPT-4o-mini 호출<br />Structured Outputs으로<br />약품명·복용법 구조화<br />오타 자동 보정"]
+    OCR_RESULT -- "✅ 성공" --> DB_MATCH["🗄️ 약품 DB 매칭<br />medicine_info 테이블에서<br />OCR 추출 약품명 검색"]
 
-    LLM --> LLM_RESULT{"약품 정보<br />추출됐나?"}
-    LLM_RESULT -- "❌ 없음" --> ERR_OCR
-    LLM_RESULT -- "✅ 있음" --> REDIS["💾 Redis 임시 저장<br />key: ocr_draft:{draft_id}<br />TTL: 10분"]
+    DB_MATCH --> MATCH_RESULT{"DB에서<br />약품 찾음?"}
+    MATCH_RESULT -- "✅ 있음" --> REDIS["💾 Redis 임시 저장<br />key: ocr_draft:{draft_id}<br />TTL: 10분"]
+    MATCH_RESULT -- "❌ 없음" --> USER_INPUT["✏️ 사용자에게 직접 입력 요청<br />(수동 입력 필수)"]
+    USER_INPUT --> REDIS
 
     REDIS --> CLEANUP["🗑️ 로컬 임시 이미지 삭제"]
     CLEANUP --> RESULT(["📋 결과 화면으로 이동"])
@@ -42,13 +43,14 @@ flowchart TD
 
     style S_LOCAL fill:#fefce8,stroke:#eab308,color:#713f12
     style OCR fill:#f0fdf4,stroke:#22c55e,color:#14532d
-    style LLM fill:#f5f3ff,stroke:#7c3aed,color:#581c87
+    style DB_MATCH fill:#fff7ed,stroke:#f97316,color:#7c2d12
+    style USER_INPUT fill:#fef2f2,stroke:#ef4444,color:#7f1d1d
 ```
 
 **AS-IS 문제점**
 - 사진이 어둡거나 기울어진 경우 OCR 인식률 저하
 - 서버 재시작 시 /tmp 파일 유실 위험
-- DB 약품 매칭 없이 OCR 결과만 반환
+- DB 매칭 실패 시 사용자가 직접 입력해야 하는 UX 부담
 
 ---
 
@@ -100,33 +102,19 @@ flowchart TD
 
     O3 --> ERR_VAL
 
-    subgraph POSTPROCESS ["✨ 후처리 (Post-processing)"]
-        direction TB
-        PP1["① GPT-4o-mini 호출<br />Structured Outputs 형식"]
-        PP2["오타 자동 보정<br />'타이레뉼' → '타이레놀'"]
-        PP3["필드별 구조화<br />약품명 / 복용량 / 횟수 / 일수 / 시점"]
-        PP4{"약품 정보가<br />추출됐나?"}
-        PP5["⚠️ 인식 실패<br />다시 찍어달라고 안내"]
-
-        PP1 --> PP2 --> PP3 --> PP4
-        PP4 -- "❌" --> PP5
-    end
-
-    O4 --> POSTPROCESS
-
     subgraph DB_MATCH ["🗄️ DB 매칭"]
         direction TB
         DB1["medicine_info 테이블에서<br />약품명 조회<br />(정확도 매칭)"]
         DB2{"DB에 해당 약품이<br />등록돼 있나?"}
         DB3["✅ DB 정보로 보완<br />효능·부작용·분류 자동 채움"]
-        DB4["❓ 미등록 약품<br />OCR 추출 정보만 사용<br />(수동 입력 유도)"]
+        DB4["✏️ 미등록 약품<br />사용자에게 직접 입력 요청<br />(수동 입력 필수)"]
 
         DB1 --> DB2
         DB2 -- "✅ 있음" --> DB3
         DB2 -- "❌ 없음" --> DB4
     end
 
-    PP4 -- "✅" --> DB_MATCH
+    O4 --> DB_MATCH
 
     DB3 --> REDIS["💾 Redis 임시 저장<br />key: ocr_draft:{draft_id}<br />TTL: 10분"]
     DB4 --> REDIS
@@ -136,7 +124,6 @@ flowchart TD
     style STORAGE fill:#fefce8,stroke:#eab308,color:#713f12
     style PREPROCESS fill:#eff6ff,stroke:#3b82f6,color:#1e3a8a
     style OCR_CALL fill:#f0fdf4,stroke:#22c55e,color:#14532d
-    style POSTPROCESS fill:#f5f3ff,stroke:#7c3aed,color:#581c87
     style DB_MATCH fill:#fff7ed,stroke:#f97316,color:#7c2d12
 ```
 
@@ -185,10 +172,10 @@ flowchart TD
         direction TB
         E1["배치 1개 꺼냄 (100건)"]
         E2["텍스트 조합<br />약품명 + 효능 + 부작용 + 주의사항"]
-        E3["OpenAI Embeddings API 호출<br />model: text-embedding-3-small<br />input: 100건 한 번에 전송"]
-        E4{"API 성공?"}
+        E3["jhgan/ko-sroberta-multitask 로컬 인퍼런스<br />(~420MB, GPU/CPU 실행)<br />100건 한 번에 배치 처리"]
+        E4{"인퍼런스 성공?"}
         E5["⚠️ 실패 시 3회 재시도<br />지수 백오프 (1s→2s→4s)"]
-        E6["128차원 벡터 100개 반환"]
+        E6["768차원 벡터 100개 반환"]
         UPSERT["업설트 처리"]
         E7{"다음 배치<br />있나?"}
         E8(["✅ 전체 완료<br />47,000건 임베딩 적재 완료"])
@@ -239,7 +226,7 @@ flowchart TD
     U_START(["👤 사용자가 챗봇 페이지 열기"])
 
     U_START --> INPUT["⌨️ 궁금한 점 입력<br />예: '이 약 졸리나요?'"]
-    INPUT --> EMB["질문을 벡터로 변환<br />(OpenAI 임베딩)"]
+    INPUT --> EMB["질문을 벡터로 변환<br />(ko-sroberta-multitask 임베딩, 로컬)"]
 
     EMB --> SEARCH["pgvector 코사인 유사도 검색<br />관련 약품 정보 최대 3개"]
     SEARCH --> CONTEXT["참고 자료(Context) 텍스트 생성"]
@@ -267,62 +254,63 @@ flowchart TD
 
 ### TO-BE
 
-> **읽는 포인트**: 대화가 쌓일수록 GPT에 넘기는 토큰이 늘어납니다. 컨텍스트 창이 꽉 찰 때 어떻게 자르는지가 핵심입니다.
+> **읽는 포인트**: 대화가 쌓일수록 GPT 토큰이 늘어납니다. N턴마다 대화를 압축(compact)해 요약으로 저장하고, 최종 LLM 입력은 "요약 + 최근 N턴 + 사용자 질의 + RAG"로 구성합니다.
 
 ```mermaid
 flowchart TD
     START(["👤 사용자가 챗봇 화면 열기"])
 
-    START --> SESSION
-
-    subgraph SESSION ["💬 세션 관리 전략"]
+    subgraph SESSION ["💬 세션 관리 전략 (프로필당 다중 독립 세션)"]
         direction TB
-        SE1{"기존 세션이<br />있나?"}
-        SE2["✅ 기존 세션 불러오기<br />DB에서 이전 대화 기록 조회"]
-        SE3["➕ 새 세션 생성<br />chat_sessions 테이블에 행 추가<br />account_id + profile_id 연결"]
-        SE4["세션 화면 표시<br />이전 대화 내역 렌더링"]
+        SE1["세션 목록 표시<br />(프로필당 여러 채팅창 독립 존재)"]
+        SE2{"세션 선택 또는<br />새 채팅 시작?"}
+        SE3["✅ 기존 세션 선택<br />해당 세션 대화 기록만 조회<br />(다른 세션 컨텍스트 공유 없음)"]
+        SE4["➕ 새 세션 생성<br />chat_sessions 테이블에 행 추가<br />컨텍스트 완전 초기화"]
 
-        SE1 -- "✅ 있음" --> SE2 --> SE4
-        SE1 -- "❌ 없음" --> SE3 --> SE4
+        SE1 --> SE2
+        SE2 -- "기존 세션" --> SE3
+        SE2 -- "새 채팅" --> SE4
     end
 
     START --> SESSION
-    SE4 --> INPUT["⌨️ 사용자가 새 메시지 입력"]
-    INPUT --> SAVE_MSG["📝 메시지 DB 저장<br />messages 테이블<br />role: user / content: 입력 내용"]
+    SE3 --> INPUT
+    SE4 --> INPUT
 
-    SAVE_MSG --> HISTORY
+    INPUT["⌨️ 사용자가 새 메시지 입력"]
 
-    subgraph HISTORY ["📚 대화 기록 불러오기 (멀티턴 핵심)"]
+    INPUT --> PRONOUN
+
+    subgraph PRONOUN ["🔤 대명사 처리 (Pronoun Resolution)"]
         direction TB
-        H1["현재 세션의 전체 대화 기록 조회<br />messages 테이블에서 시간순 정렬"]
-        H2["각 메시지를 GPT 형식으로 변환<br />{role: user/assistant, content: ...}"]
-        H3["전체 토큰 수 계산<br />(tiktoken 라이브러리 활용)"]
+        PR1["최근 N턴 대화 기록 조회"]
+        PR2["LLM 호출<br />'이 약', '아까 그 약' 등 대명사를<br />구체적인 약품명으로 치환"]
+        PR3["명확화된 질의 생성<br />예: '타이레놀 졸리나요?'"]
 
-        H1 --> H2 --> H3
+        PR1 --> PR2 --> PR3
     end
 
-    H3 --> TOKEN_CHECK
+    PR3 --> SAVE_MSG["📝 원본 메시지 DB 저장<br />messages 테이블 (role: user)"]
 
-    subgraph TOKEN_CHECK ["⚖️ 컨텍스트 초과 처리"]
+    SAVE_MSG --> COMPRESSION
+
+    subgraph COMPRESSION ["🗜️ N턴 단위 대화 압축 (Compact)"]
         direction TB
-        TC1{"전체 토큰 수가<br />한도(예: 6,000)를<br />초과하나?"}
-        TC2["✅ 한도 이내<br />전체 기록 그대로 사용"]
-        TC3["오래된 대화부터 제거<br />(슬라이딩 윈도우 방식)<br />최근 N턴만 유지"]
-        TC4{"그래도 초과?"}
-        TC5["가장 오래된 1턴 추가 제거<br />반복"]
-        TC6["최종 컨텍스트 확정"]
+        CM1{"누적 대화가<br />N턴 배수인가?<br />(예: 10, 20, 30...)"}
+        CM2["최근 N턴 대화를<br />외부 LLM API로 압축 요청<br />(핵심 정보만 compact summary 생성)"]
+        CM3["압축 요약을 DB에 저장<br />session_summary 컬럼 업데이트"]
+        CM4["압축 완료 → 다음 단계 진행"]
+        CM5["압축 불필요 → 바로 다음 단계"]
 
-        TC1 -- "✅ 이내" --> TC2 --> TC6
-        TC1 -- "❌ 초과" --> TC3 --> TC4
-        TC4 -- "❌ 아직 초과" --> TC5 --> TC4
-        TC4 -- "✅ 해결" --> TC6
+        CM1 -- "✅ N턴 배수" --> CM2 --> CM3 --> CM4
+        CM1 -- "❌ 아직 아님" --> CM5
     end
 
-    TC6 --> RAG
+    CM4 --> RAG
+    CM5 --> RAG
 
     subgraph RAG ["🧠 RAG 파이프라인"]
         direction TB
-        R1["최신 메시지로 임베딩 생성"]
+        R1["명확화된 질의로 임베딩 생성<br />(ko-sroberta-multitask, 로컬)"]
         R2["pgvector 코사인 유사도 검색<br />관련 약품 정보 최대 3개"]
         R3["참고 자료(Context) 텍스트 생성"]
 
@@ -333,23 +321,24 @@ flowchart TD
 
     subgraph GPT_CALL ["🤖 GPT 호출 구성"]
         direction TB
-        G1["시스템 프롬프트<br />'다약(Dayak)' 약사 캐릭터 설정<br />+ RAG Context 삽입"]
-        G2["멀티턴 대화 기록 삽입<br />[{role:user,...}, {role:assistant,...}, ...]"]
-        G3["현재 질문 추가<br />{role: user, content: 현재 입력}"]
-        G4["GPT-4o-mini 호출<br />temperature: 0.7 / max_tokens: 800"]
+        G1["① 저장된 대화 요약(compact summary) 삽입<br />(한참 이전 대화의 핵심 요약)"]
+        G2["② 최근 N턴 대화 기록 삽입<br />[{role:user,...}, {role:assistant,...}, ...]"]
+        G3["③ RAG Context 삽입<br />관련 약품 정보 3개"]
+        G4["④ 명확화된 현재 질의 추가<br />{role: user, content: 치환된 질문}"]
+        G5["GPT-4o-mini 호출<br />'다약(Dayak)' 약사 캐릭터<br />temperature: 0.7 / max_tokens: 800"]
 
-        G1 --> G2 --> G3 --> G4
+        G1 --> G2 --> G3 --> G4 --> G5
     end
 
     GPT_CALL --> RESULT{"답변<br />생성 성공?"}
 
-    RESULT -- "✅ 성공" --> SAVE_REPLY["📝 AI 답변 DB 저장<br />messages 테이블<br />role: assistant"]
+    RESULT -- "✅ 성공" --> SAVE_REPLY["📝 AI 답변 DB 저장<br />messages 테이블 (role: assistant)"]
     RESULT -- "❌ 실패" --> ERR["⚠️ '잠시 후 다시<br />말씀해 주세요' 안내<br />(DB 저장 안 함)"]
 
     SAVE_REPLY --> DISPLAY["💬 화면에 답변 표시"]
     DISPLAY --> CONTINUE{"계속 대화?"}
     CONTINUE -- "✅ 예" --> INPUT
-    CONTINUE -- "❌ 종료" --> END(["세션 유지 (DB에 기록 보존)<br />나중에 다시 이어서 대화 가능"])
+    CONTINUE -- "❌ 종료" --> END(["세션 유지 (DB에 기록 보존)<br />나중에 같은 세션에서 이어 대화 가능<br />다른 세션과 컨텍스트 공유 없음"])
 
     subgraph SESSION_LIFECYCLE ["🔄 세션 생명주기"]
         direction LR
@@ -362,8 +351,8 @@ flowchart TD
     end
 
     style SESSION fill:#eff6ff,stroke:#3b82f6,color:#1e3a8a
-    style HISTORY fill:#f0fdf4,stroke:#22c55e,color:#14532d
-    style TOKEN_CHECK fill:#fef2f2,stroke:#ef4444,color:#7f1d1d
+    style PRONOUN fill:#fdf4ff,stroke:#a855f7,color:#581c87
+    style COMPRESSION fill:#fef2f2,stroke:#ef4444,color:#7f1d1d
     style RAG fill:#f5f3ff,stroke:#7c3aed,color:#581c87
     style GPT_CALL fill:#fefce8,stroke:#eab308,color:#713f12
     style SESSION_LIFECYCLE fill:#fff7ed,stroke:#f97316,color:#7c2d12
@@ -377,7 +366,11 @@ flowchart TD
 |------|--------------|------|
 | **OCR 이미지 저장** | 로컬 임시 → TO-BE: S3 | 서버 재시작 시 파일 유실 방지 |
 | **OCR 전처리** | 현재 없음 → TO-BE: OpenCV | 사진 품질이 낮을 때 인식률 향상 |
+| **OCR 후처리** | LLM 없음 → DB 직접 매칭 | 비용 절감; 미매칭 시 사용자 직접 입력 |
+| **임베딩 모델** | jhgan/ko-sroberta-multitask (로컬, ~420MB, 768차원) | OpenAI API 비용 없음, 한국어 특화 |
 | **배치 청킹** | 100건 단위 제너레이터 | 47,000건 한 번에 올리면 OOM 발생 |
 | **임베딩 업설트** | INSERT or UPDATE 분기 | 중복 삽입 방지 + 기존 데이터 보존 |
-| **멀티턴 컨텍스트** | 슬라이딩 윈도우 (오래된 것부터 제거) | GPT 토큰 한도(128k) 초과 방지 |
-| **세션 관리** | DB 영구 저장 + 30일 만료 | 앱 종료 후에도 대화 이어가기 가능 |
+| **대명사 처리** | LLM으로 질의 내 대명사 → 구체 약품명 치환 | "이 약", "아까 그 약" 등 맥락 이해 |
+| **멀티턴 압축** | N턴마다 LLM으로 compact summary 생성 → DB 저장 | 오래된 대화를 요약해 토큰 한도 관리 |
+| **최종 LLM 입력** | 요약 + 최근 N턴 + 사용자 질의 + RAG | 짧은 토큰으로 긴 대화 맥락 유지 |
+| **세션 관리** | 프로필당 다중 독립 세션, DB 영구 저장 + 30일 만료 | 세션 간 컨텍스트 공유 없음; 앱 종료 후 이어가기 가능 |

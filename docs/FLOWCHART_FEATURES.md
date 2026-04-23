@@ -139,7 +139,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    START(["👤 저장된 약품 목록 화면"))
+    START(["👤 저장된 약품 목록 화면"])
 
     START --> LIST["💊 내 프로필의 약품 목록 조회<br />(활성/완료 필터 선택 가능)"]
     LIST --> SELECT["약품 카드 선택"]
@@ -271,7 +271,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    START(["👤 오늘 복약 기록 화면"))
+    START(["👤 오늘 복약 기록 화면"])
 
     START --> TODAY["📅 오늘 날짜의<br />복용 기록 목록 조회<br />(SCHEDULED 상태)"]
 
@@ -350,7 +350,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    START(["👤 챌린지 화면"))
+    START(["👤 챌린지 화면"])
 
     START --> LIST["🏆 내 프로필의<br />챌린지 목록 조회"]
     LIST --> FILTER{"어떤 챌린지를<br />볼까요?"}
