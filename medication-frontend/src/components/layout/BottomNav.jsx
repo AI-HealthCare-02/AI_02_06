@@ -13,7 +13,8 @@ export default function BottomNav() {
     { label: '홈',         path: '/main',       Icon: Home },
     { label: '등록',       path: '/ocr',        Icon: FileText },
     { label: '챌린지',     path: '/challenge',  Icon: Trophy },
-    { label: '가이드',     path: '/medication', Icon: Pill },
+    // [수정] /medication → /lifestyle-guide: 생활습관 가이드 페이지 신규 추가로 경로 변경
+    { label: '가이드',     path: '/lifestyle-guide', Icon: Pill },
     { label: '마이',       path: '/mypage',     Icon: User },
   ]
 
