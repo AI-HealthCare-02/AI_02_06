@@ -11,7 +11,7 @@ respective phases and will live here alongside ``KakaoPlace``.
 """
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -75,3 +75,27 @@ class PendingTurn(BaseModel):
         description="Pre-executed tool results keyed by tool_call_id (e.g. keyword search outputs)",
     )
     created_at: datetime = Field(description="Aware UTC timestamp")
+
+
+class RouteResult(BaseModel):
+    """What the Router LLM decided for one user turn (Y-4).
+
+    A single shape covers both branches: ``kind="text"`` (no tool call,
+    Router answered or RAG fallback should run) and ``kind="tool_calls"``
+    (one or more functions to execute, possibly in parallel).
+
+    The ``assistant_message`` field carries the raw OpenAI assistant
+    message (with its ``tool_calls`` list); we must hand it back verbatim
+    when invoking the LLM a second time with the tool results.
+    """
+
+    kind: Literal["text", "tool_calls"] = Field(description="Branch tag for the union")
+    text: str = Field(default="", description="Assistant's natural-language reply when kind='text'")
+    tool_calls: list[ToolCall] = Field(
+        default_factory=list,
+        description="Parsed tool calls when kind='tool_calls'",
+    )
+    assistant_message: dict[str, Any] | None = Field(
+        default=None,
+        description="Raw OpenAI assistant message, preserved for the 2nd LLM call",
+    )
