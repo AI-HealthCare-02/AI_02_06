@@ -99,7 +99,7 @@ class MessageService:
 
             from app.core.config import config
 
-            redis_conn = redis.from_url(config.REDIS_URL, health_check_interval=30, socket_keepalive=True)
+            redis_conn = redis.from_url(config.REDIS_URL)
             self._queue = Queue("ai", connection=redis_conn)
         return self._queue
 
@@ -111,9 +111,7 @@ class MessageService:
             from app.core.config import config
             from app.services.tools.pending import RedisPendingTurnStore
 
-            self._pending_store = RedisPendingTurnStore(
-                redis=aioredis.from_url(config.REDIS_URL, health_check_interval=30, socket_keepalive=True)
-            )
+            self._pending_store = RedisPendingTurnStore(redis=aioredis.from_url(config.REDIS_URL))
         return self._pending_store
 
     async def _verify_session_ownership(self, session_id: UUID, account_id: UUID) -> None:
