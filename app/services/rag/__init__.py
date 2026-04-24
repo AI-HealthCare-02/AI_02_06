@@ -38,7 +38,7 @@ async def get_rag_pipeline() -> "RAGPipeline":  # noqa: F821  # forward ref reso
         from app.services.rag.retrievers.hybrid import HybridRetriever
         from app.services.rag.tools import ToolRouter
 
-        redis_conn = redis.from_url(config.REDIS_URL)
+        redis_conn = redis.from_url(config.REDIS_URL, health_check_interval=30, socket_keepalive=True)
         ai_queue = Queue("ai", connection=redis_conn)
 
         embedding_provider = RQEmbeddingProvider(queue=ai_queue)
