@@ -67,3 +67,11 @@ class LifestyleGuideRepository:
             list[LifestyleGuide]: List of guides newest first.
         """
         return await LifestyleGuide.filter(profile_id=profile_id).order_by("-created_at").all()
+
+    async def delete_by_id(self, guide_id: UUID) -> None:
+        """Hard-delete a lifestyle guide by ID.
+
+        Args:
+            guide_id: Guide UUID to delete.
+        """
+        await LifestyleGuide.filter(id=guide_id).delete()

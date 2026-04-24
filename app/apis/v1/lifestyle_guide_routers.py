@@ -129,6 +129,29 @@ async def get_guide(
     return LifestyleGuideResponse.model_validate(guide)
 
 
+@router.delete(
+    "/{guide_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete lifestyle guide",
+)
+async def delete_guide(
+    guide_id: UUID,
+    current_account: CurrentAccount,
+    service: LifestyleGuideServiceDep,
+) -> None:
+    """Delete a lifestyle guide and handle its associated challenges.
+
+    Unstarted challenges are soft-deleted. Active or completed challenges
+    are preserved with guide_id set to None.
+
+    Args:
+        guide_id: Guide UUID.
+        current_account: Current authenticated account.
+        service: Lifestyle guide service instance.
+    """
+    await service.delete_guide_with_owner_check(guide_id, current_account.id)
+
+
 @router.get(
     "/{guide_id}/challenges",
     response_model=list[ChallengeResponse],

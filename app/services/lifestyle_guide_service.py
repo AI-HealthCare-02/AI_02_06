@@ -245,6 +245,36 @@ class LifestyleGuideService:
         await self._verify_profile_ownership(profile_id, account_id)
         return await self.guide_repo.get_all_by_profile(profile_id)
 
+    async def delete_guide_with_owner_check(
+        self,
+        guide_id: UUID,
+        account_id: UUID,
+    ) -> None:
+        """Delete a lifestyle guide after verifying ownership.
+
+        Unstarted challenges (is_active=False) are soft-deleted.
+        Active or completed challenges (is_active=True) are kept with guide_id=None.
+        The guide itself is hard-deleted.
+
+        Args:
+            guide_id: Guide UUID to delete.
+            account_id: Requesting account UUID.
+
+        Raises:
+            HTTPException: 404 if not found, 403 if access denied.
+        """
+        guide = await self.get_guide_with_owner_check(guide_id, account_id)
+        challenges = await self.challenge_repo.get_by_guide_id(guide.id)
+
+        for c in challenges:
+            if not c.is_active:
+                await self.challenge_repo.soft_delete(c)
+            else:
+                await Challenge.filter(id=c.id).update(guide_id=None)
+
+        await self.guide_repo.delete_by_id(guide.id)
+        logger.info("[GUIDE] 가이드 삭제 완료 guide_id=%s account_id=%s", guide_id, account_id)
+
     async def get_guide_challenges_with_owner_check(
         self,
         guide_id: UUID,
