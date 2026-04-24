@@ -27,11 +27,12 @@ export default function Navigation() {
   const { showLogoutModal, setShowLogoutModal, handleLogout } = useLogout()
 
   const menus = [
-    { label: '홈',         path: '/main',       icon: <Home size={18} /> },
-    { label: '처방전 등록', path: '/ocr',        icon: <FileText size={18} /> },
-    { label: '챌린지',     path: '/challenge',  icon: <Trophy size={18} /> },
-    { label: '복약 가이드', path: '/medication', icon: <Pill size={18} /> },
-    { label: '마이페이지', path: '/mypage',     icon: <User size={18} /> },
+    { label: '홈',         path: '/main',            icon: <Home size={18} /> },
+    { label: '처방전 등록', path: '/ocr',             icon: <FileText size={18} /> },
+    { label: '챌린지',     path: '/challenge',       icon: <Trophy size={18} /> },
+    { label: '복약 가이드', path: '/medication',      icon: <Pill size={18} /> },
+    { label: '생활습관 가이드', path: '/lifestyle-guide', icon: <Pill size={18} /> },
+    { label: '마이페이지', path: '/mypage',          icon: <User size={18} /> },
   ]
 
   return (
