@@ -106,6 +106,31 @@ class RewriteResult(BaseModel):
     token_usage: TokenUsage | None = Field(None, description="LLM token usage when the rewrite call succeeded")
 
 
+class SummaryStatus(StrEnum):
+    """Outcome of the session-compact summarization stage."""
+
+    OK = "ok"
+    EMPTY = "empty"  # nothing to summarize after filtering
+    FALLBACK = "fallback"  # technical failure; caller should keep previous summary
+
+
+class SummaryResult(BaseModel):
+    """Structured result of RAGGenerator.summarize_messages.
+
+    Returned by the session-compact path. Callers read ``summary`` only when
+    ``status == OK``; otherwise they keep the pre-existing session summary
+    untouched so compaction failures never erase prior context.
+    """
+
+    status: SummaryStatus = Field(..., description="Summarization outcome category")
+    summary: str = Field("", description="Unified summary text when status is OK, empty string otherwise")
+    consumed_message_count: int = Field(
+        0,
+        description="Number of message rows actually fed into the LLM after pollution filtering",
+    )
+    token_usage: TokenUsage | None = Field(None, description="LLM token usage when the summary call succeeded")
+
+
 class RAGResponse(BaseModel):
     """Top-level RAG pipeline response consumed by MessageService."""
 

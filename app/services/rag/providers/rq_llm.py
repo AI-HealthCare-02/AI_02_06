@@ -23,12 +23,20 @@ try:
 except ImportError:  # pragma: no cover
     Queue = Any  # type: ignore[misc, assignment]
 
-from app.dtos.rag import ChatCompletion, RewriteResult, RewriteStatus, TokenUsage
+from app.dtos.rag import (
+    ChatCompletion,
+    RewriteResult,
+    RewriteStatus,
+    SummaryResult,
+    SummaryStatus,
+    TokenUsage,
+)
 
 _DEFAULT_POLL_INTERVAL_SEC = 0.1
 _DEFAULT_TIMEOUT_SEC = 60.0  # LLM은 임베딩보다 느리므로 더 긴 상한.
 _REWRITE_JOB_REF = "ai_worker.tasks.rag_tasks.rewrite_query_job"
 _GENERATE_JOB_REF = "ai_worker.tasks.rag_tasks.generate_chat_response_job"
+_COMPACT_JOB_REF = "ai_worker.tasks.compact_tasks.compact_messages_job"
 
 
 class LLMTimeoutError(TimeoutError):
@@ -78,6 +86,16 @@ class RQRAGGenerator:
         raw = await self._await_result(job)
         return _to_chat_completion(raw)
 
+    async def summarize_messages(
+        self,
+        messages: list[dict[str, str]],
+        prev_summary: str | None = None,
+    ) -> SummaryResult:
+        """Enqueue a session-compact job and return the DTO."""
+        job = self._queue.enqueue(_COMPACT_JOB_REF, messages, prev_summary)
+        raw = await self._await_result(job)
+        return _to_summary_result(raw)
+
     # ── Internals ────────────────────────────────────────────────
 
     async def _await_result(self, job: Any) -> dict[str, Any]:
@@ -116,3 +134,14 @@ def _to_chat_completion(raw: dict[str, Any]) -> ChatCompletion:
     usage_raw = raw.get("token_usage")
     token_usage = TokenUsage(**usage_raw) if usage_raw else None
     return ChatCompletion(answer=raw["answer"], token_usage=token_usage)
+
+
+def _to_summary_result(raw: dict[str, Any]) -> SummaryResult:
+    usage_raw = raw.get("token_usage")
+    token_usage = TokenUsage(**usage_raw) if usage_raw else None
+    return SummaryResult(
+        status=SummaryStatus(raw["status"]),
+        summary=raw.get("summary", ""),
+        consumed_message_count=raw.get("consumed_message_count", 0),
+        token_usage=token_usage,
+    )

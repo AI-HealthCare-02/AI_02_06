@@ -72,3 +72,30 @@ async def generate_chat_response(
         "answer": result.answer,
         "token_usage": result.token_usage.model_dump() if result.token_usage is not None else None,
     }
+
+
+async def summarize_messages(
+    messages: list[dict[str, str]],
+    prev_summary: str | None = None,
+) -> dict[str, Any]:
+    """Compact chat history into a medical-context summary.
+
+    Callers (FastAPI-side SessionCompactService) are responsible for
+    pollution filtering before calling this job. This worker-side function
+    just forwards to the generator and serialises the DTO for RQ transport.
+
+    Args:
+        messages: Chronological, already-filtered turns (``{"role","content"}``).
+        prev_summary: Previously stored session summary, or None on first run.
+
+    Returns:
+        ``{"status", "summary", "consumed_message_count", "token_usage"}`` dict.
+        ``status`` is one of ``"ok" | "empty" | "fallback"``.
+    """
+    result = await _get_generator().summarize_messages(messages=messages, prev_summary=prev_summary)
+    return {
+        "status": result.status.value,
+        "summary": result.summary,
+        "consumed_message_count": result.consumed_message_count,
+        "token_usage": result.token_usage.model_dump() if result.token_usage is not None else None,
+    }
