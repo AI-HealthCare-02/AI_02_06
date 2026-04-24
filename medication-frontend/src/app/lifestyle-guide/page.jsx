@@ -5,11 +5,13 @@
 // - 각 탭에 연결된 챌린지를 하단 배너로 표시 (3-상태: 시작 전/진행중/완료)
 // - 증상 탭에는 오늘의 일일 증상 로그 입력 폼 포함
 import { useState, useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/Header'
 import BottomNav from '@/components/layout/BottomNav'
 import EmptyState from '@/components/common/EmptyState'
 import api, { showError } from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
+import StartChallengeModal from '@/components/common/StartChallengeModal'
 import toast from 'react-hot-toast'
 
 // ── 탭 메타데이터 ──────────────────────────────────────────────────────────────
@@ -185,7 +187,7 @@ function SymptomLogForm({ profileId, onSaved }) {
 //   1) COMPLETED → 초록 "완료" 뱃지 (버튼 없음)
 //   2) is_active=false → "시작하기" 버튼 (과거 가이드 열람 시 비활성화)
 //   3) is_active=true → 오늘 체크 여부에 따라 "오늘 완료 체크" 버튼 or "오늘 완료!" 텍스트
-function ChallengeBanner({ challenge, isViewingHistory, onStart, onCheck, isProcessing }) {
+function ChallengeBanner({ challenge, isViewingHistory, onStart, onCheck, isProcessing, onGoToChallenge }) {
   if (!challenge) return null
 
   const today = new Date().toISOString().split('T')[0]
@@ -237,10 +239,19 @@ function ChallengeBanner({ challenge, isViewingHistory, onStart, onCheck, isProc
             {isProcessing ? '처리중...' : '시작하기'}
           </button>
         ) : checkedToday ? (
-          // 상태 3-b: 오늘 이미 체크함 → 완료 텍스트
-          <span className="ml-3 bg-green-50 text-green-500 text-xs font-bold px-3 py-2 rounded-xl shrink-0">
-            오늘 완료!
-          </span>
+          // 상태 3-b: 오늘 이미 체크함 → 완료 텍스트 + 챌린지 페이지 이동 버튼
+          <div className="flex items-center gap-2 ml-3 shrink-0">
+            <span className="bg-green-50 text-green-500 text-xs font-bold px-3 py-2 rounded-xl">
+              오늘 완료!
+            </span>
+            <button
+              onClick={onGoToChallenge}
+              className="text-xs font-bold text-gray-400 hover:text-gray-700 px-2 py-2 rounded-xl hover:bg-gray-100 transition-colors cursor-pointer"
+              title="챌린지 페이지에서 보기"
+            >
+              →
+            </button>
+          </div>
         ) : (
           // 상태 3-a: 진행중, 오늘 미체크 → 완료 체크 버튼 (PATCH {completed_dates, challenge_status})
           <button
@@ -260,6 +271,7 @@ function ChallengeBanner({ challenge, isViewingHistory, onStart, onCheck, isProc
 
 // ── 메인 페이지 ────────────────────────────────────────────────────────────────
 export default function LifestyleGuidePage() {
+  const router = useRouter()
   const { selectedProfileId: profileId } = useProfile()
 
   const [isLoading, setIsLoading] = useState(true)
@@ -271,6 +283,8 @@ export default function LifestyleGuidePage() {
   const [guideChallenges, setGuideChallenges] = useState([])         // 선택된 가이드에 연결된 챌린지 목록
   const [isLoadingChallenges, setIsLoadingChallenges] = useState(false)
   const [processingChallengeId, setProcessingChallengeId] = useState(null) // 현재 처리 중인 챌린지 ID
+  const [startTarget, setStartTarget] = useState(null)   // 모달에 전달할 챌린지 객체
+  const [isStarting, setIsStarting] = useState(false)    // 모달 확인 버튼 처리 중 여부
 
   const isInitialLoad = useRef(true)
   const chipScrollRef = useRef(null)
@@ -346,7 +360,8 @@ export default function LifestyleGuidePage() {
     if (!profileId || isGenerating) return
     setIsGenerating(true)
     try {
-      const res = await api.post(`/api/v1/lifestyle-guides/generate?profile_id=${profileId}`)
+      // GPT 호출이 10~30초 걸릴 수 있으므로 이 요청만 타임아웃을 60초로 늘림
+      const res = await api.post(`/api/v1/lifestyle-guides/generate?profile_id=${profileId}`, null, { timeout: 60000 })
       const newGuide = res.data
       setGuides((prev) => [newGuide, ...prev])
       setSelectedGuide(newGuide)
@@ -358,22 +373,64 @@ export default function LifestyleGuidePage() {
     }
   }
 
-  // ── 챌린지 시작 ──
-  // PATCH /api/v1/challenges/{id} { is_active: true }
-  // 별도 /start 엔드포인트 없이 기존 update 엔드포인트 재활용
-  const handleChallengeStart = async (challenge) => {
-    if (processingChallengeId) return
-    setProcessingChallengeId(challenge.id)
+  // ── 가이드 삭제 ──
+  // DELETE /api/v1/lifestyle-guides/{id}
+  // 미시작 챌린지는 서버에서 소프트 삭제, 진행중/완료 챌린지는 guide_id=NULL로 유지
+  const handleDeleteGuide = async (guide) => {
+    if (!confirm(`${formatFullDate(guide.created_at)} 가이드를 삭제하시겠습니까?`)) return
     try {
-      const res = await api.patch(`/api/v1/challenges/${challenge.id}`, { is_active: true })
-      // 응답으로 받은 최신 데이터로 로컬 상태 업데이트 (재요청 없이 반영)
+      await api.delete(`/api/v1/lifestyle-guides/${guide.id}`)
+      const newGuides = guides.filter((g) => g.id !== guide.id)
+      setGuides(newGuides)
+      if (selectedGuide?.id === guide.id) {
+        setSelectedGuide(newGuides[0] || null)
+      }
+      toast.success('가이드가 삭제되었습니다.')
+    } catch {
+      showError('가이드 삭제에 실패했습니다.')
+    }
+  }
+
+  // ── 챌린지 시작 ──
+  // 시작하기 버튼 클릭 → 모달 표시 (즉시 API 호출 X)
+  const handleChallengeStart = (challenge) => {
+    setStartTarget(challenge)
+  }
+
+  // ── 챌린지 시작 확인 (모달 onConfirm) ──
+  // PATCH /api/v1/challenges/{id}/start { difficulty, target_days }
+  // /start 엔드포인트: is_active=True + started_at 타임스탬프 기록 + 커스텀값 저장
+  const handleConfirmStart = async (difficulty, targetDays) => {
+    if (!startTarget || isStarting) return
+    setIsStarting(true)
+    setProcessingChallengeId(startTarget.id)
+    try {
+      const res = await api.patch(`/api/v1/challenges/${startTarget.id}/start`, {
+        difficulty,
+        target_days: targetDays,
+      })
       setGuideChallenges((prev) =>
-        prev.map((c) => (c.id === challenge.id ? { ...c, ...res.data } : c))
+        prev.map((c) => (c.id === startTarget.id ? { ...c, ...res.data } : c))
       )
-      toast.success('챌린지가 시작되었습니다!')
+      setStartTarget(null)
+      toast(
+        (t) => (
+          <div className="flex items-center gap-3">
+            <span className="text-sm">챌린지가 시작되었습니다!</span>
+            <button
+              onClick={() => { toast.dismiss(t.id); router.push('/challenge') }}
+              className="text-blue-500 font-bold text-sm shrink-0 cursor-pointer"
+            >
+              보러가기
+            </button>
+          </div>
+        ),
+        { duration: 4000 }
+      )
     } catch {
       showError('챌린지 시작에 실패했습니다.')
     } finally {
+      setIsStarting(false)
       setProcessingChallengeId(null)
     }
   }
@@ -458,23 +515,69 @@ export default function LifestyleGuidePage() {
           />
         )}
 
+        {/* ── 가이드 생성 중 스켈레톤 ── */}
+        {isGenerating && (
+          <div className="animate-pulse space-y-4">
+            <div className="flex gap-2">
+              <div className="h-7 bg-gray-200 rounded-full w-20" />
+              {guides.length > 0 && <div className="h-7 bg-gray-200 rounded-full w-14" />}
+            </div>
+            <div className="bg-white rounded-2xl px-4 py-3 shadow-sm border border-gray-50">
+              <div className="h-3 bg-gray-200 rounded w-32 mb-3" />
+              <div className="flex flex-wrap gap-1.5">
+                {[1, 2, 3].map((i) => <div key={i} className="h-6 bg-gray-200 rounded-full w-16" />)}
+              </div>
+            </div>
+            <div className="flex gap-1 overflow-hidden">
+              {[1, 2, 3, 4, 5].map((i) => <div key={i} className="h-9 bg-gray-200 rounded-xl w-20 shrink-0" />)}
+            </div>
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-6 w-6 bg-gray-200 rounded" />
+                <div className="h-5 bg-gray-200 rounded w-28" />
+              </div>
+              <div className="space-y-2.5">
+                <div className="h-4 bg-gray-200 rounded w-full" />
+                <div className="h-4 bg-gray-200 rounded w-11/12" />
+                <div className="h-4 bg-gray-200 rounded w-4/5" />
+                <div className="h-4 bg-gray-200 rounded w-full" />
+                <div className="h-4 bg-gray-200 rounded w-3/4" />
+                <div className="h-4 bg-gray-200 rounded w-5/6" />
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── 이력 날짜 칩 (가이드 있을 때만) ── */}
         {guides.length > 0 && (
           <div ref={chipScrollRef} className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
             {guides.map((guide, idx) => {
               const isSelected = selectedGuide?.id === guide.id
               return (
-                <button
+                <div
                   key={guide.id}
-                  onClick={() => setSelectedGuide(guide)}
-                  className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${
+                  className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
                     isSelected
                       ? 'bg-gray-900 text-white border-gray-900'
                       : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
                   }`}
                 >
-                  {idx === 0 ? `${formatDate(guide.created_at)} 최신` : formatDate(guide.created_at)}
-                </button>
+                  <button
+                    onClick={() => setSelectedGuide(guide)}
+                    className="cursor-pointer"
+                  >
+                    {idx === 0 ? `${formatDate(guide.created_at)} 최신` : formatDate(guide.created_at)}
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDeleteGuide(guide) }}
+                    className={`ml-0.5 leading-none cursor-pointer transition-colors ${
+                      isSelected ? 'text-gray-300 hover:text-white' : 'text-gray-300 hover:text-red-400'
+                    }`}
+                    title="가이드 삭제"
+                  >
+                    ×
+                  </button>
+                </div>
               )
             })}
           </div>
@@ -490,8 +593,8 @@ export default function LifestyleGuidePage() {
           </div>
         )}
 
-        {/* ── 가이드 내용 (가이드 선택된 경우) ── */}
-        {selectedGuide && (
+        {/* ── 가이드 내용 (가이드 선택된 경우, 생성 중에는 스켈레톤으로 대체) ── */}
+        {selectedGuide && !isGenerating && (
           <>
             {/* 복용 약 스냅샷 */}
             {selectedGuide.medication_snapshot?.length > 0 && (
@@ -503,7 +606,7 @@ export default function LifestyleGuidePage() {
                       key={i}
                       className="bg-gray-100 text-gray-600 text-xs px-2.5 py-1 rounded-full font-bold"
                     >
-                      {typeof med === 'string' ? med : med.name || med}
+                      {typeof med === 'string' ? med : med.medicine_name || med.name || JSON.stringify(med)}
                     </span>
                   ))}
                 </div>
@@ -642,10 +745,21 @@ export default function LifestyleGuidePage() {
           onStart={handleChallengeStart}
           onCheck={handleChallengeCheck}
           isProcessing={processingChallengeId === activeBannerChallenge?.id}
+          onGoToChallenge={() => router.push('/challenge')}
         />
       )}
 
       <BottomNav />
+
+      {/* ── 챌린지 시작 모달 (난이도·기간 선택 바텀시트) ── */}
+      {startTarget && (
+        <StartChallengeModal
+          challenge={startTarget}
+          onConfirm={handleConfirmStart}
+          onClose={() => setStartTarget(null)}
+          isLoading={isStarting}
+        />
+      )}
     </main>
   )
 }

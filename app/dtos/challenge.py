@@ -25,6 +25,18 @@ class ChallengeCreate(BaseModel):
     started_date: date | None = Field(None, description="챌린지 시작 날짜 (미입력 시 오늘)")
 
 
+class ChallengeStartRequest(BaseModel):
+    """Challenge start customization request model.
+
+    Allows users to override AI-suggested difficulty and target_days
+    when activating a challenge. Both fields are optional — omitting
+    them preserves the LLM-generated defaults.
+    """
+
+    difficulty: str | None = Field(None, max_length=16, description="난이도 (쉬움/보통/어려움)")
+    target_days: int | None = Field(None, ge=1, le=365, description="목표 달성 일수 (1~365)")
+
+
 class ChallengeUpdate(BaseModel):
     """Challenge update request model.
 

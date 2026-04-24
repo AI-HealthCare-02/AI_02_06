@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 
 from app.core import config
-from app.dtos.challenge import ChallengeCreate, ChallengeUpdate
+from app.dtos.challenge import ChallengeCreate, ChallengeStartRequest, ChallengeUpdate
 from app.models.challenge import Challenge
 from app.repositories.challenge_repository import ChallengeRepository
 from app.repositories.profile_repository import ProfileRepository
@@ -241,24 +241,33 @@ class ChallengeService:
         self,
         challenge_id: UUID,
         account_id: UUID,
+        data: ChallengeStartRequest | None = None,
     ) -> Challenge:
         """Activate a challenge after ownership verification.
 
         Sets is_active=True and records the activation timestamp.
+        Optionally overrides AI-suggested difficulty and target_days
+        with user-selected values.
 
         Args:
             challenge_id: Challenge UUID to activate.
             account_id: Account UUID for ownership check.
+            data: Optional user customization for difficulty and target_days.
 
         Returns:
             Challenge: Updated challenge with is_active=True and started_at set.
         """
         challenge = await self.get_challenge_with_owner_check(challenge_id, account_id)
-        return await self.repository.update(
-            challenge,
-            is_active=True,
-            started_at=datetime.now(tz=config.TIMEZONE),
-        )
+        update_fields: dict = {
+            "is_active": True,
+            "started_at": datetime.now(tz=config.TIMEZONE),
+        }
+        if data:
+            if data.difficulty is not None:
+                update_fields["difficulty"] = data.difficulty
+            if data.target_days is not None:
+                update_fields["target_days"] = data.target_days
+        return await self.repository.update(challenge, **update_fields)
 
     async def complete_day(
         self,
