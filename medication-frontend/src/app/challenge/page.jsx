@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/Header'
 import BottomNav from '@/components/layout/BottomNav'
 import EmptyState from '@/components/common/EmptyState'
@@ -7,7 +8,7 @@ import api, { showError } from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
 import toast from 'react-hot-toast'
 
-// SVG 아이콘 컴포넌트
+// SVG 아이콘 컴포넌트 (진행중/완료 카드 아이콘 폴백용)
 const Icons = {
   NoSmoking: ({ className = "w-6 h-6" }) => (
     <svg viewBox="0 0 24 24" fill="none" className={className} stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -85,195 +86,36 @@ const Icons = {
   ),
 }
 
-// 난이도 설정 모달
-function DifficultyModal({ template, onConfirm, onCancel }) {
-  const [selected, setSelected] = useState(template.difficulty || '보통')
-
-  const options = [
-    { value: '쉬움', label: '쉬움', desc: '가볍게 시작하고 싶어요', color: 'border-blue-300 bg-blue-50 text-blue-600' },
-    { value: '보통', label: '보통', desc: '적당한 도전을 원해요', color: 'border-green-300 bg-green-50 text-green-600' },
-    { value: '어려움', label: '어려움', desc: '강한 의지로 도전해요', color: 'border-red-300 bg-red-50 text-red-600' },
-  ]
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 px-4 pb-6">
-      <div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-5">
-        <div>
-          <p className="text-xs text-gray-400 font-bold mb-1">챌린지 시작</p>
-          <h3 className="font-black text-gray-900 text-lg">{template.title}</h3>
-          <p className="text-gray-400 text-sm mt-1">{template.desc}</p>
-        </div>
-
-        <div>
-          <p className="text-xs font-bold text-gray-500 mb-3">난이도를 선택해주세요</p>
-          <div className="space-y-2">
-            {options.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setSelected(opt.value)}
-                className={`w-full flex items-center gap-3 p-3.5 rounded-xl border-2 transition-all cursor-pointer text-left ${
-                  selected === opt.value ? opt.color : 'border-gray-100 bg-gray-50 text-gray-500'
-                }`}
-              >
-                <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                  selected === opt.value ? 'border-current' : 'border-gray-300'
-                }`}>
-                  {selected === opt.value && <div className="w-2 h-2 rounded-full bg-current" />}
-                </div>
-                <div>
-                  <p className="text-sm font-bold">{opt.label}</p>
-                  <p className="text-xs opacity-70">{opt.desc}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex gap-2">
-          <button
-            onClick={onCancel}
-            className="flex-1 py-3 rounded-xl text-sm font-bold text-gray-500 bg-gray-100 cursor-pointer hover:bg-gray-200 transition-colors"
-          >
-            취소
-          </button>
-          <button
-            onClick={() => onConfirm(selected)}
-            className="flex-1 py-3 rounded-xl text-sm font-bold text-white bg-blue-500 cursor-pointer hover:bg-blue-600 transition-colors"
-          >
-            시작하기
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 const DIFFICULTY_STYLE = {
   '쉬움':   { bg: 'bg-blue-50',   text: 'text-blue-500' },
   '보통':   { bg: 'bg-green-50',  text: 'text-green-500' },
   '어려움': { bg: 'bg-red-50',    text: 'text-red-500' },
 }
 
-const TEMPLATES = [
-  {
-    id: 'tpl_1',
-    icon: <Icons.NoSmoking />,
-    title: '금연 챌린지',
-    desc: '담배 없이 30일을 버텨보세요. 폐 건강이 눈에 띄게 좋아집니다.',
-    days: 30,
-    difficulty: '어려움',
-    color: 'bg-red-50',
-    textColor: 'text-red-500',
-    iconColor: 'text-red-400',
-  },
-  {
-    id: 'tpl_2',
-    icon: <Icons.Walking />,
-    title: '매일 30분 걷기',
-    desc: '가볍게 걷는 것만으로도 심혈관 건강이 개선됩니다.',
-    days: 21,
-    difficulty: '보통',
-    color: 'bg-green-50',
-    textColor: 'text-green-500',
-    iconColor: 'text-green-400',
-  },
-  {
-    id: 'tpl_3',
-    icon: <Icons.Pill />,
-    title: '복약 완료 챌린지',
-    desc: '7일 연속 빠짐없이 약을 챙겨보세요.',
-    days: 7,
-    difficulty: '쉬움',
-    color: 'bg-blue-50',
-    textColor: 'text-blue-500',
-    iconColor: 'text-blue-400',
-  },
-  {
-    id: 'tpl_4',
-    icon: <Icons.Salad />,
-    title: '균형 잡힌 식단',
-    desc: '21일 동안 채소와 단백질 위주의 식사를 해보세요.',
-    days: 21,
-    difficulty: '보통',
-    color: 'bg-yellow-50',
-    textColor: 'text-yellow-500',
-    iconColor: 'text-yellow-400',
-  },
-  {
-    id: 'tpl_5',
-    icon: <Icons.Water />,
-    title: '하루 2L 물 마시기',
-    desc: '충분한 수분 섭취로 신진대사를 개선해보세요.',
-    days: 14,
-    difficulty: '쉬움',
-    color: 'bg-cyan-50',
-    textColor: 'text-cyan-500',
-    iconColor: 'text-cyan-400',
-  },
-  {
-    id: 'tpl_6',
-    icon: <Icons.Moon />,
-    title: '규칙적인 수면',
-    desc: '매일 같은 시간에 자고 일어나 수면 사이클을 잡아보세요.',
-    days: 14,
-    difficulty: '보통',
-    color: 'bg-indigo-50',
-    textColor: 'text-indigo-500',
-    iconColor: 'text-indigo-400',
-  },
-  {
-    id: 'tpl_7',
-    icon: <Icons.Heart />,
-    title: '혈압 매일 체크',
-    desc: '아침저녁으로 혈압을 측정하고 기록하는 습관을 만들어보세요.',
-    days: 30,
-    difficulty: '쉬움',
-    color: 'bg-pink-50',
-    textColor: 'text-pink-500',
-    iconColor: 'text-pink-400',
-  },
-  {
-    id: 'tpl_8',
-    icon: <Icons.Activity />,
-    title: '혈당 관리 챌린지',
-    desc: '식후 혈당 측정과 식단 조절로 혈당 수치를 안정시켜보세요.',
-    days: 30,
-    difficulty: '어려움',
-    color: 'bg-orange-50',
-    textColor: 'text-orange-500',
-    iconColor: 'text-orange-400',
-  },
-  {
-    id: 'tpl_9',
-    icon: <Icons.Coffee />,
-    title: '카페인 줄이기',
-    desc: '하루 커피를 1잔으로 줄이고 대신 물이나 허브차를 마셔보세요.',
-    days: 21,
-    difficulty: '보통',
-    color: 'bg-amber-50',
-    textColor: 'text-amber-600',
-    iconColor: 'text-amber-500',
-  },
-  {
-    id: 'tpl_10',
-    icon: <Icons.Stretch />,
-    title: '아침 스트레칭',
-    desc: '매일 아침 10분 스트레칭으로 하루를 상쾌하게 시작해보세요.',
-    days: 14,
-    difficulty: '쉬움',
-    color: 'bg-purple-50',
-    textColor: 'text-purple-500',
-    iconColor: 'text-purple-400',
-  },
-]
+const CATEGORY_META = {
+  interaction: { label: '약물', color: 'bg-red-50 text-red-500' },
+  sleep:       { label: '수면', color: 'bg-indigo-50 text-indigo-500' },
+  diet:        { label: '식단', color: 'bg-green-50 text-green-500' },
+  exercise:    { label: '운동', color: 'bg-blue-50 text-blue-500' },
+  symptom:     { label: '증상', color: 'bg-orange-50 text-orange-500' },
+}
+
+function getDaysSince(startedDate) {
+  const diff = Date.now() - new Date(startedDate).getTime()
+  return Math.floor(diff / (1000 * 60 * 60 * 24)) + 1
+}
 
 export default function ChallengePage() {
+  const router = useRouter()
   const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('추천')
   const [ongoing, setOngoing] = useState([])
   const [completed, setCompleted] = useState([])
   const [processingIds, setProcessingIds] = useState([])
-  const [difficultyTarget, setDifficultyTarget] = useState(null) // 난이도 모달용
+  const [recommended, setRecommended] = useState([])
+  const [isLoadingRecommended, setIsLoadingRecommended] = useState(false)
+  const [noGuide, setNoGuide] = useState(false)
+  const [recommendedError, setRecommendedError] = useState(false)
 
   const { selectedProfileId: profileId } = useProfile()
   const isInitialLoad = useRef(true)
@@ -293,8 +135,26 @@ export default function ChallengePage() {
     return <Icons.Target />
   }
 
-  const isAlreadyStarted = (templateTitle) => {
-    return ongoing.some((c) => c.title === templateTitle)
+  const fetchRecommended = async () => {
+    if (!profileId) return
+    setIsLoadingRecommended(true)
+    setNoGuide(false)
+    setRecommendedError(false)
+    try {
+      const latestRes = await api.get(`/api/v1/lifestyle-guides/latest?profile_id=${profileId}`)
+      const guide = latestRes.data
+      const challengeRes = await api.get(`/api/v1/lifestyle-guides/${guide.id}/challenges`)
+      const unstarted = challengeRes.data.filter(c => !c.is_active && c.challenge_status !== 'DELETED')
+      setRecommended(unstarted)
+    } catch (err) {
+      if (err.response?.status === 404) {
+        setNoGuide(true)
+      } else if (err.response?.status !== 401) {
+        setRecommendedError(true)
+      }
+    } finally {
+      setIsLoadingRecommended(false)
+    }
   }
 
   useEffect(() => {
@@ -309,7 +169,7 @@ export default function ChallengePage() {
         const challengeRes = await api.get(`/api/v1/challenges?profile_id=${profileId}`)
 
         const activeChallenges = challengeRes.data
-          .filter((c) => c.challenge_status === 'IN_PROGRESS')
+          .filter((c) => c.challenge_status === 'IN_PROGRESS' && c.is_active)
           .map((c) => ({
             ...c,
             icon: getIconByTitle(c.title),
@@ -336,39 +196,25 @@ export default function ChallengePage() {
       }
     }
     fetchData()
+    fetchRecommended()
   }, [profileId])
 
-  const handleAccept = (template) => {
-    if (!profileId || processingIds.includes(template.id)) return
-    setDifficultyTarget(template)
-  }
-
-  const handleConfirmStart = async (difficulty) => {
-    const template = difficultyTarget
-    setDifficultyTarget(null)
-    setProcessingIds(prev => [...prev, template.id])
-
+  const handleStartGuideChallenge = async (challenge) => {
+    if (processingIds.includes(challenge.id)) return
+    setProcessingIds(prev => [...prev, challenge.id])
     try {
-      const response = await api.post('/api/v1/challenges', {
-        profile_id: profileId,
-        title: template.title,
-        description: template.desc,
-        target_days: template.days,
-        difficulty,
-      })
-
-      const newChallenge = {
-        ...response.data,
-        icon: template.icon,
-        current: 0,
-      }
-      setOngoing(prev => [...prev, newChallenge])
+      const res = await api.patch(`/api/v1/challenges/${challenge.id}`, { is_active: true })
+      setRecommended(prev => prev.filter(c => c.id !== challenge.id))
+      setOngoing(prev => [
+        { ...res.data, icon: getIconByTitle(res.data.title), current: res.data.completed_dates?.length || 0 },
+        ...prev,
+      ])
       toast.success('챌린지가 시작되었습니다!')
       setActiveTab('진행중')
     } catch (err) {
       showError(err.parsed?.message || '챌린지 시작에 실패했습니다.')
     } finally {
-      setProcessingIds(prev => prev.filter(id => id !== template.id))
+      setProcessingIds(prev => prev.filter(id => id !== challenge.id))
     }
   }
 
@@ -422,6 +268,11 @@ export default function ChallengePage() {
     }
   }
 
+  // started_date 내림차순 정렬 (최근 시작한 챌린지 먼저)
+  const sortedOngoing = [...ongoing].sort(
+    (a, b) => new Date(b.started_date) - new Date(a.started_date)
+  )
+
   if (isLoading) {
     return (
       <main className="min-h-screen bg-gray-50 pb-24">
@@ -437,14 +288,6 @@ export default function ChallengePage() {
   return (
     <main className={`min-h-screen bg-gray-50 pb-24 transition-opacity duration-200 ${isRefreshing ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
       <Header title="생활습관 챌린지" subtitle="건강한 습관을 만들어보세요" showBack={true} />
-
-      {difficultyTarget && (
-        <DifficultyModal
-          template={difficultyTarget}
-          onConfirm={handleConfirmStart}
-          onCancel={() => setDifficultyTarget(null)}
-        />
-      )}
 
       <div className="max-w-3xl mx-auto px-6 py-6">
         <div className="flex gap-8 mb-8 border-b border-gray-200">
@@ -472,75 +315,110 @@ export default function ChallengePage() {
           ))}
         </div>
 
-        {/* 추천 탭 */}
+        {/* 추천 탭 — AI 가이드 기반 */}
         {activeTab === '추천' && (
           <div className="space-y-3">
-            {TEMPLATES.map((item) => {
-              const started = isAlreadyStarted(item.title)
-              const isProcessing = processingIds.includes(item.id)
-              const diffStyle = DIFFICULTY_STYLE[item.difficulty] || DIFFICULTY_STYLE['보통']
-              return (
-                <div key={item.id} className="bg-white rounded-2xl shadow-sm p-5 border border-gray-50 hover:border-blue-100 transition-all">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-4 flex-1 min-w-0">
-                      <div className={`${item.color} ${item.iconColor} w-11 h-11 rounded-xl flex items-center justify-center shrink-0`}>
-                        {item.icon}
-                      </div>
-                      <div className="min-w-0">
-                        <h3 className="font-bold text-gray-900 text-sm">{item.title}</h3>
-                        <p className="text-gray-400 text-xs mt-0.5 leading-relaxed line-clamp-1">{item.desc}</p>
-                        <div className="flex gap-1.5 mt-1.5">
-                          <span className="bg-gray-100 text-gray-500 text-[10px] px-2 py-0.5 rounded-full font-bold">{item.days}일</span>
-                          <span className={`${diffStyle.bg} ${diffStyle.text} text-[10px] px-2 py-0.5 rounded-full font-bold`}>{item.difficulty}</span>
+            {isLoadingRecommended ? (
+              <div className="space-y-3 animate-pulse">
+                {[1, 2, 3].map(i => <div key={i} className="bg-white rounded-2xl h-20 w-full" />)}
+              </div>
+            ) : noGuide ? (
+              <EmptyState
+                title="아직 AI 추천 챌린지가 없어요"
+                message="생활습관 가이드를 먼저 받아보세요"
+                onAction={() => router.push('/lifestyle-guide')}
+                actionLabel="가이드 받기"
+              />
+            ) : recommendedError ? (
+              <EmptyState
+                title="추천 챌린지를 불러오지 못했어요"
+                message="잠시 후 다시 시도해주세요"
+                onAction={fetchRecommended}
+                actionLabel="다시 시도"
+              />
+            ) : recommended.length === 0 ? (
+              <EmptyState
+                title="모든 추천 챌린지를 시작했습니다!"
+                message="진행 중인 챌린지를 확인해보세요"
+                onAction={() => setActiveTab('진행중')}
+                actionLabel="진행중 보기"
+              />
+            ) : (
+              recommended.map((item) => {
+                const isProcessing = processingIds.includes(item.id)
+                const categoryMeta = item.category ? CATEGORY_META[item.category] : null
+                return (
+                  <div key={item.id} className="bg-white rounded-2xl shadow-sm p-5 border border-gray-50 hover:border-blue-100 transition-all">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-4 flex-1 min-w-0">
+                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${categoryMeta ? categoryMeta.color : 'bg-gray-100 text-gray-500'}`}>
+                          {getIconByTitle(item.title)}
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="font-bold text-gray-900 text-sm">{item.title}</h3>
+                          <p className="text-gray-400 text-xs mt-0.5 leading-relaxed line-clamp-1">{item.description}</p>
+                          <div className="flex gap-1.5 mt-1.5">
+                            <span className="bg-gray-100 text-gray-500 text-[10px] px-2 py-0.5 rounded-full font-bold">{item.target_days}일</span>
+                            {categoryMeta && (
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${categoryMeta.color}`}>
+                                {categoryMeta.label}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <button
-                      onClick={() => handleAccept(item)}
-                      disabled={started || isProcessing}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors shrink-0
-                        ${started
-                          ? 'bg-gray-100 text-gray-400 cursor-default'
-                          : isProcessing
+                      <button
+                        onClick={() => handleStartGuideChallenge(item)}
+                        disabled={isProcessing}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors shrink-0
+                          ${isProcessing
                             ? 'bg-blue-300 text-white cursor-wait'
                             : 'bg-blue-500 text-white hover:bg-blue-600 cursor-pointer'}`}
-                    >
-                      {started ? '진행중' : isProcessing ? '처리중...' : '시작하기'}
-                    </button>
+                      >
+                        {isProcessing ? '처리중...' : '시작하기'}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })
+            )}
           </div>
         )}
 
-        {/* 진행중 탭 */}
+        {/* 진행중 탭 — started_date 내림차순, D+N 표시 */}
         {activeTab === '진행중' && (
           <div className="space-y-4">
-            {ongoing.length > 0 ? (
-              ongoing.map((item) => {
+            {sortedOngoing.length > 0 ? (
+              sortedOngoing.map((item) => {
                 const isProcessing = processingIds.includes(item.id)
                 const today = new Date().toISOString().split('T')[0]
                 const checkedToday = item.completed_dates?.includes(today)
                 const diffStyle = item.difficulty ? (DIFFICULTY_STYLE[item.difficulty] || DIFFICULTY_STYLE['보통']) : null
+                const categoryMeta = item.category ? CATEGORY_META[item.category] : null
                 return (
                   <div key={item.id} className="bg-white rounded-2xl shadow-sm p-6 border border-gray-50">
                     <div className="flex items-center gap-4 mb-5">
-                      <div className="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center text-gray-500">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${categoryMeta ? categoryMeta.color : 'bg-gray-100 text-gray-500'}`}>
                         {item.icon}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="font-bold text-gray-900">{item.title}</h3>
-                          {diffStyle && (
+                          {categoryMeta && (
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${categoryMeta.color}`}>
+                              {categoryMeta.label}
+                            </span>
+                          )}
+                          {diffStyle && !categoryMeta && (
                             <span className={`${diffStyle.bg} ${diffStyle.text} text-[10px] px-2 py-0.5 rounded-full font-bold`}>
                               {item.difficulty}
                             </span>
                           )}
                         </div>
                         <p className="text-gray-400 text-xs mt-0.5">
-                          {item.current}일째 진행 중
-                          {item.started_date && <span className="ml-1">· {item.started_date} 시작</span>}
+                          {item.started_date
+                            ? `D+${getDaysSince(item.started_date)} · ${item.target_days}일 목표`
+                            : `${item.current}일째 진행 중`}
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -578,7 +456,7 @@ export default function ChallengePage() {
                 )
               })
             ) : (
-              <EmptyState title="진행 중인 챌린지가 없어요" message="새로운 습관을 시작해보세요!" onAction={() => setActiveTab('추천')} actionLabel="추천 챌린지 보기" />
+              <EmptyState title="진행 중인 챌린지가 없어요" message="AI 추천 챌린지를 시작해보세요!" onAction={() => setActiveTab('추천')} actionLabel="추천 챌린지 보기" />
             )}
           </div>
         )}
@@ -589,16 +467,22 @@ export default function ChallengePage() {
             {completed.length > 0 ? (
               completed.map((item) => {
                 const diffStyle = item.difficulty ? (DIFFICULTY_STYLE[item.difficulty] || DIFFICULTY_STYLE['보통']) : null
+                const categoryMeta = item.category ? CATEGORY_META[item.category] : null
                 return (
                   <div key={item.id} className="bg-white rounded-2xl shadow-sm p-6 border border-gray-50 opacity-80">
                     <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center text-green-400">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${categoryMeta ? categoryMeta.color : 'bg-green-50 text-green-400'}`}>
                         {item.icon}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="font-bold text-gray-900">{item.title}</h3>
-                          {diffStyle && (
+                          {categoryMeta && (
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${categoryMeta.color}`}>
+                              {categoryMeta.label}
+                            </span>
+                          )}
+                          {diffStyle && !categoryMeta && (
                             <span className={`${diffStyle.bg} ${diffStyle.text} text-[10px] px-2 py-0.5 rounded-full font-bold`}>
                               {item.difficulty}
                             </span>
