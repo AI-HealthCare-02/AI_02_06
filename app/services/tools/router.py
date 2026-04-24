@@ -13,9 +13,12 @@ job 안에서 일어나고 (Y-5), 본 모듈은 그 결과 (assistant message di
 """
 
 import json
+import logging
 from typing import Any
 
 from app.dtos.tools import RouteResult, ToolCall
+
+logger = logging.getLogger(__name__)
 
 _LOCATION_TOOL_NAMES = frozenset({"search_hospitals_by_location"})
 
@@ -44,8 +47,12 @@ def _parse_arguments(raw: str | None) -> dict[str, Any]:
     try:
         parsed = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
+        logger.warning("[ToolCalling] router JSON parse failed, falling back to empty args")
         return {}
-    return parsed if isinstance(parsed, dict) else {}
+    if not isinstance(parsed, dict):
+        logger.warning("[ToolCalling] router arguments not a dict (type=%s), using empty args", type(parsed).__name__)
+        return {}
+    return parsed
 
 
 def parse_router_response(message: dict[str, Any]) -> RouteResult:

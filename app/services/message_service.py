@@ -422,7 +422,7 @@ class MessageService:
         queue = self._get_queue()
 
         route = await route_intent_via_rq(messages=route_messages, queue=queue)
-        logger.info("[Y-6] route kind=%s calls=%d", route.kind, len(route.tool_calls))
+        logger.info("[ToolCalling] route kind=%s calls=%d", route.kind, len(route.tool_calls))
 
         if route.kind == "text":
             user_msg, assistant_msg = await self.ask_and_reply(session_id, content)
@@ -481,7 +481,7 @@ class MessageService:
         store = self._get_pending_store()
         turn_id = await store.create(pending)
         geo_count = len(route.tool_calls) - len(eager_results)
-        logger.info("[Y-6] pending turn=%s eager=%d geo=%d", turn_id, len(eager_results), geo_count)
+        logger.info("[ToolCalling] pending turn=%s eager=%d geo=%d", turn_id, len(eager_results), geo_count)
 
         return AskResult(
             user_message=user_msg,
@@ -600,7 +600,7 @@ class MessageService:
 
         session_uuid = UUID(pending.session_id)
         assistant_msg = await self.repository.create_assistant_message(session_uuid, answer)
-        logger.info("[Y-6] resolved turn=%s status=%s", turn_id, status)
+        logger.info("[ToolCalling] resolved turn=%s status=%s", turn_id, status)
 
         return AskResult(user_message=None, assistant_message=assistant_msg, pending=None)
 

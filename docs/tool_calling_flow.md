@@ -282,7 +282,7 @@ Phase Y 범위에서는 `assistant_message.content` 는 **순수 자연어**만 
   자동 처리해야 한다.
 - 422 (Unprocessable Entity) 는 Pydantic 검증 실패. `status` 가 `"ok"` /
   `"denied"` 중 하나가 아니거나 `session_id` 가 UUID 형식이 아닐 때 발생.
-- **서버 로그에서** `[Y-6] route kind=tool_calls calls=...` 를 확인하면 Router
+- **서버 로그에서** `[ToolCalling] route kind=tool_calls calls=...` 를 확인하면 Router
   LLM 분류가 의도대로 됐는지 디버깅 가능.
 
 ---

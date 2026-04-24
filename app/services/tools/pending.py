@@ -17,6 +17,7 @@ Hash 대신 JSON string 을 쓰는 이유:
 """
 
 import json
+import logging
 import time
 from typing import Protocol, runtime_checkable
 import uuid
@@ -24,6 +25,8 @@ import uuid
 from redis.asyncio import Redis
 
 from app.dtos.tools import PendingTurn
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TTL_SEC = 60
 _KEY_PREFIX = "pending:turn:"
@@ -107,19 +110,24 @@ class RedisPendingTurnStore:
         turn_id = str(uuid.uuid4())
         stamped = turn.model_copy(update={"turn_id": turn_id})
         await self._redis.setex(_key(turn_id), self._ttl, stamped.model_dump_json())
+        logger.info("[ToolCalling] pending store create turn=%s ttl=%ds", turn_id, self._ttl)
         return turn_id
 
     async def claim(self, turn_id: str) -> PendingTurn | None:
         raw = await self._redis.getdel(_key(turn_id))
         if raw is None:
+            logger.warning("[ToolCalling] pending store claim miss turn=%s (expired or unknown)", turn_id)
             return None
         if isinstance(raw, bytes):
             raw = raw.decode("utf-8")
         try:
-            return PendingTurn.model_validate_json(raw)
+            pending = PendingTurn.model_validate_json(raw)
         except (json.JSONDecodeError, ValueError):
             # 이전 버전 스키마로 저장된 데이터 등 — 재진입 불가능, 무시.
+            logger.warning("[ToolCalling] pending store claim parse fail turn=%s (stale schema?)", turn_id)
             return None
+        logger.debug("[ToolCalling] pending store claim turn=%s", turn_id)
+        return pending
 
     async def exists(self, turn_id: str) -> bool:
         return bool(await self._redis.exists(_key(turn_id)))

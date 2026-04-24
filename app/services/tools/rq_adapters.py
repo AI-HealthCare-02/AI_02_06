@@ -23,10 +23,13 @@ deadline exceeded) and ``ToolJobError`` (RQ status transitioned to
 """
 
 import asyncio
+import logging
 import time
 from typing import Any
 
 from app.services.tools.router import parse_router_response
+
+logger = logging.getLogger(__name__)
 
 try:
     from app.dtos.tools import RouteResult  # only the DTO is needed here
@@ -73,19 +76,23 @@ async def _await_result(
         ToolTimeoutError: If the deadline is reached before completion.
         ToolJobError: If the job reports a failed status.
     """
-    deadline = time.monotonic() + timeout
+    start = time.monotonic()
+    deadline = start + timeout
 
     while True:
         job.refresh()
         status = job.get_status()
 
         if status == "finished":
+            logger.debug("[ToolCalling] RQ job finished in %.3fs", time.monotonic() - start)
             return job.result
 
         if status == "failed":
+            logger.warning("[ToolCalling] RQ job failed after %.3fs", time.monotonic() - start)
             raise ToolJobError(job.exc_info or "AI-Worker tool job failed")
 
         if time.monotonic() >= deadline:
+            logger.warning("[ToolCalling] RQ job timeout after %.1fs (poll interval=%.3fs)", timeout, poll_interval)
             raise ToolTimeoutError(f"Tool job did not finish within {timeout}s")
 
         await asyncio.sleep(poll_interval)
@@ -114,6 +121,7 @@ async def route_intent_via_rq(
         ToolTimeoutError: Polling deadline exceeded.
         ToolJobError: Worker returned a failed status.
     """
+    logger.info("[ToolCalling] enqueue route_intent_job messages=%d", len(messages))
     job = queue.enqueue(ROUTE_INTENT_JOB_REF, messages)
     assistant_message = await _await_result(job, poll_interval=poll_interval, timeout=timeout)
     return parse_router_response(assistant_message)
@@ -152,6 +160,7 @@ async def run_tool_calls_via_rq(
     if not calls:
         return {}
 
+    logger.info("[ToolCalling] enqueue run_tool_calls_job calls=%d", len(calls))
     job = queue.enqueue(RUN_TOOL_CALLS_JOB_REF, calls)
     return await _await_result(job, poll_interval=poll_interval, timeout=timeout)
 
@@ -189,5 +198,6 @@ async def generate_chat_response_via_rq(
         ToolTimeoutError: Polling deadline exceeded.
         ToolJobError: Worker returned a failed status.
     """
+    logger.info("[ToolCalling] enqueue generate_chat_response_job messages=%d", len(messages))
     job = queue.enqueue(GENERATE_CHAT_RESPONSE_JOB_REF, messages, system_prompt)
     return await _await_result(job, poll_interval=poll_interval, timeout=timeout)

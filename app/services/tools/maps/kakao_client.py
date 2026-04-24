@@ -157,27 +157,35 @@ async def kakao_local_search(
 
     http_client = client or _get_shared_client()
 
+    logger.debug("[ToolCalling] Kakao Local search query=%r has_coords=%s", query, x is not None and y is not None)
+
     last_error: Exception | None = None
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
             response = await http_client.get(KAKAO_ENDPOINT, params=params, headers=headers)
         except httpx.TimeoutException as exc:
+            logger.warning("[ToolCalling] Kakao API timeout query=%r", query)
             raise KakaoAPIError(f"Kakao API timeout: {exc}") from exc
         except httpx.HTTPError as exc:
+            logger.warning("[ToolCalling] Kakao API transport error query=%r err=%s", query, exc)
             raise KakaoAPIError(f"Kakao API transport error: {exc}") from exc
 
         status = response.status_code
         if status >= 500:
             last_error = KakaoAPIError(f"Kakao API {status}")
             if attempt < _MAX_ATTEMPTS:
-                logger.warning("Kakao API %d (attempt %d/%d); retrying", status, attempt, _MAX_ATTEMPTS)
+                logger.warning("[ToolCalling] Kakao API %d (attempt %d/%d); retrying", status, attempt, _MAX_ATTEMPTS)
                 continue
+            logger.error("[ToolCalling] Kakao API %d exhausted retries query=%r", status, query)
             raise last_error
 
         if status >= 400:
+            logger.error("[ToolCalling] Kakao API %d query=%r body=%r", status, query, response.text[:200])
             raise KakaoAPIError(f"Kakao API {status}: {response.text[:200]}")
 
-        return _parse_response(response)
+        places = _parse_response(response)
+        logger.info("[ToolCalling] Kakao Local search hit=%d query=%r", len(places), query)
+        return places
 
     # 방어적: 위 루프가 항상 return/raise 로 끝나지만 mypy 안심용.
     raise KakaoAPIError("Kakao API exhausted retries") from last_error

@@ -48,7 +48,15 @@ async def route_intent_job(messages: list[dict[str, Any]]) -> dict[str, Any]:
     """
     from ai_worker.providers import router as router_provider
 
-    return await router_provider.route_with_tools(messages)
+    logger.info("[ToolCalling] route_intent_job start messages=%d", len(messages))
+    result = await router_provider.route_with_tools(messages)
+    tool_calls = result.get("tool_calls") or []
+    logger.info(
+        "[ToolCalling] route_intent_job done tool_calls=%d%s",
+        len(tool_calls),
+        " names=" + ",".join(c.get("function", {}).get("name", "?") for c in tool_calls) if tool_calls else "",
+    )
+    return result
 
 
 # ── Tool 병렬 실행 ─────────────────────────────────────────────
@@ -94,7 +102,7 @@ async def _dispatch(call: dict[str, Any]) -> dict[str, Any]:
         if name == "search_hospitals_by_location":
             return await _run_location(call)
     except Exception as exc:  # 병렬 호출 격리 — 실패도 결과로 전달
-        logger.exception("[Y-5] tool call %r failed", name)
+        logger.exception("[ToolCalling] tool call %r failed", name)
         return {"error": f"{type(exc).__name__}: {exc}"}
     else:
         return {"error": f"unknown function: {name}"}
@@ -116,7 +124,15 @@ async def run_tool_calls_job(calls: list[dict[str, Any]]) -> dict[str, Any]:
     if not calls:
         return {}
 
+    logger.info(
+        "[ToolCalling] run_tool_calls_job start calls=%d names=%s",
+        len(calls),
+        ",".join(c.get("name", "?") for c in calls),
+    )
     coros = [_dispatch(call) for call in calls]
     results = await asyncio.gather(*coros, return_exceptions=False)
 
-    return {call["tool_call_id"]: result for call, result in zip(calls, results, strict=True)}
+    merged = {call["tool_call_id"]: result for call, result in zip(calls, results, strict=True)}
+    error_count = sum(1 for r in merged.values() if "error" in r)
+    logger.info("[ToolCalling] run_tool_calls_job done ok=%d errors=%d", len(merged) - error_count, error_count)
+    return merged

@@ -79,6 +79,14 @@ async def route_with_tools(messages: list[dict[str, Any]]) -> dict[str, Any]:
         [_serialize_tool_call(c) for c in raw_tool_calls] if raw_tool_calls else None
     )
 
+    usage = getattr(completion, "usage", None)
+    total_tokens = getattr(usage, "total_tokens", None) if usage else None
+    logger.info(
+        "[ToolCalling] router LLM response tool_calls=%d tokens=%s",
+        len(tool_calls_dict) if tool_calls_dict else 0,
+        total_tokens if total_tokens is not None else "?",
+    )
+
     return {
         "role": "assistant",
         "content": getattr(message, "content", None),
