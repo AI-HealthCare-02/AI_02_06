@@ -7,7 +7,6 @@ Includes Redis connection retry logic and RQ version compatibility handling.
 import asyncio
 from pathlib import Path
 import signal
-import socket
 import sys
 import time
 
@@ -110,27 +109,7 @@ def main() -> None:
     # Import RQ components (inside function for version compatibility)
     from rq import Queue, SimpleWorker
 
-    # Create Redis connection object.
-    # RQ 2.x worker 는 pubsub subscribe 를 dedicated 연결로 유지한다. 이 연결이
-    # idle 상태로 오래 남으면 Docker bridge / WSL2 가상 네트워크가 TCP 세션을
-    # silent drop → worker 가 "Redis connection timeout, quitting..." 로 자체 종료.
-    # health_check_interval 은 command connection pool 에만 작동하므로 pubsub
-    # 용까지 커버하려면 OS 레벨 TCP keepalive 를 명시해야 한다.
-    # TCP_KEEPIDLE=60  : 60초 idle 후 keepalive probe 시작
-    # TCP_KEEPINTVL=10 : probe 실패 시 10초 간격 재시도
-    # TCP_KEEPCNT=3    : 3회 실패 시 연결 끊김 감지
-    # 즉 최대 60 + 10*3 = 90초 내로 dead connection 이 감지되어 복구된다.
-    redis_conn = redis.from_url(
-        config.REDIS_URL,
-        health_check_interval=30,
-        socket_keepalive=True,
-        socket_keepalive_options={
-            socket.TCP_KEEPIDLE: 60,
-            socket.TCP_KEEPINTVL: 10,
-            socket.TCP_KEEPCNT: 3,
-        },
-        socket_connect_timeout=10,
-    )
+    redis_conn = redis.from_url(config.REDIS_URL)
 
     # Setup queues and worker
     # Direct injection instead of Connection context manager to prevent version issues
@@ -145,7 +124,14 @@ def main() -> None:
         # 이 30 초 안에 끝나지 않는 timeout 을 일으킨다. SimpleWorker 로
         # 부모 프로세스의 warmed 모델 + AsyncOpenAI 싱글톤 + ThreadPool 을
         # 그대로 재사용하면서 결정적으로 실행되게 한다.
-        worker = SimpleWorker(queues, connection=redis_conn)
+        #
+        # default_worker_ttl=180: BLPOP 타임아웃 = ttl - 15 = 165s.
+        # 기본 420 이면 BLPOP 이 ~7분 블로킹하는데 Docker bridge / WSL2 NAT 가
+        # 그 이상 idle TCP 세션을 유지해주지 않아 "Redis connection timeout,
+        # quitting..." 로 워커 자체 종료. TTL 을 180s 로 낮추면 매 ~165s 마다
+        # BLPOP 이 자연 반환 → 재호출로 연결을 실질적으로 idle 상태에 두지 않음.
+        # (TCP keepalive / health_check_interval 은 WSL2 drop 을 막지 못해 제거)
+        worker = SimpleWorker(queues, connection=redis_conn, default_worker_ttl=180)
         worker.work(with_scheduler=True)
     except Exception as e:
         logger.error("Worker crashed: %s", e)
