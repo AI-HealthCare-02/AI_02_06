@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import PropTypes from 'prop-types'
 import api from '@/lib/api'
+import { AUTH_STATUS, LOGOUT_REASON, getAuthStatus, markLoggedOut } from '@/lib/authStatus'
 import LoadingSpinner from '@/components/common/LoadingSpinner'
 
 // 인증이 필요하지 않은 공개 경로들 (화이트리스트)
@@ -46,14 +47,17 @@ export default function GlobalAuthGuard({ children }) {
       }
 
       try {
-        // 인증 확인 API 호출 (인터셉터 비활성화)
+        // 인증 확인 API 호출 (인터셉터 비활성화로 빠른 판정 — RTR 은 skip)
         await api.get('/api/v1/profiles', {
-          skipAuthInterceptor: true  // 인터셉터 비활성화 플래그
+          skipAuthInterceptor: true
         })
         setIsAuthenticated(true)
       } catch (error) {
-        // 인증 실패 시 조용히 리다이렉트 (토스트 없음)
-        console.log('Authentication failed, redirecting to login')
+        // 로그인 힌트가 있었음에도 세션이 만료됐다면 "로그인 시간이 오래되어..."
+        // 안내를 보여줘야 한다. 인터셉터를 우회했으므로 여기서 직접 marking.
+        if (getAuthStatus() === AUTH_STATUS.LOGIN) {
+          markLoggedOut({ reason: LOGOUT_REASON.SESSION_EXPIRED })
+        }
         router.replace('/login')
         return
       } finally {
