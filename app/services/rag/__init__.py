@@ -30,6 +30,7 @@ async def get_rag_pipeline() -> "RAGPipeline":  # noqa: F821  # forward ref reso
         from rq import Queue
 
         from app.core.config import config
+        from app.repositories.profile_repository import ProfileRepository
         from app.services.rag.intent.classifier import IntentClassifier
         from app.services.rag.pipeline import RAGPipeline
         from app.services.rag.providers.rq_embedding import RQEmbeddingProvider
@@ -49,6 +50,7 @@ async def get_rag_pipeline() -> "RAGPipeline":  # noqa: F821  # forward ref reso
             intent_classifier=IntentClassifier(),
             tool_router=ToolRouter(),
             rag_generator=rag_generator,
+            profile_repository=ProfileRepository(),
         )
 
     return _pipeline

@@ -216,12 +216,20 @@ class MessageService:
         ]
         history_metadata = [m.metadata or {} for m in chronological]
 
+        # Resolve the active profile so the RAG pipeline can inject the
+        # profile's health_survey (allergies, conditions, etc.) into the
+        # answer LLM prompt. A missing session falls through to the pipeline
+        # which will simply skip the medical-context block.
+        session = await self.session_repository.get_by_id(session_id)
+        user_profile_id = session.profile_id if session is not None else None
+
         try:
             pipeline = await get_rag_pipeline()
             response = await pipeline.ask(
                 question=content,
                 history=history,
                 history_metadata=history_metadata,
+                user_profile_id=user_profile_id,
             )
         except Exception as e:
             # 503 으로 변환하기 전에 진짜 원인을 stack trace 와 함께 남긴다.
