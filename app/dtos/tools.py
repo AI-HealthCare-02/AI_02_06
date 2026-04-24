@@ -10,6 +10,9 @@ later Y phases — ``ToolCall``, ``PendingTurn``, ``ToolResultRequest``,
 respective phases and will live here alongside ``KakaoPlace``.
 """
 
+from datetime import datetime
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -34,3 +37,41 @@ class KakaoPlace(BaseModel):
     )
     lat: float = Field(description="Latitude (WGS84), mapped from Kakao 'y'")
     lng: float = Field(description="Longitude (WGS84), mapped from Kakao 'x'")
+
+
+class ToolCall(BaseModel):
+    """One LLM-issued function call inside a turn (Y-3, Y-4).
+
+    The ``needs_geolocation`` flag is computed by the router after parsing
+    arguments: ``True`` when the function is location-based and the user's
+    coordinates are not yet known. Used to decide whether the whole turn
+    must wait for a frontend GPS callback.
+    """
+
+    tool_call_id: str = Field(description="OpenAI-issued id matching tool_calls[i].id")
+    name: str = Field(description="Function name, e.g. 'search_hospitals_by_location'")
+    arguments: dict[str, Any] = Field(default_factory=dict, description="Parsed JSON arguments")
+    needs_geolocation: bool = Field(default=False, description="True if this call requires a GPS callback")
+
+
+class PendingTurn(BaseModel):
+    """A whole conversation turn paused while waiting for a frontend callback.
+
+    Stored as a single JSON blob in Redis under ``pending:turn:{turn_id}``
+    with a TTL. ``eager_results`` caches results of tool calls that could
+    be executed immediately (e.g. keyword search) so we do not re-run them
+    after the geolocation callback arrives.
+    """
+
+    turn_id: str = Field(description="UUID assigned by the store; echoed back to FE")
+    session_id: str = Field(description="Chat session UUID")
+    account_id: str = Field(description="Owner account UUID; checked on callback")
+    messages_snapshot: list[dict[str, Any]] = Field(
+        description="Original messages + Router LLM assistant message with tool_calls",
+    )
+    tool_calls: list[ToolCall] = Field(description="All tool calls the LLM issued in this turn")
+    eager_results: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Pre-executed tool results keyed by tool_call_id (e.g. keyword search outputs)",
+    )
+    created_at: datetime = Field(description="Aware UTC timestamp")
