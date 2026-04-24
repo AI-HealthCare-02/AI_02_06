@@ -28,6 +28,16 @@ from app.services.tools.rq_adapters import (
 logger = logging.getLogger(__name__)
 
 _HISTORY_LIMIT = 10
+_STATUS_OK = "ok"
+_STATUS_DENIED = "denied"
+_GEOLOCATION_DENIED_MESSAGE = "Permission denied: user rejected geolocation"
+
+# HTTP status codes referenced inside ``resolve_pending_turn`` — the
+# ``status`` parameter shadows ``fastapi.status`` in that method, so the
+# symbolic aliases are imported up-front to avoid an inline alias.
+_HTTP_400_BAD_REQUEST = 400
+_HTTP_403_FORBIDDEN = 403
+_HTTP_410_GONE = 410
 
 
 def _preview(text: str, limit: int = 80) -> str:
@@ -508,6 +518,91 @@ class MessageService:
         user_msg = await self.repository.create_user_message(session_id, content)
         assistant_msg = await self.repository.create_assistant_message(session_id, answer)
         return AskResult(user_message=user_msg, assistant_message=assistant_msg, pending=None)
+
+    async def resolve_pending_turn(
+        self,
+        *,
+        turn_id: str,
+        account_id: UUID | str,
+        status: str,
+        lat: float | None,
+        lng: float | None,
+    ) -> AskResult:
+        """Complete a turn that was waiting on a GPS callback.
+
+        Called by the frontend once the user has either allowed or denied
+        geolocation access. Validation order is chosen so we never waste
+        the (atomic) ``claim`` on a known-bad request:
+
+        1. ``status="ok"`` but missing coords → ``400``.
+        2. Turn not in the store (expired / never existed) → ``410``.
+        3. Account does not own the turn → ``403``.
+
+        Args:
+            turn_id: Id returned to the client as ``AskPending.turn_id``.
+            account_id: Caller account id. Compared as a string against
+                the owner recorded on the pending turn.
+            status: ``"ok"`` (user allowed GPS) or ``"denied"``.
+            lat: Latitude (WGS84) when ``status="ok"``.
+            lng: Longitude (WGS84) when ``status="ok"``.
+
+        Returns:
+            ``AskResult`` with only ``assistant_message`` set — the user
+            turn was persisted when the pending was created.
+
+        Raises:
+            HTTPException: 400 / 403 / 410 per above.
+        """
+        if status == _STATUS_OK and (lat is None or lng is None):
+            raise HTTPException(
+                status_code=_HTTP_400_BAD_REQUEST,
+                detail="lat and lng are required when status='ok'",
+            )
+
+        store = self._get_pending_store()
+        pending = await store.claim(turn_id)
+        if pending is None:
+            raise HTTPException(
+                status_code=_HTTP_410_GONE,
+                detail="Pending turn not found or expired.",
+            )
+
+        if pending.account_id != str(account_id):
+            raise HTTPException(
+                status_code=_HTTP_403_FORBIDDEN,
+                detail="Access denied to this pending turn.",
+            )
+
+        results = dict(pending.eager_results)
+        remaining_geo_calls = [
+            tc for tc in pending.tool_calls if tc.needs_geolocation and tc.tool_call_id not in results
+        ]
+
+        if status == _STATUS_OK:
+            geolocation = {"lat": lat, "lng": lng}
+            if remaining_geo_calls:
+                call_payload = [_tool_call_to_worker_dict(tc, geolocation=geolocation) for tc in remaining_geo_calls]
+                geo_results = await run_tool_calls_via_rq(calls=call_payload, queue=self._get_queue())
+                results.update(geo_results)
+        else:
+            for tc in remaining_geo_calls:
+                results[tc.tool_call_id] = {"error": _GEOLOCATION_DENIED_MESSAGE}
+
+        tool_messages = [_tool_result_message(call_id, result) for call_id, result in results.items()]
+        second_messages = [*pending.messages_snapshot, *tool_messages]
+
+        completion = await generate_chat_response_via_rq(
+            messages=second_messages,
+            system_prompt=None,
+            queue=self._get_queue(),
+        )
+        answer = completion.get("answer", "")
+
+        session_uuid = UUID(pending.session_id)
+        assistant_msg = await self.repository.create_assistant_message(session_uuid, answer)
+        logger.info("[Y-6] resolved turn=%s status=%s", turn_id, status)
+
+        return AskResult(user_message=None, assistant_message=assistant_msg, pending=None)
 
     async def delete_message(self, message_id: UUID) -> None:
         """Delete message (soft delete).
