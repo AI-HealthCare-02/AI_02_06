@@ -2,7 +2,43 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { X, Send, RefreshCw, Plus, Pencil, Trash2, Check } from 'lucide-react'
 import PropTypes from 'prop-types'
+import Markdown from 'react-markdown'
 import api, { showError } from '@/lib/api'
+
+// Assistant 메시지는 LLM 이 Markdown 으로 답하므로 커스텀 컴포넌트 매핑으로
+// Tailwind 스타일을 주입한다. Tailwind Typography 플러그인 없이도 읽기 좋은
+// 리스트·볼드·링크 스타일을 확보하는 게 목적.
+const MARKDOWN_COMPONENTS = {
+  p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+  ul: ({ children }) => <ul className="list-disc pl-5 mb-2 last:mb-0 space-y-0.5">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 last:mb-0 space-y-0.5">{children}</ol>,
+  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+  strong: ({ children }) => <strong className="font-semibold text-gray-900">{children}</strong>,
+  em: ({ children }) => <em className="italic">{children}</em>,
+  h1: ({ children }) => <h1 className="font-bold text-base mt-3 mb-1 first:mt-0">{children}</h1>,
+  h2: ({ children }) => <h2 className="font-bold text-base mt-3 mb-1 first:mt-0">{children}</h2>,
+  h3: ({ children }) => <h3 className="font-semibold text-sm mt-2 mb-1 first:mt-0">{children}</h3>,
+  a: ({ href, children }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="underline text-blue-600 hover:text-blue-800 break-all"
+    >
+      {children}
+    </a>
+  ),
+  code: ({ children }) => (
+    <code className="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono">{children}</code>
+  ),
+  pre: ({ children }) => (
+    <pre className="bg-gray-100 rounded-md p-2 my-2 text-xs font-mono overflow-x-auto">{children}</pre>
+  ),
+  hr: () => <hr className="my-3 border-gray-200" />,
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-4 border-gray-300 pl-3 my-2 text-gray-600">{children}</blockquote>
+  ),
+}
 
 /**
  * 기본 세션 제목 포맷: "새 채팅 MM/DD HH:mm"
@@ -206,6 +242,59 @@ export default function ChatModal({ onClose, profileId }) {
     }
   }
 
+  // Tool Calling 분기: 202 수신 시 브라우저 GPS 권한 요청 → /tool-result 로
+  // 허용/거부 결과 전달. 위치 기반 약국·병원 검색 (Phase Y) 전용 플로우.
+  const handleGeolocationCallback = useCallback(async (pending) => {
+    const { turn_id } = pending
+
+    const resolveWithCoords = (position) =>
+      api.post('/api/v1/messages/tool-result', {
+        turn_id,
+        status: 'ok',
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+      })
+
+    const resolveAsDenied = () =>
+      api.post('/api/v1/messages/tool-result', {
+        turn_id,
+        status: 'denied',
+      })
+
+    let finalRes
+    try {
+      const position = await new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+          reject(new Error('navigator.geolocation unavailable'))
+          return
+        }
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          // BE pending TTL 이 60s 이므로 권한 응답 대기는 15s 로 조여둔다
+          timeout: 15_000,
+          maximumAge: 0,
+        })
+      })
+      finalRes = await resolveWithCoords(position)
+    } catch (geoErr) {
+      // 권한 거부 / 타임아웃 / 미지원 — 모두 denied 로 보내서 LLM 이 안내 문구 생성
+      console.warn('[ToolCalling] geolocation failed, falling back to denied:', geoErr)
+      try {
+        finalRes = await resolveAsDenied()
+      } catch (denyErr) {
+        if (denyErr.response?.status === 410) {
+          setMessages(prev => [...prev, { role: 'assistant', content: '시간이 너무 지나서 요청이 만료되었어요. 다시 질문해 주세요.' }])
+          return
+        }
+        console.error('[ToolCalling] tool-result denied 전달 실패:', denyErr)
+        setMessages(prev => [...prev, { role: 'assistant', content: '요청을 처리하지 못했어요. 잠시 후 다시 시도해 주세요.' }])
+        return
+      }
+    }
+
+    const content = finalRes?.data?.assistant_message?.content || '응답을 받지 못했습니다.'
+    setMessages(prev => [...prev, { role: 'assistant', content }])
+  }, [])
+
   const handleSend = async () => {
     const message = input.trim()
     if (!message || isLoading || isInitializing) return
@@ -232,6 +321,14 @@ export default function ChatModal({ onClose, profileId }) {
         session_id: sid,
         content: message,
       })
+
+      // 202 Accepted + action=request_geolocation: Router LLM 이 위치 기반
+      // 툴을 고른 상태. 브라우저 GPS 후 /tool-result 로 재요청한다.
+      if (res.status === 202 && res.data?.action === 'request_geolocation') {
+        await handleGeolocationCallback(res.data)
+        return
+      }
+
       const assistantContent = res.data.assistant_message?.content || '응답을 받지 못했습니다.'
       setMessages(prev => [...prev, { role: 'assistant', content: assistantContent }])
     } catch (err) {
@@ -354,10 +451,19 @@ export default function ChatModal({ onClose, profileId }) {
               <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm shadow-sm
                   ${msg.role === 'user'
-                    ? 'bg-gray-900 text-white rounded-br-none'
+                    ? 'bg-gray-900 text-white rounded-br-none whitespace-pre-wrap break-words'
                     : 'bg-white text-gray-800 rounded-bl-none border border-gray-200'
                   }`}>
-                  {msg.content}
+                  {msg.role === 'user' ? (
+                    msg.content
+                  ) : (
+                    // react-markdown 은 기본적으로 raw HTML 렌더링을 차단한다
+                    // (rehype-raw 등 플러그인 미추가). 따라서 사용자나 LLM 이 <script>
+                    // 를 포함해도 텍스트 노드로만 삽입되어 XSS 가 차단된다.
+                    <Markdown components={MARKDOWN_COMPONENTS}>
+                      {msg.content}
+                    </Markdown>
+                  )}
                 </div>
               </div>
             ))}
