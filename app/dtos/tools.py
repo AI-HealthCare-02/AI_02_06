@@ -99,3 +99,37 @@ class RouteResult(BaseModel):
         default=None,
         description="Raw OpenAI assistant message, preserved for the 2nd LLM call",
     )
+
+
+class AskPending(BaseModel):
+    """Handoff payload returned when a turn is paused for a GPS callback (Y-6).
+
+    Carries only what the frontend needs to complete the callback:
+    the server-issued ``turn_id`` and how many seconds the turn will
+    stay alive in the pending store.
+    """
+
+    turn_id: str = Field(description="Pending turn id echoed back on callback")
+    ttl_sec: int = Field(description="Seconds remaining before the turn expires")
+
+
+class AskResult(BaseModel):
+    """Union-shaped result of ``MessageService.ask_with_tools`` (Y-6).
+
+    One shape covers three branches the router produces:
+
+    - **text / full tool run**: both ``user_message`` and
+      ``assistant_message`` are set, ``pending`` is ``None``.
+    - **location pending**: ``user_message`` is set, ``assistant_message``
+      is ``None``, and ``pending`` carries the ``AskPending`` handoff.
+
+    ``user_message`` and ``assistant_message`` are ORM-level
+    ``ChatMessage`` instances, so the field type is ``Any`` to avoid a
+    cross-layer import and preserve the service's DB coupling point.
+    """
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    user_message: Any = Field(default=None, description="Saved user-turn ChatMessage (or None)")
+    assistant_message: Any = Field(default=None, description="Saved assistant-turn ChatMessage (or None if pending)")
+    pending: AskPending | None = Field(default=None, description="Set when the turn is paused for a GPS callback")

@@ -4,18 +4,30 @@ This module provides business logic for chat message management operations
 including creation, AI response generation, and ownership verification.
 """
 
+from datetime import UTC, datetime
+import json
 import logging
 import time
+from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
 
+from app.dtos.tools import AskPending, AskResult, PendingTurn, RouteResult, ToolCall
 from app.models.messages import ChatMessage
 from app.repositories.chat_session_repository import ChatSessionRepository
 from app.repositories.message_repository import MessageRepository
 from app.services.rag import get_rag_pipeline
+from app.services.tools.pending import DEFAULT_TTL_SEC, PendingTurnStore
+from app.services.tools.rq_adapters import (
+    generate_chat_response_via_rq,
+    route_intent_via_rq,
+    run_tool_calls_via_rq,
+)
 
 logger = logging.getLogger(__name__)
+
+_HISTORY_LIMIT = 10
 
 
 def _preview(text: str, limit: int = 80) -> str:
@@ -24,12 +36,73 @@ def _preview(text: str, limit: int = 80) -> str:
     return collapsed if len(collapsed) <= limit else collapsed[:limit] + "..."
 
 
+def _chat_messages_to_history(messages: list[ChatMessage]) -> list[dict[str, str]]:
+    """Map stored ChatMessages (newest-first) to chronological LLM history."""
+    chronological = list(reversed(messages))
+    return [{"role": "user" if m.sender_type == "USER" else "assistant", "content": m.content} for m in chronological]
+
+
+def _tool_call_to_worker_dict(call: ToolCall, *, geolocation: dict[str, float] | None = None) -> dict[str, Any]:
+    """Render a ``ToolCall`` DTO into the pickle-safe dict the worker expects."""
+    payload: dict[str, Any] = {
+        "tool_call_id": call.tool_call_id,
+        "name": call.name,
+        "arguments": call.arguments,
+    }
+    if geolocation is not None:
+        payload["geolocation"] = geolocation
+    return payload
+
+
+def _tool_result_message(tool_call_id: str, result: dict[str, Any]) -> dict[str, Any]:
+    """Wrap one tool result as the ``role="tool"`` message the LLM expects."""
+    return {
+        "role": "tool",
+        "tool_call_id": tool_call_id,
+        "content": json.dumps(result, ensure_ascii=False),
+    }
+
+
 class MessageService:
     """Message business logic service for chat conversation management."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        pending_store: PendingTurnStore | None = None,
+        queue: Any = None,
+    ) -> None:
         self.repository = MessageRepository()
         self.session_repository = ChatSessionRepository()
+        self._pending_store = pending_store
+        self._queue = queue
+
+    def _get_queue(self) -> Any:
+        """Lazy-init the RQ ``"ai"`` queue shared with the RAG pipeline.
+
+        Kept as an instance method (not a singleton) so tests can inject
+        a stub queue via ``MessageService(queue=...)``.
+        """
+        if self._queue is None:
+            import redis
+            from rq import Queue
+
+            from app.core.config import config
+
+            redis_conn = redis.from_url(config.REDIS_URL)
+            self._queue = Queue("ai", connection=redis_conn)
+        return self._queue
+
+    def _get_pending_store(self) -> PendingTurnStore:
+        """Lazy-init the Redis-backed pending-turn store."""
+        if self._pending_store is None:
+            import redis.asyncio as aioredis
+
+            from app.core.config import config
+            from app.services.tools.pending import RedisPendingTurnStore
+
+            self._pending_store = RedisPendingTurnStore(redis=aioredis.from_url(config.REDIS_URL))
+        return self._pending_store
 
     async def _verify_session_ownership(self, session_id: UUID, account_id: UUID) -> None:
         """Verify chat session ownership.
@@ -295,6 +368,146 @@ class MessageService:
         """
         await self._verify_session_ownership(session_id, account_id)
         return await self.ask_and_reply(session_id, content)
+
+    async def ask_with_tools(
+        self,
+        *,
+        session_id: UUID,
+        account_id: UUID,
+        content: str,
+    ) -> AskResult:
+        """Route one user turn through the Router LLM and fan out.
+
+        Three branches mirror PLAN.md §8 Y-6:
+
+        - **text** — Router produced a natural-language reply without
+          invoking any tool. Fall back to the classic RAG pipeline so
+          medical questions keep working unchanged.
+        - **tool_calls, all eager** — every tool call can run now
+          (keyword-only). Execute in parallel, feed results back to the
+          2nd LLM, persist both turns.
+        - **tool_calls, any geo** — at least one call needs the user's
+          GPS. Run any eager calls immediately so they are not re-run
+          on callback, then snapshot the turn into the pending store
+          and hand the client an ``AskPending`` for the GPS round-trip.
+
+        Args:
+            session_id: Chat session UUID.
+            account_id: Caller account UUID (for ownership check).
+            content: User message content.
+
+        Returns:
+            ``AskResult`` — shape differs per branch; see DTO docstring.
+
+        Raises:
+            HTTPException: Session ownership violations and AI failures
+                bubble up unchanged from the RAG fallback path.
+        """
+        await self._verify_session_ownership(session_id, account_id)
+
+        recent = await self.repository.get_recent_by_session(session_id, limit=_HISTORY_LIMIT)
+        history = _chat_messages_to_history(recent)
+        route_messages = [*history, {"role": "user", "content": content}]
+
+        queue = self._get_queue()
+
+        route = await route_intent_via_rq(messages=route_messages, queue=queue)
+        logger.info("[Y-6] route kind=%s calls=%d", route.kind, len(route.tool_calls))
+
+        if route.kind == "text":
+            user_msg, assistant_msg = await self.ask_and_reply(session_id, content)
+            return AskResult(user_message=user_msg, assistant_message=assistant_msg, pending=None)
+
+        eager_calls = [tc for tc in route.tool_calls if not tc.needs_geolocation]
+        geo_calls = [tc for tc in route.tool_calls if tc.needs_geolocation]
+
+        eager_results: dict[str, Any] = {}
+        if eager_calls:
+            eager_payload = [_tool_call_to_worker_dict(tc) for tc in eager_calls]
+            eager_results = await run_tool_calls_via_rq(calls=eager_payload, queue=queue)
+
+        if geo_calls:
+            return await self._park_pending_turn(
+                session_id=session_id,
+                account_id=account_id,
+                content=content,
+                route=route,
+                eager_results=eager_results,
+            )
+
+        return await self._finalize_tool_turn(
+            session_id=session_id,
+            content=content,
+            history=history,
+            route=route,
+            tool_results=eager_results,
+        )
+
+    async def _park_pending_turn(
+        self,
+        *,
+        session_id: UUID,
+        account_id: UUID,
+        content: str,
+        route: RouteResult,
+        eager_results: dict[str, Any],
+    ) -> AskResult:
+        """Persist the user turn and hand out an ``AskPending`` handle."""
+        user_msg = await self.repository.create_user_message(session_id, content)
+
+        messages_snapshot = [
+            {"role": "user", "content": content},
+            route.assistant_message or {"role": "assistant", "content": None, "tool_calls": []},
+        ]
+        pending = PendingTurn(
+            turn_id="",
+            session_id=str(session_id),
+            account_id=str(account_id),
+            messages_snapshot=messages_snapshot,
+            tool_calls=route.tool_calls,
+            eager_results=eager_results,
+            created_at=datetime.now(UTC),
+        )
+        store = self._get_pending_store()
+        turn_id = await store.create(pending)
+        geo_count = len(route.tool_calls) - len(eager_results)
+        logger.info("[Y-6] pending turn=%s eager=%d geo=%d", turn_id, len(eager_results), geo_count)
+
+        return AskResult(
+            user_message=user_msg,
+            assistant_message=None,
+            pending=AskPending(turn_id=turn_id, ttl_sec=DEFAULT_TTL_SEC),
+        )
+
+    async def _finalize_tool_turn(
+        self,
+        *,
+        session_id: UUID,
+        content: str,
+        history: list[dict[str, str]],
+        route: RouteResult,
+        tool_results: dict[str, Any],
+    ) -> AskResult:
+        """Run the 2nd LLM with tool results and persist both turns."""
+        assistant_with_calls = route.assistant_message or {"role": "assistant", "content": None, "tool_calls": []}
+        tool_messages = [_tool_result_message(call_id, result) for call_id, result in tool_results.items()]
+
+        second_messages = [
+            *history,
+            {"role": "user", "content": content},
+            assistant_with_calls,
+            *tool_messages,
+        ]
+        completion = await generate_chat_response_via_rq(
+            messages=second_messages,
+            system_prompt=None,
+            queue=self._get_queue(),
+        )
+        answer = completion.get("answer", "")
+
+        user_msg = await self.repository.create_user_message(session_id, content)
+        assistant_msg = await self.repository.create_assistant_message(session_id, answer)
+        return AskResult(user_message=user_msg, assistant_message=assistant_msg, pending=None)
 
     async def delete_message(self, message_id: UUID) -> None:
         """Delete message (soft delete).

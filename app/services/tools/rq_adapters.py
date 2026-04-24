@@ -35,10 +35,12 @@ except ImportError:  # pragma: no cover — defensive; DTO always present in app
 
 ROUTE_INTENT_JOB_REF = "ai_worker.tasks.tool_tasks.route_intent_job"
 RUN_TOOL_CALLS_JOB_REF = "ai_worker.tasks.tool_tasks.run_tool_calls_job"
+GENERATE_CHAT_RESPONSE_JOB_REF = "ai_worker.tasks.rag_tasks.generate_chat_response_job"
 
 _DEFAULT_POLL_INTERVAL_SEC = 0.1
 _DEFAULT_ROUTE_TIMEOUT_SEC = 30.0
 _DEFAULT_RUN_TIMEOUT_SEC = 30.0
+_DEFAULT_GENERATE_TIMEOUT_SEC = 60.0  # LLM call; matches rq_llm.py
 
 
 class ToolTimeoutError(TimeoutError):
@@ -151,4 +153,41 @@ async def run_tool_calls_via_rq(
         return {}
 
     job = queue.enqueue(RUN_TOOL_CALLS_JOB_REF, calls)
+    return await _await_result(job, poll_interval=poll_interval, timeout=timeout)
+
+
+async def generate_chat_response_via_rq(
+    *,
+    messages: list[dict[str, Any]],
+    queue: Any,
+    system_prompt: str | None = None,
+    poll_interval: float = _DEFAULT_POLL_INTERVAL_SEC,
+    timeout: float = _DEFAULT_GENERATE_TIMEOUT_SEC,  # noqa: ASYNC109 — poll deadline; see _await_result
+) -> dict[str, Any]:
+    """Enqueue ``generate_chat_response_job`` and return the raw dict.
+
+    Used by the tool-calling path's 2nd LLM invocation: after tools have
+    executed, we hand the worker the assistant message + tool-role
+    results and let it produce a natural-language answer.
+
+    Args:
+        messages: Chronological message list for the LLM. Expected to
+            include the original user turn, the Router's assistant
+            message (with ``tool_calls``), and one ``role="tool"`` entry
+            per executed call keyed by ``tool_call_id``.
+        queue: ``rq.Queue`` instance or duck-typed stub.
+        system_prompt: Optional prompt prefix; passed through to the job.
+        poll_interval: Seconds between status polls.
+        timeout: Max wait in seconds.
+
+    Returns:
+        ``{"answer": str, "token_usage": dict | None}`` — kept as a raw
+        dict rather than a DTO so the service layer can embed it in
+        ``ChatMessage.metadata`` without an extra conversion.
+
+    Raises:
+        ToolTimeoutError: Polling deadline exceeded.
+        ToolJobError: Worker returned a failed status.
+    """
+    job = queue.enqueue(GENERATE_CHAT_RESPONSE_JOB_REF, messages, system_prompt)
     return await _await_result(job, poll_interval=poll_interval, timeout=timeout)
