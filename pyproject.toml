@@ -229,6 +229,12 @@ ignore = [
     "TD003",   # Missing issue link for TODO
     "FIX002",  # Line contains TODO
 
+    # Windows + Docker volume mount false positive: every file appears executable
+    # because the host (NTFS) does not carry POSIX executable bits, so the
+    # bind-mounted file inherits 0755 inside the Linux container. chmod is denied
+    # on the mount, so this rule cannot be cleanly satisfied — ignore globally.
+    "EXE002",
+
     # Eradicate (too many false positives on comments)
     "ERA001",  # Found commented-out code
 
