@@ -1,6 +1,6 @@
 """AI-Worker Router LLM provider 계약 테스트 (Y-5 Red).
 
-``ai_worker/providers/router.py`` 의 ``route_with_tools`` 는 OpenAI
+``ai_worker/domains/tool_calling/router_llm.py`` 의 ``route_with_tools`` 는 OpenAI
 ``chat.completions.create`` 를 ``tools=TOOL_SCHEMAS``,
 ``parallel_tool_calls=True`` 로 호출하고, 응답 ``choices[0].message`` 를
 dict 로 정규화해 반환한다. 그 dict 는 ``parse_router_response`` 가 그대로
@@ -19,12 +19,12 @@ import pytest
 
 class TestRouteWithToolsSignature:
     def test_is_async(self) -> None:
-        from ai_worker.providers import router as router_provider
+        from ai_worker.domains.tool_calling import router_llm as router_provider
 
         assert inspect.iscoroutinefunction(router_provider.route_with_tools)
 
     def test_signature_has_messages(self) -> None:
-        from ai_worker.providers import router as router_provider
+        from ai_worker.domains.tool_calling import router_llm as router_provider
 
         sig = inspect.signature(router_provider.route_with_tools)
         assert "messages" in sig.parameters
@@ -33,7 +33,7 @@ class TestRouteWithToolsSignature:
 class TestRouteWithToolsCallContract:
     @pytest.mark.asyncio
     async def test_uses_parallel_tool_calls_true_and_tool_schemas(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ai_worker.providers import router as router_provider
+        from ai_worker.domains.tool_calling import router_llm as router_provider
         from app.services.tools.schemas import TOOL_SCHEMAS
 
         captured: dict[str, Any] = {}
@@ -60,7 +60,7 @@ class TestRouteWithToolsCallContract:
         fake_client = MagicMock()
         fake_client.chat.completions.create = fake_create
 
-        monkeypatch.setattr(router_provider, "_get_openai_client", lambda: fake_client)
+        monkeypatch.setattr(router_provider, "get_openai_client", lambda: fake_client)
 
         msgs = [{"role": "user", "content": "강남역 약국 알려줘"}]
         result = await router_provider.route_with_tools(messages=msgs)
@@ -79,7 +79,7 @@ class TestRouteWithToolsCallContract:
 
     @pytest.mark.asyncio
     async def test_text_response_yields_dict_with_content(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ai_worker.providers import router as router_provider
+        from ai_worker.domains.tool_calling import router_llm as router_provider
 
         msg = MagicMock()
         msg.content = "안녕하세요"
@@ -90,7 +90,7 @@ class TestRouteWithToolsCallContract:
         fake_client = MagicMock()
         fake_client.chat.completions.create = AsyncMock(return_value=completion)
 
-        monkeypatch.setattr(router_provider, "_get_openai_client", lambda: fake_client)
+        monkeypatch.setattr(router_provider, "get_openai_client", lambda: fake_client)
 
         result = await router_provider.route_with_tools(messages=[{"role": "user", "content": "안녕"}])
 

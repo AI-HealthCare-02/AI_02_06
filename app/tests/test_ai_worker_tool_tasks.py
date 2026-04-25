@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from ai_worker.tasks import tool_tasks
+from ai_worker.domains.tool_calling import jobs as tool_tasks
 from app.dtos.tools import KakaoPlace
 
 # ── 시그니처 ────────────────────────────────────────────────────
@@ -62,7 +62,7 @@ class TestRouteIntentJobDelegatesToProvider:
             captured["messages"] = messages
             return expected
 
-        from ai_worker.providers import router as router_provider
+        from ai_worker.domains.tool_calling import router_llm as router_provider
 
         monkeypatch.setattr(router_provider, "route_with_tools", fake_route)
 
@@ -102,7 +102,7 @@ class TestRunToolCallsJobKeyword:
         async def fake_loc(**_: Any) -> list[KakaoPlace]:
             raise AssertionError("location 함수가 호출되면 안 됨")
 
-        from ai_worker.tasks import tool_tasks as tt
+        from ai_worker.domains.tool_calling import jobs as tt
 
         monkeypatch.setattr(tt, "search_hospitals_by_keyword", fake_kw)
         monkeypatch.setattr(tt, "search_hospitals_by_location", fake_loc)
@@ -132,7 +132,7 @@ class TestRunToolCallsJobLocation:
             captured.update(lat=lat, lng=lng, radius_m=radius_m, category=category)
             return [_place("미진약국")]
 
-        from ai_worker.tasks import tool_tasks as tt
+        from ai_worker.domains.tool_calling import jobs as tt
 
         monkeypatch.setattr(tt, "search_hospitals_by_location", fake_loc)
 
@@ -163,7 +163,7 @@ class TestRunToolCallsJobLocation:
             captured["category"] = category
             return []
 
-        from ai_worker.tasks import tool_tasks as tt
+        from ai_worker.domains.tool_calling import jobs as tt
 
         monkeypatch.setattr(tt, "search_hospitals_by_location", fake_loc)
 
@@ -196,7 +196,7 @@ class TestRunToolCallsJobParallel:
             await asyncio.sleep(0.1)
             return [_place("약국B", "2")]
 
-        from ai_worker.tasks import tool_tasks as tt
+        from ai_worker.domains.tool_calling import jobs as tt
 
         monkeypatch.setattr(tt, "search_hospitals_by_keyword", slow_kw)
         monkeypatch.setattr(tt, "search_hospitals_by_location", slow_loc)
@@ -235,7 +235,7 @@ class TestRunToolCallsJobErrorIsolation:
         async def fail_loc(**_: Any) -> list[KakaoPlace]:
             raise RuntimeError("kakao 5xx")
 
-        from ai_worker.tasks import tool_tasks as tt
+        from ai_worker.domains.tool_calling import jobs as tt
 
         monkeypatch.setattr(tt, "search_hospitals_by_keyword", ok_kw)
         monkeypatch.setattr(tt, "search_hospitals_by_location", fail_loc)
@@ -260,7 +260,7 @@ class TestRunToolCallsJobErrorIsolation:
 class TestRunToolCallsJobUnknownFunction:
     @pytest.mark.asyncio
     async def test_unknown_tool_returns_error(self) -> None:
-        from ai_worker.tasks import tool_tasks as tt
+        from ai_worker.domains.tool_calling import jobs as tt
 
         result = await tt.run_tool_calls_job(
             calls=[{"tool_call_id": "c1", "name": "do_magic", "arguments": {}}],
@@ -273,7 +273,7 @@ class TestRunToolCallsJobUnknownFunction:
 class TestRunToolCallsJobMissingGeolocation:
     @pytest.mark.asyncio
     async def test_location_call_without_geolocation_returns_error(self) -> None:
-        from ai_worker.tasks import tool_tasks as tt
+        from ai_worker.domains.tool_calling import jobs as tt
 
         result = await tt.run_tool_calls_job(
             calls=[

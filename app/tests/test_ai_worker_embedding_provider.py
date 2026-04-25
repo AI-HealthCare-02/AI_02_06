@@ -1,6 +1,6 @@
 """AI-Worker 임베딩 프로바이더 계약 테스트.
 
-`ai_worker/providers/embedding.py`의 핵심 함수들을 검증한다:
+`ai_worker/domains/rag/embedding_provider.py`의 핵심 함수들을 검증한다:
 
 - preprocess: Korean pharmaceutical term normalization (순수 함수)
 - normalize:  L2-정규화 (순수 함수)
@@ -17,8 +17,8 @@ import math
 
 import pytest
 
-from ai_worker.providers import embedding as emb
-from ai_worker.tasks import rag_tasks
+from ai_worker.domains.rag import embedding_provider as emb
+from ai_worker.domains.rag import jobs as rag_tasks
 
 # ── 순수 함수 (빠름) ────────────────────────────────────────────────
 

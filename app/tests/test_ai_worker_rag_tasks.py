@@ -15,7 +15,7 @@ Contract lock:
 
 import inspect
 
-from ai_worker.tasks import rag_tasks
+from ai_worker.domains.rag import jobs as rag_tasks
 
 
 class TestEmbedTextJobSignature:
