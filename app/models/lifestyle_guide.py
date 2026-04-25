@@ -49,9 +49,7 @@ class LifestyleGuide(models.Model):
 
     # Snapshot of active medications at the time of generation
     # Used for medication change detection (future scope)
-    medication_snapshot = fields.JSONField(
-        description="Active medication list at guide generation time"
-    )
+    medication_snapshot = fields.JSONField(description="Active medication list at guide generation time")
 
     created_at = fields.DatetimeField(auto_now_add=True)
 
