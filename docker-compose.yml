@@ -40,6 +40,10 @@ services:
   redis:
     image: redis:alpine
     container_name: redis
+    # 60 초마다 서버측 TCP keepalive PING — Docker bridge / WSL2 NAT 의 idle TCP
+    # 세션 강제 종료(Idle Connection Drop) 1차 예방. 클라이언트(redis-py) 의
+    # ``socket_keepalive`` + ``health_check_interval`` 와 양방향 보호.
+    command: ["redis-server", "--tcp-keepalive", "60"]
     networks:
       - backend
     ports:
