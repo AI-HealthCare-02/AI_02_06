@@ -66,19 +66,12 @@ _REQUEST_TIMEOUT = 30.0
 # Used to prepend "[{medicine_name}] {label}\n" before embedding so the vector
 # captures both drug identity and section category alongside the body text.
 _SECTION_LABELS: dict[MedicineChunkSection, str] = {
-    MedicineChunkSection.EFFICACY: "효능",
-    MedicineChunkSection.USAGE: "용법",
-    MedicineChunkSection.STORAGE: "저장",
-    MedicineChunkSection.INGREDIENT: "주성분",
-    MedicineChunkSection.PRECAUTION_WARNING: "주의(경고)",
-    MedicineChunkSection.PRECAUTION_CONTRAINDICATION: "주의(금기)",
-    MedicineChunkSection.PRECAUTION_CAUTION: "주의(신중투여)",
+    MedicineChunkSection.OVERVIEW: "개요",
+    MedicineChunkSection.INTAKE_GUIDE: "복용 가이드",
+    MedicineChunkSection.DRUG_INTERACTION: "약물 상호작용",
+    MedicineChunkSection.LIFESTYLE_INTERACTION: "생활 상호작용",
     MedicineChunkSection.ADVERSE_REACTION: "이상반응",
-    MedicineChunkSection.PRECAUTION_GENERAL: "주의(일반)",
-    MedicineChunkSection.PRECAUTION_PREGNANCY: "주의(임부/수유)",
-    MedicineChunkSection.PRECAUTION_PEDIATRIC: "주의(소아)",
-    MedicineChunkSection.PRECAUTION_ELDERLY: "주의(고령자)",
-    MedicineChunkSection.PRECAUTION_OVERDOSE: "주의(과량투여)",
+    MedicineChunkSection.SPECIAL_EVENT: "특수 상황",
 }
 
 
@@ -103,15 +96,14 @@ def iter_section_chunks(
 ) -> list[tuple[MedicineChunkSection, int, str]]:
     """Build all (section, chunk_index, content) triples for one medicine.
 
-    Chunks are produced from five sources:
-      1. EE_DOC_DATA (평문화) -> single EFFICACY chunk
-      2. UD_DOC_DATA (평문화) -> single USAGE chunk
-      3. NB_DOC_DATA ARTICLE 단위 분해 -> 각 ARTICLE title을 키워드
-         분류기에 통과시켜 9개 PRECAUTION_* / ADVERSE_REACTION /
-         INTERACTION 섹션 중 하나에 할당. 같은 섹션에 ARTICLE이 여러
-         개면 chunk_index가 0부터 증가.
-      4. storage_method 컬럼 -> STORAGE chunk
-      5. material_name (없으면 main_item_ingr) 컬럼 -> INGREDIENT chunk
+    v2 6섹션 매핑 (사용자 질문 패턴 기준):
+      1. EE_DOC_DATA (효능)  → OVERVIEW
+      2. UD_DOC_DATA (용법)  → INTAKE_GUIDE
+      3. NB_DOC_DATA ARTICLE → classify_article_section 으로 6섹션 중 하나 분류
+         (DRUG_INTERACTION / LIFESTYLE_INTERACTION / ADVERSE_REACTION /
+          SPECIAL_EVENT / INTAKE_GUIDE 기본값)
+      4. storage_method      → INTAKE_GUIDE (보관도 복용 가이드 영역)
+      5. material_name 등    → OVERVIEW (성분 = 약 개요)
 
     Empty bodies are skipped. Header ``[{medicine_name}] {label}`` is
     prepended before the body so the embedding captures drug identity
@@ -132,8 +124,8 @@ def iter_section_chunks(
         result.append((section, idx, content))
 
     # DOC XML 원본 기반
-    add(MedicineChunkSection.EFFICACY, flatten_doc_plaintext(medicine.ee_doc_data))
-    add(MedicineChunkSection.USAGE, flatten_doc_plaintext(medicine.ud_doc_data))
+    add(MedicineChunkSection.OVERVIEW, flatten_doc_plaintext(medicine.ee_doc_data))
+    add(MedicineChunkSection.INTAKE_GUIDE, flatten_doc_plaintext(medicine.ud_doc_data))
 
     for article in parse_doc_articles(medicine.nb_doc_data):
         section = classify_article_section(article.title)
@@ -141,9 +133,9 @@ def iter_section_chunks(
         add(section, combined)
 
     # 단일 평문 컬럼 기반
-    add(MedicineChunkSection.STORAGE, medicine.storage_method or "")
+    add(MedicineChunkSection.INTAKE_GUIDE, medicine.storage_method or "")
     add(
-        MedicineChunkSection.INGREDIENT,
+        MedicineChunkSection.OVERVIEW,
         medicine.material_name or medicine.main_item_ingr or "",
     )
 

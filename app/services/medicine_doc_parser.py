@@ -38,41 +38,46 @@ class Article:
 
 # ── 섹션 키워드 매핑 (순서 중요: 더 구체적인 것 먼저) ─────────────────
 # Each entry is (keyword, section). The first matching keyword wins.
+# v2 6섹션 enum 으로 재매핑됨 — 사용자 질문 패턴 기준 묶음.
 _SECTION_KEYWORDS: tuple[tuple[str, MedicineChunkSection], ...] = (
-    # 최우선: 경고
-    ("경고", MedicineChunkSection.PRECAUTION_WARNING),
-    # 금기 — 투여/복용/사용 금지 표현 포괄
-    ("투여하지 말", MedicineChunkSection.PRECAUTION_CONTRAINDICATION),
-    ("복용하지 말", MedicineChunkSection.PRECAUTION_CONTRAINDICATION),
-    ("사용하지 말", MedicineChunkSection.PRECAUTION_CONTRAINDICATION),
-    ("금기", MedicineChunkSection.PRECAUTION_CONTRAINDICATION),
-    # 신중 투여 / 상호작용 / 의사·약사 상담
-    ("신중히 투여", MedicineChunkSection.PRECAUTION_CAUTION),
-    ("신중 투여", MedicineChunkSection.PRECAUTION_CAUTION),
-    ("신중히 복용", MedicineChunkSection.PRECAUTION_CAUTION),
-    ("상호작용", MedicineChunkSection.PRECAUTION_CAUTION),
-    ("병용", MedicineChunkSection.PRECAUTION_CAUTION),
-    ("상의", MedicineChunkSection.PRECAUTION_CAUTION),
-    # 이상반응 / 부작용
+    # 생활 상호작용 (술/카페인/운전 — 사용자 일상 질문)
+    ("음주", MedicineChunkSection.LIFESTYLE_INTERACTION),
+    ("술", MedicineChunkSection.LIFESTYLE_INTERACTION),
+    ("카페인", MedicineChunkSection.LIFESTYLE_INTERACTION),
+    ("커피", MedicineChunkSection.LIFESTYLE_INTERACTION),
+    ("운전", MedicineChunkSection.LIFESTYLE_INTERACTION),
+    ("기계조작", MedicineChunkSection.LIFESTYLE_INTERACTION),
+    # 약물 상호작용 — 금기·병용·신중투여 일괄
+    ("투여하지 말", MedicineChunkSection.DRUG_INTERACTION),
+    ("복용하지 말", MedicineChunkSection.DRUG_INTERACTION),
+    ("사용하지 말", MedicineChunkSection.DRUG_INTERACTION),
+    ("금기", MedicineChunkSection.DRUG_INTERACTION),
+    ("신중히 투여", MedicineChunkSection.DRUG_INTERACTION),
+    ("신중 투여", MedicineChunkSection.DRUG_INTERACTION),
+    ("신중히 복용", MedicineChunkSection.DRUG_INTERACTION),
+    ("상호작용", MedicineChunkSection.DRUG_INTERACTION),
+    ("병용", MedicineChunkSection.DRUG_INTERACTION),
+    ("상의", MedicineChunkSection.DRUG_INTERACTION),
+    # 이상반응·과량 — 부작용 영역
     ("이상반응", MedicineChunkSection.ADVERSE_REACTION),
     ("부작용", MedicineChunkSection.ADVERSE_REACTION),
-    # 임부 / 수유부 / 가임여성
-    ("임부", MedicineChunkSection.PRECAUTION_PREGNANCY),
-    ("임산부", MedicineChunkSection.PRECAUTION_PREGNANCY),
-    ("수유", MedicineChunkSection.PRECAUTION_PREGNANCY),
-    ("가임", MedicineChunkSection.PRECAUTION_PREGNANCY),
-    # 소아 / 신생아 / 영유아
-    ("소아", MedicineChunkSection.PRECAUTION_PEDIATRIC),
-    ("어린이", MedicineChunkSection.PRECAUTION_PEDIATRIC),
-    ("영아", MedicineChunkSection.PRECAUTION_PEDIATRIC),
-    ("유아", MedicineChunkSection.PRECAUTION_PEDIATRIC),
-    ("신생아", MedicineChunkSection.PRECAUTION_PEDIATRIC),
-    # 고령자
-    ("고령자", MedicineChunkSection.PRECAUTION_ELDERLY),
-    ("노인", MedicineChunkSection.PRECAUTION_ELDERLY),
-    # 과량투여
-    ("과량", MedicineChunkSection.PRECAUTION_OVERDOSE),
-    ("과용", MedicineChunkSection.PRECAUTION_OVERDOSE),
+    ("과량", MedicineChunkSection.ADVERSE_REACTION),
+    ("과용", MedicineChunkSection.ADVERSE_REACTION),
+    # 특수 상황 — 경고·임부·소아·고령·시술
+    ("경고", MedicineChunkSection.SPECIAL_EVENT),
+    ("임부", MedicineChunkSection.SPECIAL_EVENT),
+    ("임산부", MedicineChunkSection.SPECIAL_EVENT),
+    ("수유", MedicineChunkSection.SPECIAL_EVENT),
+    ("가임", MedicineChunkSection.SPECIAL_EVENT),
+    ("소아", MedicineChunkSection.SPECIAL_EVENT),
+    ("어린이", MedicineChunkSection.SPECIAL_EVENT),
+    ("영아", MedicineChunkSection.SPECIAL_EVENT),
+    ("유아", MedicineChunkSection.SPECIAL_EVENT),
+    ("신생아", MedicineChunkSection.SPECIAL_EVENT),
+    ("고령자", MedicineChunkSection.SPECIAL_EVENT),
+    ("노인", MedicineChunkSection.SPECIAL_EVENT),
+    ("수술", MedicineChunkSection.SPECIAL_EVENT),
+    ("시술", MedicineChunkSection.SPECIAL_EVENT),
 )
 
 
@@ -136,20 +141,21 @@ def classify_article_section(title: str) -> MedicineChunkSection:
     """Classify an ARTICLE title into a MedicineChunkSection.
 
     Uses ordered keyword matching over ``_SECTION_KEYWORDS``. Titles
-    with no matching keyword fall back to ``PRECAUTION_GENERAL``.
+    with no matching keyword fall back to ``INTAKE_GUIDE`` (일반 복용
+    가이드).
 
     Args:
         title: ARTICLE title string (Korean).
 
     Returns:
         Corresponding MedicineChunkSection. Unknown/empty titles
-        return PRECAUTION_GENERAL.
+        return INTAKE_GUIDE.
     """
     if not title:
-        return MedicineChunkSection.PRECAUTION_GENERAL
+        return MedicineChunkSection.INTAKE_GUIDE
 
     for keyword, section in _SECTION_KEYWORDS:
         if keyword in title:
             return section
 
-    return MedicineChunkSection.PRECAUTION_GENERAL
+    return MedicineChunkSection.INTAKE_GUIDE

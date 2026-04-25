@@ -163,22 +163,19 @@ class TestFlattenDocPlaintext:
 
 
 class TestClassifyArticleSection:
-    """ARTICLE title → MedicineChunkSection 키워드 매칭."""
+    """ARTICLE title → MedicineChunkSection (v2 6섹션) 키워드 매칭."""
 
-    def test_warning(self) -> None:
-        assert classify_article_section("1. 경고") == MedicineChunkSection.PRECAUTION_WARNING
+    def test_warning_maps_to_special_event(self) -> None:
+        assert classify_article_section("1. 경고") == MedicineChunkSection.SPECIAL_EVENT
 
-    def test_contraindication_by_phrase(self) -> None:
-        assert (
-            classify_article_section("2. 다음 환자에는 투여하지 말 것")
-            == MedicineChunkSection.PRECAUTION_CONTRAINDICATION
-        )
+    def test_contraindication_maps_to_drug_interaction(self) -> None:
+        assert classify_article_section("2. 다음 환자에는 투여하지 말 것") == MedicineChunkSection.DRUG_INTERACTION
 
-    def test_contraindication_by_keyword(self) -> None:
-        assert classify_article_section("병용금기") == MedicineChunkSection.PRECAUTION_CONTRAINDICATION
+    def test_contraindication_keyword_maps_to_drug_interaction(self) -> None:
+        assert classify_article_section("병용금기") == MedicineChunkSection.DRUG_INTERACTION
 
-    def test_caution(self) -> None:
-        assert classify_article_section("3. 다음 환자에는 신중히 투여할 것") == MedicineChunkSection.PRECAUTION_CAUTION
+    def test_caution_maps_to_drug_interaction(self) -> None:
+        assert classify_article_section("3. 다음 환자에는 신중히 투여할 것") == MedicineChunkSection.DRUG_INTERACTION
 
     def test_adverse_reaction_by_formal(self) -> None:
         assert classify_article_section("4. 이상반응") == MedicineChunkSection.ADVERSE_REACTION
@@ -186,23 +183,29 @@ class TestClassifyArticleSection:
     def test_adverse_reaction_by_common(self) -> None:
         assert classify_article_section("부작용") == MedicineChunkSection.ADVERSE_REACTION
 
-    def test_pregnancy(self) -> None:
-        assert classify_article_section("5. 임부 및 수유부에 대한 투여") == MedicineChunkSection.PRECAUTION_PREGNANCY
+    def test_pregnancy_maps_to_special_event(self) -> None:
+        assert classify_article_section("5. 임부 및 수유부에 대한 투여") == MedicineChunkSection.SPECIAL_EVENT
 
-    def test_pediatric(self) -> None:
-        assert classify_article_section("6. 소아에 대한 투여") == MedicineChunkSection.PRECAUTION_PEDIATRIC
+    def test_pediatric_maps_to_special_event(self) -> None:
+        assert classify_article_section("6. 소아에 대한 투여") == MedicineChunkSection.SPECIAL_EVENT
 
-    def test_elderly(self) -> None:
-        assert classify_article_section("7. 고령자에 대한 투여") == MedicineChunkSection.PRECAUTION_ELDERLY
+    def test_elderly_maps_to_special_event(self) -> None:
+        assert classify_article_section("7. 고령자에 대한 투여") == MedicineChunkSection.SPECIAL_EVENT
 
-    def test_overdose(self) -> None:
-        assert classify_article_section("8. 과량투여시의 처치") == MedicineChunkSection.PRECAUTION_OVERDOSE
+    def test_overdose_maps_to_adverse_reaction(self) -> None:
+        assert classify_article_section("8. 과량투여시의 처치") == MedicineChunkSection.ADVERSE_REACTION
 
-    def test_unknown_falls_back_to_general(self) -> None:
-        assert classify_article_section("일반적 주의") == MedicineChunkSection.PRECAUTION_GENERAL
+    def test_alcohol_maps_to_lifestyle_interaction(self) -> None:
+        assert classify_article_section("음주 시 주의") == MedicineChunkSection.LIFESTYLE_INTERACTION
 
-    def test_empty_title_falls_back_to_general(self) -> None:
-        assert classify_article_section("") == MedicineChunkSection.PRECAUTION_GENERAL
+    def test_driving_maps_to_lifestyle_interaction(self) -> None:
+        assert classify_article_section("운전·기계조작") == MedicineChunkSection.LIFESTYLE_INTERACTION
+
+    def test_unknown_falls_back_to_intake_guide(self) -> None:
+        assert classify_article_section("일반적 주의") == MedicineChunkSection.INTAKE_GUIDE
+
+    def test_empty_title_falls_back_to_intake_guide(self) -> None:
+        assert classify_article_section("") == MedicineChunkSection.INTAKE_GUIDE
 
 
 class TestArticleDataclass:
