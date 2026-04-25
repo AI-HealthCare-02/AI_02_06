@@ -18,9 +18,9 @@ from fastapi import BackgroundTasks, UploadFile
 import httpx
 from openai import AsyncOpenAI, OpenAIError
 from pydantic import BaseModel
-import redis.asyncio as redis
 
 from app.core.config import config
+from app.core.redis_client import make_async_redis
 from app.dtos.ocr import ConfirmMedicationRequest, ExtractedMedicine, OcrExtractResponse
 from app.models.medication import Medication
 
@@ -76,9 +76,9 @@ class OCRService:
     """
 
     def __init__(self) -> None:
-        # Redis 연결 (환경변수로 URL 관리 권장)
+        # Redis 연결 — keepalive + retry 옵션은 make_async_redis 일괄 적용
         redis_url = os.environ.get("REDIS_URL", "redis://redis:6379")
-        self.redis = redis.from_url(redis_url, decode_responses=True)
+        self.redis = make_async_redis(redis_url, decode_responses=True)
 
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:

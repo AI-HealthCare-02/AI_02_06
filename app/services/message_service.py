@@ -94,24 +94,23 @@ class MessageService:
         a stub queue via ``MessageService(queue=...)``.
         """
         if self._queue is None:
-            import redis
             from rq import Queue
 
             from app.core.config import config
+            from app.core.redis_client import make_sync_redis
 
-            redis_conn = redis.from_url(config.REDIS_URL)
+            redis_conn = make_sync_redis(config.REDIS_URL)
             self._queue = Queue("ai", connection=redis_conn)
         return self._queue
 
     def _get_pending_store(self) -> PendingTurnStore:
         """Lazy-init the Redis-backed pending-turn store."""
         if self._pending_store is None:
-            import redis.asyncio as aioredis
-
             from app.core.config import config
+            from app.core.redis_client import make_async_redis
             from app.services.tools.pending import RedisPendingTurnStore
 
-            self._pending_store = RedisPendingTurnStore(redis=aioredis.from_url(config.REDIS_URL))
+            self._pending_store = RedisPendingTurnStore(redis=make_async_redis(config.REDIS_URL))
         return self._pending_store
 
     async def _verify_session_ownership(self, session_id: UUID, account_id: UUID) -> None:

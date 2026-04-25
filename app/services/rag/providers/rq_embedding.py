@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover
 EMBEDDING_DIMENSIONS = 768
 _DEFAULT_POLL_INTERVAL_SEC = 0.1
 _DEFAULT_TIMEOUT_SEC = 30.0
-_EMBED_JOB_REF = "ai_worker.tasks.rag_tasks.embed_text_job"
+_EMBED_JOB_REF = "ai_worker.domains.rag.jobs.embed_text_job"
 
 
 class EmbeddingTimeoutError(TimeoutError):

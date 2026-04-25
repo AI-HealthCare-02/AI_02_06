@@ -26,10 +26,10 @@ async def get_rag_pipeline() -> "RAGPipeline":  # noqa: F821  # forward ref reso
     global _pipeline
 
     if _pipeline is None:
-        import redis
         from rq import Queue
 
         from app.core.config import config
+        from app.core.redis_client import make_sync_redis
         from app.repositories.profile_repository import ProfileRepository
         from app.services.rag.intent.classifier import IntentClassifier
         from app.services.rag.pipeline import RAGPipeline
@@ -38,7 +38,7 @@ async def get_rag_pipeline() -> "RAGPipeline":  # noqa: F821  # forward ref reso
         from app.services.rag.retrievers.hybrid import HybridRetriever
         from app.services.rag.tools import ToolRouter
 
-        redis_conn = redis.from_url(config.REDIS_URL)
+        redis_conn = make_sync_redis(config.REDIS_URL)
         ai_queue = Queue("ai", connection=redis_conn)
 
         embedding_provider = RQEmbeddingProvider(queue=ai_queue)

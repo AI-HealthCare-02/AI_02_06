@@ -34,9 +34,9 @@ from app.dtos.rag import (
 
 _DEFAULT_POLL_INTERVAL_SEC = 0.1
 _DEFAULT_TIMEOUT_SEC = 60.0  # LLM은 임베딩보다 느리므로 더 긴 상한.
-_REWRITE_JOB_REF = "ai_worker.tasks.rag_tasks.rewrite_query_job"
-_GENERATE_JOB_REF = "ai_worker.tasks.rag_tasks.generate_chat_response_job"
-_COMPACT_JOB_REF = "ai_worker.tasks.compact_tasks.compact_messages_job"
+_REWRITE_JOB_REF = "ai_worker.domains.rag.jobs.rewrite_query_job"
+_GENERATE_JOB_REF = "ai_worker.domains.rag.jobs.generate_chat_response_job"
+_COMPACT_JOB_REF = "ai_worker.domains.session_compact.jobs.compact_messages_job"
 
 
 class LLMTimeoutError(TimeoutError):

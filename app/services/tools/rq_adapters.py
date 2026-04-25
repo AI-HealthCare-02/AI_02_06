@@ -36,9 +36,9 @@ try:
 except ImportError:  # pragma: no cover — defensive; DTO always present in app runtime
     RouteResult = Any  # type: ignore[misc, assignment]
 
-ROUTE_INTENT_JOB_REF = "ai_worker.tasks.tool_tasks.route_intent_job"
-RUN_TOOL_CALLS_JOB_REF = "ai_worker.tasks.tool_tasks.run_tool_calls_job"
-GENERATE_CHAT_RESPONSE_JOB_REF = "ai_worker.tasks.rag_tasks.generate_chat_response_job"
+ROUTE_INTENT_JOB_REF = "ai_worker.domains.tool_calling.jobs.route_intent_job"
+RUN_TOOL_CALLS_JOB_REF = "ai_worker.domains.tool_calling.jobs.run_tool_calls_job"
+GENERATE_CHAT_RESPONSE_JOB_REF = "ai_worker.domains.rag.jobs.generate_chat_response_job"
 
 _DEFAULT_POLL_INTERVAL_SEC = 0.1
 _DEFAULT_ROUTE_TIMEOUT_SEC = 30.0
