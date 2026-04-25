@@ -4,8 +4,6 @@ This module provides business logic for medication management operations
 including creation, updates, and ownership verification.
 """
 
-from datetime import UTC, datetime, timedelta
-import hashlib
 import json
 import os
 from uuid import UUID
@@ -15,7 +13,6 @@ from openai import AsyncOpenAI, OpenAIError
 
 from app.dtos.drug_info import DrugInfoResponse, DrugInteraction
 from app.dtos.medication import MedicationCreate, MedicationUpdate, PrescriptionDateItem
-from app.models.llm_response_cache import LLMResponseCache
 from app.models.medication import Medication
 from app.repositories.medication_repository import MedicationRepository
 from app.repositories.profile_repository import ProfileRepository
@@ -330,7 +327,8 @@ class MedicationService:
     async def get_drug_info_with_owner_check(self, medication_id: UUID, account_id: UUID) -> DrugInfoResponse:
         """Get LLM-based drug information with ownership verification.
 
-        Returns warnings, side effects, and interactions from LLM, with DB cache to reduce costs.
+        Returns warnings, side effects, and interactions from LLM. (캐싱 미적용 — 추후
+        Redis 등 외부 캐시 도입 시 별도 추가)
 
         Args:
             medication_id: Medication UUID.
@@ -343,30 +341,17 @@ class MedicationService:
         return await self._get_drug_info(medication.medicine_name)
 
     async def _get_drug_info(self, medicine_name: str) -> DrugInfoResponse:
-        """Fetch drug information by name from LLM, with 30-day DB cache.
+        """Fetch drug information by name from LLM (no caching).
 
         Args:
             medicine_name: Name of the medication.
 
         Returns:
-            DrugInfoResponse: Drug information from cache or LLM.
+            DrugInfoResponse: LLM-derived drug information.
 
         Raises:
             HTTPException: If OPENAI_API_KEY is missing or LLM call fails.
         """
-        prompt_key = f"drug_info_v1:{medicine_name}"
-        prompt_hash = hashlib.sha256(prompt_key.encode()).hexdigest()
-
-        # 캐시 조회
-        cached = await LLMResponseCache.filter(
-            prompt_hash=prompt_hash,
-            expires_at__gte=datetime.now(tz=UTC),
-        ).first()
-        if cached:
-            await LLMResponseCache.filter(id=cached.id).update(hit_count=cached.hit_count + 1)
-            return DrugInfoResponse.model_validate(cached.response)
-
-        # LLM 호출
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise HTTPException(status_code=500, detail="OPENAI_API_KEY가 설정되지 않았습니다.")
@@ -401,7 +386,7 @@ class MedicationService:
             )
             raw = response.choices[0].message.content or "{}"
             data = json.loads(raw)
-            drug_info = DrugInfoResponse(
+            return DrugInfoResponse(
                 medicine_name=data.get("medicine_name", medicine_name),
                 warnings=data.get("warnings", []),
                 side_effects=data.get("side_effects", []),
@@ -413,14 +398,3 @@ class MedicationService:
             )
         except (OpenAIError, json.JSONDecodeError) as e:
             raise HTTPException(status_code=502, detail=f"약품 정보를 가져오는 데 실패했습니다: {e}") from e
-
-        # 30일 캐시 저장
-        expires_at = datetime.now(tz=UTC) + timedelta(days=30)
-        await LLMResponseCache.create(
-            prompt_hash=prompt_hash,
-            prompt_text=prompt_key,
-            response=drug_info.model_dump(),
-            expires_at=expires_at,
-        )
-
-        return drug_info
