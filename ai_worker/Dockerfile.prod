@@ -1,3 +1,4 @@
+# AI Worker — 프로덕션 이미지. multi-stage.
 FROM python:3.13-slim AS builder
 
 WORKDIR /app
@@ -10,28 +11,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --group ai --no-dev --frozen
+# app 그룹 포함 — ai_worker.utils.rag → app.dtos.rag → Tortoise 의존 체인
+RUN uv sync --group ai --group app --no-dev --frozen
 
-# Stage 2: Final
+# Final stage
 FROM python:3.13-slim
 
 WORKDIR /app
 
-# Non-root 사용자 생성
 RUN groupadd --gid 1000 appgroup && \
     useradd --uid 1000 --gid appgroup --shell /bin/bash --create-home appuser
 
-# builder에서 설치된 패키지만 복사
 COPY --from=builder /app/.venv /app/.venv
 COPY . .
 
-# PATH 설정
 ENV PATH="/app/.venv/bin:$PATH"
+
+# ko-sroberta 모델 pre-download
+ENV HF_HOME=/app/.cache/huggingface
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('jhgan/ko-sroberta-multitask')"
 
 RUN chown -R appuser:appgroup /app
 USER appuser
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD pgrep -f "python" || exit 1
+# compose.prod.yml 이 Redis 기반 healthcheck 로 override. 여기선 기본만 정의.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
+    CMD python -c "import redis; r=redis.from_url('redis://redis:6379/0'); r.ping()" || exit 1
 
 CMD ["python", "-m", "ai_worker.main"]

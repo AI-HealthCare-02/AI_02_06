@@ -4,6 +4,7 @@ This module contains the main entry point for the AI worker service.
 Includes Redis connection retry logic and RQ version compatibility handling.
 """
 
+import asyncio
 from pathlib import Path
 import signal
 import sys
@@ -18,6 +19,27 @@ from ai_worker.core.config import config
 from ai_worker.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def warmup_embedding_model() -> None:
+    """Pre-load ko-sroberta into memory and run a dummy encode.
+
+    첫 사용자 요청이 cold-start 비용(~30초)을 뒤집어쓰지 않도록 RQ 워커
+    루프가 돌기 전에 모델을 메모리에 올리고 dummy encode 한 번을 돌린다.
+    ``_ensure_model`` 내부에서 warmup encode 까지 수행한다.
+    """
+    try:
+        from ai_worker.providers.embedding import _ensure_model
+
+        logger.info("Pre-warming embedding model...")
+        t0 = time.perf_counter()
+        asyncio.run(_ensure_model())
+        elapsed = time.perf_counter() - t0
+        logger.info("Embedding model warmed up in %.2fs", elapsed)
+    except Exception:
+        # 비정상이면 로그만 남기고 워커 기동은 계속한다. 첫 요청이 느려질 뿐이다.
+        logger.exception("Embedding warmup failed (non-fatal)")
+
 
 # Graceful shutdown flag
 shutdown_requested = False
@@ -80,10 +102,13 @@ def main() -> None:
 
     logger.info("Redis connected successfully")
 
-    # Import RQ components (inside function for version compatibility)
-    from rq import Queue, Worker
+    # Warm up the embedding model before accepting jobs so the first
+    # user-facing request does not pay the cold-start cost.
+    warmup_embedding_model()
 
-    # Create Redis connection object
+    # Import RQ components (inside function for version compatibility)
+    from rq import Queue, SimpleWorker
+
     redis_conn = redis.from_url(config.REDIS_URL)
 
     # Setup queues and worker
@@ -93,8 +118,20 @@ def main() -> None:
     logger.info("AI Worker ready - waiting for tasks...")
 
     try:
-        # Enable scheduler functionality with with_scheduler=True
-        worker = Worker(queues, connection=redis_conn)
+        # SimpleWorker = no fork, single-process job execution.
+        # 일반 Worker 는 매 job 마다 child 프로세스를 fork 하는데, PyTorch 의
+        # 내부 스레드와 fork() 조합은 알려진 deadlock 을 유발해 embed_text_job
+        # 이 30 초 안에 끝나지 않는 timeout 을 일으킨다. SimpleWorker 로
+        # 부모 프로세스의 warmed 모델 + AsyncOpenAI 싱글톤 + ThreadPool 을
+        # 그대로 재사용하면서 결정적으로 실행되게 한다.
+        #
+        # default_worker_ttl=180: BLPOP 타임아웃 = ttl - 15 = 165s.
+        # 기본 420 이면 BLPOP 이 ~7분 블로킹하는데 Docker bridge / WSL2 NAT 가
+        # 그 이상 idle TCP 세션을 유지해주지 않아 "Redis connection timeout,
+        # quitting..." 로 워커 자체 종료. TTL 을 180s 로 낮추면 매 ~165s 마다
+        # BLPOP 이 자연 반환 → 재호출로 연결을 실질적으로 idle 상태에 두지 않음.
+        # (TCP keepalive / health_check_interval 은 WSL2 drop 을 막지 못해 제거)
+        worker = SimpleWorker(queues, connection=redis_conn, default_worker_ttl=180)
         worker.work(with_scheduler=True)
     except Exception as e:
         logger.error("Worker crashed: %s", e)

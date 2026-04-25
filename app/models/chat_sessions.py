@@ -10,14 +10,10 @@ from tortoise import fields, models
 class ChatSession(models.Model):
     """Chat session model for storing conversation sessions.
 
-    This model stores chat session information linking accounts, profiles,
-    and optional medications to conversation threads.
-
     Attributes:
         id: Primary key UUID.
         account: Foreign key to Account model.
         profile: Foreign key to Profile model.
-        medication: Optional foreign key to Medication model.
         title: Optional session title.
         created_at: Session creation timestamp.
         updated_at: Last update timestamp.
@@ -27,7 +23,6 @@ class ChatSession(models.Model):
     id = fields.UUIDField(pk=True)
     account = fields.ForeignKeyField("models.Account", related_name="chat_sessions")
     profile = fields.ForeignKeyField("models.Profile", related_name="chat_sessions")
-    medication = fields.ForeignKeyField("models.Medication", related_name="chat_sessions", null=True)
     title = fields.CharField(max_length=64, null=True)
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)
@@ -38,5 +33,4 @@ class ChatSession(models.Model):
         indexes = [
             ("account_id", "created_at"),
             ("profile_id",),
-            ("medication_id",),
         ]

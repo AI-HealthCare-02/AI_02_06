@@ -89,6 +89,7 @@ class ChallengeRepository:
             target_days: Target completion days.
             started_date: Challenge start date.
             description: Optional challenge description.
+            difficulty: Optional difficulty level.
 
         Returns:
             Challenge: Created challenge.

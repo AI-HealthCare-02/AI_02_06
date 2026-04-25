@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { LogOut, UserX } from 'lucide-react'
 import PropTypes from 'prop-types'
 import api from '@/lib/api'
+import { markLoggedOut } from '@/lib/authStatus'
 import toast from 'react-hot-toast'
 
 
@@ -16,9 +17,11 @@ export function useLogout() {
     try {
       await api.post('/api/v1/auth/logout')
       toast.success('로그아웃 되었습니다.')
-      router.push('/')
     } catch (err) {
       toast.error('로그아웃 중 오류가 발생했습니다.')
+    } finally {
+      // 사용자가 직접 수행한 로그아웃 — 별도 안내 불필요, 조용히 NONE 으로 복귀
+      markLoggedOut()
       router.push('/')
     }
   }
@@ -35,6 +38,7 @@ export function useDeleteAccount() {
     try {
       await api.delete('/api/v1/auth/account')
       toast.success('회원 탈퇴가 완료되었습니다.')
+      markLoggedOut()
       router.push('/')
     } catch (err) {
       toast.error('회원 탈퇴 중 오류가 발생했습니다.')

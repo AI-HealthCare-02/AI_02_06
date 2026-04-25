@@ -121,6 +121,7 @@ async def confirm_and_save_medication(
 
     Args:
         request: Confirmation request with finalized medication data.
+        background_tasks: Background task runner for async guide generation.
         ocr_service: OCR service instance.
         current_account: Current authenticated account.
 

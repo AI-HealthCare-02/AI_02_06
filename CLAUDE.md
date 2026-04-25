@@ -51,6 +51,24 @@ All feature implementations and modifications MUST strictly adhere to the follow
     * **Objective**: Complete the actual feature to pass the tests.
     * **Principles**: Write the **minimum code necessary** to pass the tests. Once passed (Green), perform additional tidying if necessary. **Implementing features without test codes is strictly prohibited.**
 
+#### Ruff 의무 검사 규칙 (CRITICAL)
+
+**모든 Python 파일 작성/수정 후 반드시 아래 검사를 통과해야 커밋 가능:**
+
+```bash
+# 자동 수정 먼저 적용
+uv run ruff check --fix app/ ai_worker/
+uv run ruff format app/ ai_worker/
+
+# 검사 통과 확인 (에러 0건이어야 함)
+uv run ruff check app/ ai_worker/
+uv run ruff format --check app/ ai_worker/
+```
+
+- AI 에이전트는 코드 수정 후 반드시 Ruff 검사를 실행해야 함
+- Ruff 오류가 있으면 수정 완료 전까지 다음 단계로 진행 불가
+- 커밋 추천 시 반드시 Ruff 검사 결과(PASS/FAIL)를 포함해야 함
+
 ### 2.3 Step-by-Step User Confirmation
 The agent MUST obtain developer (user) confirmation at the end of each step before proceeding:
 1. **After Tidy**: "구조 정돈이 완료되었습니다. 테스트 작성을 진행할까요?" (Tidy phase complete. Shall we proceed to write tests?)

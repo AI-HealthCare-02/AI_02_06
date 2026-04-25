@@ -2,6 +2,7 @@
 import { useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import api, { parseApiError, showError } from '@/lib/api'
+import { markLoggedIn } from '@/lib/authStatus'
 
 // 메인 페이지 스켈레톤 UI
 function MainSkeleton() {
@@ -100,6 +101,9 @@ function KakaoCallbackContent() {
         const response = await api.get('/api/v1/auth/kakao/callback', {
           params: { code, state },
         })
+
+        // 로그인 성공 — 이후 재접속자 판별용 힌트 기록
+        markLoggedIn()
 
         // 4. 신규 사용자거나 dev 사용자면 설문조사, 기존 사용자면 메인으로 리다이렉트
         const { show_survey } = response.data
