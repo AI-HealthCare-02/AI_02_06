@@ -5,8 +5,26 @@ operations including medicine extraction, temporary storage, and confirmation.
 """
 
 from datetime import date
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
+
+
+class OcrDraftStatus(StrEnum):
+    """OCR 처리 상태 (프론트 폴링 응답용).
+
+    PENDING: ai-worker 가 처리 중. 프론트는 폴링을 계속한다.
+    READY:   처리 완료. ``medicines`` 필드에 결과가 채워져 있다.
+    NO_TEXT: OCR 결과에 텍스트가 없음 (블러·빈 이미지 등). 사용자에게 재촬영 안내.
+    NO_CANDIDATES: 텍스트는 있지만 약품명 후보 추출 실패. 사용자에게 다른 이미지 안내.
+    FAILED:  처리 중 예외 발생. 일반 에러 안내.
+    """
+
+    PENDING = "pending"
+    READY = "ready"
+    NO_TEXT = "no_text"
+    NO_CANDIDATES = "no_candidates"
+    FAILED = "failed"
 
 
 class ExtractedMedicine(BaseModel):
@@ -34,7 +52,21 @@ class OcrExtractResponse(BaseModel):
     """
 
     draft_id: str = Field(description="Unique ID for prescription info temporarily stored in Redis")
-    medicines: list[ExtractedMedicine]
+    medicines: list[ExtractedMedicine] = Field(default_factory=list)
+
+
+class OcrDraftPollResponse(BaseModel):
+    """폴링 응답 — 상태 + (READY 일 때만) medicines.
+
+    프론트는 ``status`` 를 보고 흐름을 분기한다:
+    - PENDING: 대기, 다시 폴링
+    - READY: medicines 표시 후 사용자 검수 화면으로
+    - NO_TEXT / NO_CANDIDATES / FAILED: 안내 메시지 + 재업로드 유도
+    """
+
+    draft_id: str
+    status: OcrDraftStatus
+    medicines: list[ExtractedMedicine] = Field(default_factory=list)
 
 
 class ConfirmMedicationRequest(BaseModel):
