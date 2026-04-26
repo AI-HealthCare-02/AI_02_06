@@ -131,8 +131,17 @@ async def _run_location(call: dict[str, Any]) -> dict[str, Any]:
 
 
 def _is_valid_geolocation(geolocation: dict[str, Any] | None) -> bool:
-    """Geolocation dict 가 lat/lng 를 모두 가졌는지 확인."""
-    return bool(geolocation) and "lat" in geolocation and "lng" in geolocation
+    """Geolocation dict 가 lat/lng 를 실제 숫자값으로 가졌는지 검증.
+
+    이전에는 키 존재만 확인해 ``{"lat": None, "lng": None}`` 같은 케이스가
+    통과 -> Kakao API 호출 단계에서 ValueError. 호출 전 차단으로 의미 있는
+    에러 메시지 제공.
+    """
+    if not geolocation:
+        return False
+    lat = geolocation.get("lat")
+    lng = geolocation.get("lng")
+    return isinstance(lat, (int, float)) and isinstance(lng, (int, float))
 
 
 def _places_to_dict_list(places: list[KakaoPlace]) -> list[dict[str, Any]]:

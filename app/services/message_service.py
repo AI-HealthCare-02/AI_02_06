@@ -46,6 +46,22 @@ def _preview(text: str, limit: int = 80) -> str:
     return collapsed if len(collapsed) <= limit else collapsed[:limit] + "..."
 
 
+def _is_valid_coords(lat: float | None, lng: float | None) -> bool:
+    """``lat``/``lng`` 가 유한한 숫자값인지 검증.
+
+    None / NaN / Infinity / 비숫자 모두 거부 — 잘못된 좌표가 ai-worker 까지
+    내려가 Kakao API 호출에서 ValueError 로 터지는 것을 callback 진입 단계에서
+    명확한 400 으로 끊는다.
+    """
+    import math
+
+    if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
+        return False
+    if isinstance(lat, bool) or isinstance(lng, bool):  # bool 은 int 의 서브클래스
+        return False
+    return math.isfinite(lat) and math.isfinite(lng)
+
+
 def _chat_messages_to_history(messages: list[ChatMessage]) -> list[dict[str, str]]:
     """Map stored ChatMessages (newest-first) to chronological LLM history."""
     chronological = list(reversed(messages))
@@ -552,10 +568,10 @@ class MessageService:
         Raises:
             HTTPException: 400 / 403 / 410 per above.
         """
-        if status == _STATUS_OK and (lat is None or lng is None):
+        if status == _STATUS_OK and not _is_valid_coords(lat, lng):
             raise HTTPException(
                 status_code=_HTTP_400_BAD_REQUEST,
-                detail="lat and lng are required when status='ok'",
+                detail="lat and lng must be finite numbers when status='ok'",
             )
 
         store = self._get_pending_store()
