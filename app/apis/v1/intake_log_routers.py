@@ -83,7 +83,7 @@ async def list_intake_logs(
         target_date: Optional target date to filter by.
 
     Returns:
-        List[IntakeLogResponse]: List of intake logs.
+        list[IntakeLogResponse]: List of intake logs.
     """
     if profile_id and target_date:
         logs = await service.get_logs_by_profile_and_date_with_owner_check(profile_id, target_date, current_account.id)

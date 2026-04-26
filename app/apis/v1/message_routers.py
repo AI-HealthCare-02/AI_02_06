@@ -195,7 +195,7 @@ async def list_messages(
         limit: Optional limit on number of messages to retrieve.
 
     Returns:
-        List[MessageResponse]: List of messages in chronological order.
+        list[MessageResponse]: List of messages in chronological order.
     """
     messages = await service.get_messages_by_session_with_owner_check(session_id, current_account.id, limit)
     return [MessageResponse.model_validate(m) for m in messages]

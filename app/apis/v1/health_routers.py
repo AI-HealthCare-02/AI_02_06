@@ -14,7 +14,7 @@ async def health_check() -> dict[str, str]:
     """Basic health check endpoint - liveness probe.
 
     Returns:
-        Dict[str, str]: Health status response.
+        dict[str, str]: Health status response.
     """
     return {"status": "healthy"}
 
@@ -26,6 +26,6 @@ async def readiness_check() -> dict[str, str]:
     TODO: Add checks for DB connection, Redis connection, etc.
 
     Returns:
-        Dict[str, str]: Readiness status response.
+        dict[str, str]: Readiness status response.
     """
     return {"status": "ready"}
