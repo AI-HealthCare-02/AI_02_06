@@ -135,3 +135,19 @@ class OcrDraftRepository:
             consumed_at__isnull=True,
         ).update(consumed_at=datetime.now(tz=config.TIMEZONE))
         return affected > 0
+
+    async def delete_stale(self, max_age_hours: int = 24) -> int:
+        """24h 이상 경과한 draft row 를 hard delete (cron 전용).
+
+        consume 여부와 무관하게 ``created_at`` 기준 cutoff 를 넘긴 row 를 모두
+        제거한다 — list_active 가 이미 동일 cutoff 로 검색 대상에서 빼고 있고,
+        consumed 된 row 의 감사 보존도 24h 면 충분하다고 합의됨.
+
+        Args:
+            max_age_hours: cutoff 기준 시간 (기본 24h).
+
+        Returns:
+            삭제된 row 수.
+        """
+        cutoff = datetime.now(tz=config.TIMEZONE) - timedelta(hours=max_age_hours)
+        return await OcrDraft.filter(created_at__lt=cutoff).delete()
