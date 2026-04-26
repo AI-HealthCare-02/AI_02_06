@@ -4,8 +4,9 @@
 
 services:
   # PostgreSQL + pgvector — RAG 벡터 저장소
+  # 공식 pgvector image (PG15 + pgvector 0.7+). ankane/pgvector 는 archived 라 마이그레이션함.
   postgres:
-    image: ankane/pgvector:v0.5.1
+    image: pgvector/pgvector:pg15
     container_name: postgres
     environment:
       POSTGRES_USER: ${DB_USER:-downforce_admin}
