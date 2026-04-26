@@ -4,10 +4,12 @@
 # 호스트 포트 매핑 없음 — Docker 내부 전용.
 
 services:
-  # PostgreSQL — 내부 전용, 인터넷 차단.
+  # PostgreSQL + pgvector — 내부 전용, 인터넷 차단.
   # 127.0.0.1 바인딩으로 EC2 외부에선 접근 불가, 호스트 SSH 터널(DBeaver)만 허용.
+  # 공식 pgvector image (PG15 + pgvector 0.7+) — RAG 임베딩 검색의 vector 컬럼 필수.
+  # 마이그레이션 #8 의 ``CREATE EXTENSION vector`` 가 통과하려면 base image 에 extension 이 포함돼야 함.
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     container_name: postgres
     environment:
       POSTGRES_USER: ${DB_USER:-downforce_admin}
