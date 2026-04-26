@@ -1,7 +1,8 @@
 """Lifestyle guide model module.
 
 This module defines the LifestyleGuide model for storing GPT-generated
-medication-lifestyle interaction guides per profile.
+medication-lifestyle interaction guides per profile, plus the lifecycle
+status enum used by the async (RQ) generation pipeline.
 """
 
 from enum import StrEnum
@@ -22,6 +23,21 @@ class GuideCategory(StrEnum):
     INTERACTION = "interaction"
 
 
+class LifestyleGuideStatusValue(StrEnum):
+    """Async generation lifecycle status for ``lifestyle_guides`` rows.
+
+    - ``pending``: FastAPI inserted the row + RQ enqueued; ai-worker not done yet.
+    - ``ready``: ai-worker filled ``content`` + bulk-created challenges.
+    - ``no_active_meds``: No active medications at generation time (terminal).
+    - ``failed``: LLM call/parse error (terminal).
+    """
+
+    PENDING = "pending"
+    READY = "ready"
+    NO_ACTIVE_MEDS = "no_active_meds"
+    FAILED = "failed"
+
+
 class LifestyleGuide(models.Model):
     """Lifestyle guide model for GPT-generated medication lifestyle advice.
 
@@ -29,12 +45,17 @@ class LifestyleGuide(models.Model):
     active medications. Each guide is a snapshot tied to a specific set of
     medications at generation time.
 
+    The row is INSERTed by FastAPI in ``pending`` state with empty content,
+    then ai-worker UPDATEs it to a terminal state once the LLM call finishes.
+
     Attributes:
         id: Primary key UUID.
         profile: Foreign key to Profile model.
-        content: Full GPT-generated guide as JSON (5-category structure).
+        status: Async generation lifecycle status.
+        content: Full GPT-generated guide as JSON (empty until status='ready').
         medication_snapshot: JSON snapshot of active medications at generation time.
-        created_at: Guide generation timestamp.
+        created_at: Row insertion timestamp (= enqueue time).
+        processed_at: ai-worker terminal-status set time.
     """
 
     id = fields.UUIDField(primary_key=True)
@@ -44,7 +65,13 @@ class LifestyleGuide(models.Model):
         description="Guide owner profile",
     )
 
-    # Full GPT response stored as JSON — 5-category structure
+    status = fields.CharField(
+        max_length=16,
+        default=LifestyleGuideStatusValue.PENDING.value,
+        description="Async generation status (pending/ready/no_active_meds/failed)",
+    )
+
+    # Full GPT response stored as JSON — 5-category structure (empty until ready)
     content = fields.JSONField(description="GPT-generated guide content (5 categories)")
 
     # Snapshot of active medications at the time of generation
@@ -52,6 +79,7 @@ class LifestyleGuide(models.Model):
     medication_snapshot = fields.JSONField(description="Active medication list at guide generation time")
 
     created_at = fields.DatetimeField(auto_now_add=True)
+    processed_at = fields.DatetimeField(null=True, description="Terminal-status set time")
 
     class Meta:
         table = "lifestyle_guides"
