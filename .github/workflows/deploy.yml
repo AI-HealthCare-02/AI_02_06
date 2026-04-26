@@ -75,8 +75,15 @@ jobs:
             git reset --hard origin/main
             echo "Commit: $(git log -1 --oneline)"
 
-            echo "=== [2/5] Stop containers ==="
+            echo "=== [2/6] Stop containers ==="
             docker compose -f docker-compose.prod.yml down || true
+
+            echo "=== [2.5/6] Prune build cache + dangling images (디스크 풀 재발 방지) ==="
+            # 이번 통합으로 ai-worker / fastapi 가 torch + sentence-transformers 등 무거운 의존성을
+            # 갖게 되어 layer 누적이 빠름. EC2 root 29GB 한도 안에서 돌아가려면 매 deploy 직전에
+            # 캐시·dangling image 를 비워야 함. running 컨테이너 / named volume 은 -a 가 보호.
+            docker builder prune -af || true
+            docker image prune -af || true
 
             echo "=== [3/6] Build and start ==="
             docker compose -f docker-compose.prod.yml up -d --build
