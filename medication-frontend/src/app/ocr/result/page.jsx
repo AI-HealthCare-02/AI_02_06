@@ -47,26 +47,70 @@ function OcrResultContent() {
       return
     }
 
-    // 백엔드에서 draft_id로 임시 저장된 데이터 로드
-    const fetchDraftData = async () => {
-      try {
-        // API 인스턴스로 조회
-        const response = await api.get(`/api/v1/ocr/draft/${draftId}`)
-        const medicines = response.data.medicines
-        setMeds(medicines)
-        // 첫 번째 약품에서 처방일 초기값 설정 (처방전 전체 공통)
-        const firstDate = medicines[0]?.dispensed_date || ''
-        setPrescriptionDate(firstDate)
-      } catch (err) {
-        // 데이터가 만료(10분 경과)되었거나 서버 에러 시 튕겨냅니다.
-        alert('데이터가 만료되었거나 불러올 수 없습니다. 다시 촬영해주세요.')
-        router.push('/ocr')
-      } finally {
-        setIsLoading(false)
+    // ai-worker가 비동기로 처리하므로 status === 'ready' 가 될 때까지 폴링.
+    // 폴링 동안 isLoading=true 유지 -> 사용자에게 ResultSkeleton 노출.
+    const POLL_INTERVAL_MS = 1000
+    const MAX_POLLS = 30 // 30초 timeout
+    const TERMINAL_ERROR_MESSAGES = {
+      no_text: '이미지에서 텍스트를 찾지 못했어요.',
+      no_candidates: '약품 정보를 인식하지 못했어요.',
+      failed: '처리 중 오류가 발생했어요.',
+    }
+
+    let pollCount = 0
+    let intervalId = null
+    let cancelled = false
+
+    const stopPolling = () => {
+      if (intervalId) {
+        clearInterval(intervalId)
+        intervalId = null
       }
     }
 
-    fetchDraftData()
+    const fetchDraftData = async () => {
+      if (cancelled) return
+      try {
+        const response = await api.get(`/api/v1/ocr/draft/${draftId}`)
+        const { status, medicines } = response.data
+
+        if (status === 'ready') {
+          stopPolling()
+          setMeds(medicines || [])
+          const firstDate = medicines?.[0]?.dispensed_date || ''
+          setPrescriptionDate(firstDate)
+          setIsLoading(false)
+          return
+        }
+
+        if (status in TERMINAL_ERROR_MESSAGES) {
+          stopPolling()
+          alert(`${TERMINAL_ERROR_MESSAGES[status]} 다시 촬영해주세요.`)
+          router.push('/ocr')
+          return
+        }
+
+        // status === 'pending' — 폴링 계속
+        pollCount += 1
+        if (pollCount >= MAX_POLLS) {
+          stopPolling()
+          alert('처리 시간이 초과되었어요. 다시 시도해주세요.')
+          router.push('/ocr')
+        }
+      } catch (err) {
+        stopPolling()
+        alert('데이터가 만료되었거나 불러올 수 없습니다. 다시 촬영해주세요.')
+        router.push('/ocr')
+      }
+    }
+
+    fetchDraftData() // 즉시 1회
+    intervalId = setInterval(fetchDraftData, POLL_INTERVAL_MS)
+
+    return () => {
+      cancelled = true
+      stopPolling()
+    }
   }, [draftId, router])
 
   // 사용자가 텍스트를 수정할 때 상태 업데이트하는 함수
@@ -80,6 +124,19 @@ function OcrResultContent() {
   const handleDelete = (index) => {
     const updatedMeds = meds.filter((_, i) => i !== index)
     setMeds(updatedMeds)
+  }
+
+  // 다시 촬영 — 현재 draft 를 백엔드에서 폐기 처리한 뒤 업로드 페이지로 이동.
+  // 폐기 실패해도 사용자 흐름은 막지 않음 (UX 우선, 24h 후 자동 정리됨).
+  const handleRetake = async () => {
+    if (draftId) {
+      try {
+        await api.delete(`/api/v1/ocr/draft/${draftId}`)
+      } catch {
+        // ignore — 사용자 흐름 차단하지 않음
+      }
+    }
+    router.push('/ocr')
   }
 
   // 최종 확인 버튼 (Phase 3으로 연결될 부분)
@@ -115,9 +172,15 @@ function OcrResultContent() {
 
   return (
     <main className="min-h-screen bg-gray-50 pb-24">
-      {/* 상단 헤더 영역 */}
+      {/* 상단 헤더 영역 — ← 는 메인으로, "다시 촬영" 은 /ocr 로 분리 */}
       <div className="bg-white border-b border-gray-200 px-10 py-4 flex items-center gap-4">
-        <button onClick={() => router.push('/ocr')} className="text-gray-400 hover:text-black cursor-pointer text-xl">←</button>
+        <button
+          onClick={() => router.push('/main')}
+          className="text-gray-400 hover:text-black cursor-pointer text-xl"
+          aria-label="메인으로 이동"
+        >
+          ←
+        </button>
         <div>
           <h1 className="font-bold text-gray-900">처방전 확인 및 수정</h1>
           <p className="text-xs text-gray-400">오탈자가 있다면 직접 수정해주세요</p>
@@ -214,7 +277,7 @@ function OcrResultContent() {
         {/* 하단 액션 버튼 */}
         <div className="flex gap-3 pb-10">
           <button
-            onClick={() => router.push('/ocr')}
+            onClick={handleRetake}
             className="flex-1 bg-white border border-gray-200 py-4 rounded-xl text-gray-500 text-sm font-bold cursor-pointer hover:bg-gray-50 transition-colors"
           >
             다시 촬영

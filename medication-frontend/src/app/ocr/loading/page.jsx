@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CheckCircle } from 'lucide-react'
+import { CheckCircle, X } from 'lucide-react'
 import api from '@/lib/api'
 
 const STEPS = [
@@ -10,6 +10,14 @@ const STEPS = [
   '복용 방법을 정리하고 있어요...',
   '거의 다 됐어요!',
 ]
+
+const POLL_INTERVAL_MS = 1000
+const MAX_POLLS = 30
+const TERMINAL_ERROR_MESSAGES = {
+  no_text: '이미지에서 텍스트를 찾지 못했어요.',
+  no_candidates: '약품 정보를 인식하지 못했어요.',
+  failed: '처리 중 오류가 발생했어요.',
+}
 
 function MedCardSkeleton({ delay = 0 }) {
   return (
@@ -106,9 +114,57 @@ export default function OcrLoadingPage() {
   const [done, setDone] = useState(false)
 
   useEffect(() => {
-    const ticker = setInterval(() => {
+    let cancelled = false
+    let stepTicker = null
+    let pollTicker = null
+
+    const stopAll = () => {
+      if (stepTicker) clearInterval(stepTicker)
+      if (pollTicker) clearInterval(pollTicker)
+      stepTicker = null
+      pollTicker = null
+    }
+
+    stepTicker = setInterval(() => {
       setStep((prev) => (prev < STEPS.length - 1 ? prev + 1 : prev))
     }, 1500)
+
+    // ai-worker 가 처리 끝낼 때까지 폴링 -> ready 면 SuccessOverlay -> result push.
+    // terminal status / timeout 시 사용자에게 안내 후 /ocr 로 복귀.
+    const startPolling = (draftId) => {
+      let pollCount = 0
+      const tick = async () => {
+        if (cancelled) return
+        try {
+          const resp = await api.get(`/api/v1/ocr/draft/${draftId}`)
+          const { status } = resp.data
+          if (status === 'ready') {
+            stopAll()
+            setDone(true)
+            setTimeout(() => router.push(`/ocr/result?draft_id=${draftId}`), 1200)
+            return
+          }
+          if (status in TERMINAL_ERROR_MESSAGES) {
+            stopAll()
+            alert(`${TERMINAL_ERROR_MESSAGES[status]} 다시 촬영해주세요.`)
+            router.push('/ocr')
+            return
+          }
+          pollCount += 1
+          if (pollCount >= MAX_POLLS) {
+            stopAll()
+            alert('처리 시간이 초과되었어요. 처방전 카드에서 다시 확인해주세요.')
+            router.push('/main')
+          }
+        } catch (err) {
+          stopAll()
+          const msg = err.parsed?.message || err.response?.data?.detail || '분석 중 오류가 발생했습니다.'
+          router.push(`/ocr?error=${encodeURIComponent(typeof msg === 'string' ? msg : JSON.stringify(msg))}`)
+        }
+      }
+      tick() // 즉시 1회
+      pollTicker = setInterval(tick, POLL_INTERVAL_MS)
+    }
 
     const run = async () => {
       try {
@@ -137,21 +193,37 @@ export default function OcrLoadingPage() {
         sessionStorage.removeItem('ocrFileName')
         sessionStorage.removeItem('ocrFileType')
 
-        clearInterval(ticker)
-        setDone(true)
-
-        const draftId = response.data.draft_id
-        setTimeout(() => router.push(`/ocr/result?draft_id=${draftId}`), 1200)
+        if (cancelled) return
+        startPolling(response.data.draft_id)
       } catch (err) {
+        stopAll()
         const msg = err.parsed?.message || err.response?.data?.detail || '분석 중 오류가 발생했습니다.'
         router.push(`/ocr?error=${encodeURIComponent(typeof msg === 'string' ? msg : JSON.stringify(msg))}`)
       }
     }
 
     run()
-    return () => clearInterval(ticker)
+    return () => {
+      cancelled = true
+      stopAll()
+    }
   }, [router])
 
+  // 우측상단 닫기 X — 사용자가 main 으로 빠져나갈 수 있도록.
+  // 처리 자체는 ai-worker 가 백그라운드로 계속 수행 -> main 의 활성 draft 카드로 회수 가능.
+  const handleClose = () => router.push('/main')
+
   if (done) return <SuccessOverlay />
-  return <PrescriptionSkeleton step={step} />
+  return (
+    <>
+      <button
+        onClick={handleClose}
+        className="fixed top-4 right-4 z-30 w-10 h-10 bg-white border border-gray-200 rounded-full flex items-center justify-center shadow-sm hover:bg-gray-50 cursor-pointer"
+        aria-label="닫고 메인으로 이동"
+      >
+        <X size={18} className="text-gray-600" />
+      </button>
+      <PrescriptionSkeleton step={step} />
+    </>
+  )
 }
