@@ -154,6 +154,29 @@ function MainPageContent() {
     initPage()
   }, [selectedProfileId])
 
+  // ── 활성 draft 재동기화 ───────────────────────────────────────────────
+  // 흐름: 1) result 페이지가 sessionStorage 에 남긴 consumed marker 즉시 반영
+  //       2) window focus 시 백엔드 재조회 (App Router page cache 우회 안전망)
+  useEffect(() => {
+    const consumedId = typeof window !== 'undefined' && sessionStorage.getItem('ocr_consumed_draft_id')
+    if (consumedId) {
+      setActiveDrafts((prev) => prev.filter((d) => d.draft_id !== consumedId))
+      sessionStorage.removeItem('ocr_consumed_draft_id')
+    }
+
+    if (!selectedProfileId) return
+    const refetchActiveDrafts = async () => {
+      try {
+        const res = await api.get('/api/v1/ocr/drafts/active')
+        setActiveDrafts(res.data?.drafts || [])
+      } catch {
+        // ignore — 사용자 흐름 차단하지 않음
+      }
+    }
+    window.addEventListener('focus', refetchActiveDrafts)
+    return () => window.removeEventListener('focus', refetchActiveDrafts)
+  }, [selectedProfileId])
+
   // 처리 중이거나 확인 대기 중인 draft 가 있으면 그쪽으로 이동, 없으면 업로드 페이지로.
   // 업로드 버튼 + 빈 약 카드의 등록 버튼 모두 동일 분기를 공유한다.
   const goToOcrFlow = useCallback(() => {

@@ -14,6 +14,7 @@ ai-worker 의 ``process_ocr_task`` 가 비동기로 처리하며, 결과는 DB
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
 
 from app.dependencies.security import get_current_account
 from app.dtos.ocr import (
@@ -25,6 +26,11 @@ from app.dtos.ocr import (
 from app.models.accounts import Account
 from app.models.profiles import Profile, RelationType
 from app.services.ocr_service import OCRService
+
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "X-Accel-Buffering": "no",  # nginx 가 SSE chunk 를 buffer 하지 않도록
+}
 
 router = APIRouter(
     prefix="/ocr",
@@ -152,6 +158,31 @@ async def get_draft_medication(
     if response is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found.")
     return response
+
+
+@router.get(
+    "/draft/{draft_id}/stream",
+    summary="OCR 처리 결과 SSE 스트림 (long-poll, status 변화만 push)",
+)
+async def stream_draft_medication(
+    draft_id: str,
+    ocr_service: Annotated[OCRService, Depends(get_ocr_service)],
+    profile: Annotated[Profile, Depends(get_self_profile)],
+) -> StreamingResponse:
+    """SSE 로 status 변화를 push 한다.
+
+    클라이언트는 ``EventSource`` 또는 ``fetch().body.getReader()`` 로 수신한다.
+    이벤트 종류:
+
+    - ``update`` : status 가 변할 때마다 (첫 호출은 즉시 1회). data = OcrDraftPollResponse JSON.
+    - ``timeout``: 단일 연결 max_seconds 초과 시. 클라이언트가 재연결하도록 유도.
+    - ``error`` : draft 가 사라졌을 때 (만료 등).
+    """
+    return StreamingResponse(
+        ocr_service.stream_draft_states(draft_id, profile.id),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
 
 
 @router.delete(

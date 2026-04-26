@@ -5,6 +5,29 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Trash2 } from 'lucide-react'
 import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
+import { streamSSE } from '@/lib/sseClient'
+
+const TERMINAL_ERROR_MESSAGES = {
+  no_text: '이미지에서 텍스트를 찾지 못했어요.',
+  no_candidates: '약품 정보를 인식하지 못했어요.',
+  failed: '처리 중 오류가 발생했어요.',
+}
+
+/**
+ * SSE 연결을 ready/terminal 까지 자동 재연결하며 await for-of 로 소비.
+ * timeout event 시 새 연결 — 무한 재시도 (cancel 또는 ready 까지).
+ */
+async function* watchDraftStatus(draftId, signal) {
+  while (true) {
+    let timedOut = false
+    for await (const ev of streamSSE(`/api/v1/ocr/draft/${draftId}/stream`, { signal })) {
+      if (ev.event === 'update') yield ev.data
+      else if (ev.event === 'timeout') { timedOut = true; break }
+      else if (ev.event === 'error') throw new Error(ev.data?.detail || 'sse error')
+    }
+    if (!timedOut) return
+  }
+}
 
 // 로딩 스켈레톤 UI
 function ResultSkeleton() {
@@ -47,70 +70,37 @@ function OcrResultContent() {
       return
     }
 
-    // ai-worker가 비동기로 처리하므로 status === 'ready' 가 될 때까지 폴링.
-    // 폴링 동안 isLoading=true 유지 -> 사용자에게 ResultSkeleton 노출.
-    const POLL_INTERVAL_MS = 1000
-    const MAX_POLLS = 30 // 30초 timeout
-    const TERMINAL_ERROR_MESSAGES = {
-      no_text: '이미지에서 텍스트를 찾지 못했어요.',
-      no_candidates: '약품 정보를 인식하지 못했어요.',
-      failed: '처리 중 오류가 발생했어요.',
-    }
+    // SSE 로 ai-worker 진행 상태를 수신. status='ready' 까지 isLoading=true 유지
+    // -> 사용자에게 ResultSkeleton 노출. terminal status 시 안내 + /ocr 복귀.
+    // (단발 GET 폐기 — 이미 ready 인 draft 도 SSE 가 첫 yield 즉시 보내므로 비용 동일)
+    const abortController = new AbortController()
 
-    let pollCount = 0
-    let intervalId = null
-    let cancelled = false
-
-    const stopPolling = () => {
-      if (intervalId) {
-        clearInterval(intervalId)
-        intervalId = null
-      }
-    }
-
-    const fetchDraftData = async () => {
-      if (cancelled) return
+    const consumeStream = async () => {
       try {
-        const response = await api.get(`/api/v1/ocr/draft/${draftId}`)
-        const { status, medicines } = response.data
-
-        if (status === 'ready') {
-          stopPolling()
-          setMeds(medicines || [])
-          const firstDate = medicines?.[0]?.dispensed_date || ''
-          setPrescriptionDate(firstDate)
-          setIsLoading(false)
-          return
-        }
-
-        if (status in TERMINAL_ERROR_MESSAGES) {
-          stopPolling()
-          alert(`${TERMINAL_ERROR_MESSAGES[status]} 다시 촬영해주세요.`)
-          router.push('/ocr')
-          return
-        }
-
-        // status === 'pending' — 폴링 계속
-        pollCount += 1
-        if (pollCount >= MAX_POLLS) {
-          stopPolling()
-          alert('처리 시간이 초과되었어요. 다시 시도해주세요.')
-          router.push('/ocr')
+        for await (const payload of watchDraftStatus(draftId, abortController.signal)) {
+          const { status, medicines } = payload
+          if (status === 'ready') {
+            setMeds(medicines || [])
+            setPrescriptionDate(medicines?.[0]?.dispensed_date || '')
+            setIsLoading(false)
+            return
+          }
+          if (status in TERMINAL_ERROR_MESSAGES) {
+            alert(`${TERMINAL_ERROR_MESSAGES[status]} 다시 촬영해주세요.`)
+            router.push('/ocr')
+            return
+          }
+          // status='pending' — 다음 update 대기 (스켈레톤 유지)
         }
       } catch (err) {
-        stopPolling()
+        if (abortController.signal.aborted) return
         alert('데이터가 만료되었거나 불러올 수 없습니다. 다시 촬영해주세요.')
         router.push('/ocr')
       }
     }
 
-    fetchDraftData() // 즉시 1회
-    intervalId = setInterval(fetchDraftData, POLL_INTERVAL_MS)
-
-    return () => {
-      cancelled = true
-      stopPolling()
-    }
+    consumeStream()
+    return () => abortController.abort()
   }, [draftId, router])
 
   // 사용자가 텍스트를 수정할 때 상태 업데이트하는 함수
@@ -159,6 +149,9 @@ function OcrResultContent() {
         confirmed_medicines: confirmedMedicines,
       }, { timeout: 60000 })
 
+      // confirm 직후 main 페이지의 활성 카드에서 즉시 제거되도록 마킹.
+      // (client cache 로 main useEffect 재실행 보장이 안 되므로 단방향 신호)
+      sessionStorage.setItem('ocr_consumed_draft_id', draftId)
       alert('저장 완료! 복약 목록에서 확인해보세요.')
       router.push('/medication')
 

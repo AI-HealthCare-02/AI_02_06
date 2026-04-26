@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { CheckCircle, X } from 'lucide-react'
 import api from '@/lib/api'
+import { streamSSE } from '@/lib/sseClient'
 
 const STEPS = [
   '처방전 이미지를 읽고 있어요...',
@@ -11,12 +12,29 @@ const STEPS = [
   '거의 다 됐어요!',
 ]
 
-const POLL_INTERVAL_MS = 1000
-const MAX_POLLS = 30
 const TERMINAL_ERROR_MESSAGES = {
   no_text: '이미지에서 텍스트를 찾지 못했어요.',
   no_candidates: '약품 정보를 인식하지 못했어요.',
   failed: '처리 중 오류가 발생했어요.',
+}
+
+/**
+ * SSE 연결을 ready/terminal 까지 자동 재연결하며 await for-of 로 소비한다.
+ * timeout event 가 오면 새 연결을 열어 계속 대기 — 사용자가 끄거나 ready
+ * 도달 전까지 무한 재연결.
+ *
+ * @yields {{status: string, medicines?: any[]}}  draft poll payload
+ */
+async function* watchDraftStatus(draftId, signal) {
+  while (true) {
+    let timedOut = false
+    for await (const ev of streamSSE(`/api/v1/ocr/draft/${draftId}/stream`, { signal })) {
+      if (ev.event === 'update') yield ev.data
+      else if (ev.event === 'timeout') { timedOut = true; break }
+      else if (ev.event === 'error') throw new Error(ev.data?.detail || 'sse error')
+    }
+    if (!timedOut) return // 정상 close (terminal 도달)
+  }
 }
 
 function MedCardSkeleton({ delay = 0 }) {
@@ -114,56 +132,40 @@ export default function OcrLoadingPage() {
   const [done, setDone] = useState(false)
 
   useEffect(() => {
-    let cancelled = false
+    const abortController = new AbortController()
     let stepTicker = null
-    let pollTicker = null
-
-    const stopAll = () => {
-      if (stepTicker) clearInterval(stepTicker)
-      if (pollTicker) clearInterval(pollTicker)
-      stepTicker = null
-      pollTicker = null
-    }
 
     stepTicker = setInterval(() => {
       setStep((prev) => (prev < STEPS.length - 1 ? prev + 1 : prev))
     }, 1500)
 
-    // ai-worker 가 처리 끝낼 때까지 폴링 -> ready 면 SuccessOverlay -> result push.
-    // terminal status / timeout 시 사용자에게 안내 후 /ocr 로 복귀.
-    const startPolling = (draftId) => {
-      let pollCount = 0
-      const tick = async () => {
-        if (cancelled) return
-        try {
-          const resp = await api.get(`/api/v1/ocr/draft/${draftId}`)
-          const { status } = resp.data
+    // SSE 로 ai-worker 진행 상태를 받아오는 메인 루프.
+    // ready -> SuccessOverlay -> result push, terminal -> 안내 + /ocr 복귀.
+    const consumeStream = async (draftId) => {
+      try {
+        for await (const payload of watchDraftStatus(draftId, abortController.signal)) {
+          const status = payload.status
           if (status === 'ready') {
-            stopAll()
+            clearInterval(stepTicker)
             setDone(true)
             setTimeout(() => router.push(`/ocr/result?draft_id=${draftId}`), 1200)
             return
           }
           if (status in TERMINAL_ERROR_MESSAGES) {
-            stopAll()
+            clearInterval(stepTicker)
             alert(`${TERMINAL_ERROR_MESSAGES[status]} 다시 촬영해주세요.`)
             router.push('/ocr')
             return
           }
-          pollCount += 1
-          if (pollCount >= MAX_POLLS) {
-            stopAll()
-            alert('처리 시간이 초과되었어요. 처방전 카드에서 다시 확인해주세요.')
-            router.push('/main')
-          }
-        } catch (err) {
-          stopAll()
-          const msg = err.parsed?.message || err.response?.data?.detail || '분석 중 오류가 발생했습니다.'
-          router.push(`/ocr?error=${encodeURIComponent(typeof msg === 'string' ? msg : JSON.stringify(msg))}`)
+          // status='pending' — STEPS 진행 (별도 ticker), 다음 SSE event 대기
         }
+        // generator 종료 (no more events) — 이론상 ready/terminal 에서 return 으로 빠짐
+      } catch (err) {
+        if (abortController.signal.aborted) return
+        clearInterval(stepTicker)
+        const msg = err?.message || '분석 중 오류가 발생했습니다.'
+        router.push(`/ocr?error=${encodeURIComponent(msg)}`)
       }
-      tick() // 즉시 1회
-      pollTicker = setInterval(tick, POLL_INTERVAL_MS)
     }
 
     const run = async () => {
@@ -171,16 +173,10 @@ export default function OcrLoadingPage() {
         const fileData = sessionStorage.getItem('ocrFileData')
         const fileName = sessionStorage.getItem('ocrFileName')
         const fileType = sessionStorage.getItem('ocrFileType')
+        if (!fileData) { router.push('/ocr'); return }
 
-        if (!fileData) {
-          router.push('/ocr')
-          return
-        }
-
-        const res = await fetch(fileData)
-        const blob = await res.blob()
+        const blob = await (await fetch(fileData)).blob()
         const file = new File([blob], fileName, { type: fileType })
-
         const formData = new FormData()
         formData.append('file', file)
 
@@ -193,10 +189,10 @@ export default function OcrLoadingPage() {
         sessionStorage.removeItem('ocrFileName')
         sessionStorage.removeItem('ocrFileType')
 
-        if (cancelled) return
-        startPolling(response.data.draft_id)
+        if (abortController.signal.aborted) return
+        await consumeStream(response.data.draft_id)
       } catch (err) {
-        stopAll()
+        clearInterval(stepTicker)
         const msg = err.parsed?.message || err.response?.data?.detail || '분석 중 오류가 발생했습니다.'
         router.push(`/ocr?error=${encodeURIComponent(typeof msg === 'string' ? msg : JSON.stringify(msg))}`)
       }
@@ -204,8 +200,8 @@ export default function OcrLoadingPage() {
 
     run()
     return () => {
-      cancelled = true
-      stopAll()
+      abortController.abort()
+      clearInterval(stepTicker)
     }
   }, [router])
 
