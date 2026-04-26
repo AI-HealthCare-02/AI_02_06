@@ -64,6 +64,8 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
+          # 빌드 합계가 10분 초과 (ai-worker ~6m + fastapi ~4m + migration + health) — 여유 30m
+          command_timeout: "30m"
           script: |
             set -e
             cd ~/AI_02_06
