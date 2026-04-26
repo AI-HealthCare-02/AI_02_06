@@ -16,11 +16,11 @@ from tortoise import fields, models
 
 
 class MedicineChunkSection(StrEnum):
-    """RAG 청크 섹션 타입 (스키마 락 v2: 6종 고정, 사용자 질문 패턴 중심).
+    """RAG 청크 섹션 타입 (스키마 락 ②: 6종 고정, v2 수요자 중심 재설계).
 
     초기 v1은 공공데이터 API ARTICLE title 기반 13종이었으나, 실제 사용자
-    질의 유형을 역설계하여 6종으로 축약했다. 세분화 필터는 metadata 레이어
-    (예: interaction_tags JSONB) 가 담당.
+    질의 유형을 역설계하여 6종으로 축약했다. 세분화 필터는 `interaction_tags`
+    JSONB 레이어가 담당한다.
 
     각 섹션이 커버하는 대표 사용자 질문 유형:
     - OVERVIEW              : "이 약 뭐야?", "두통에 뭐 먹어?"
@@ -106,6 +106,15 @@ class MedicineChunk(models.Model):
     model_version = fields.CharField(
         max_length=64,
         description="Embedding model version (e.g. ko-sroberta-multitask-v1)",
+    )
+
+    # ── 상호작용 태그 JSONB (스키마 락 ④, v2) ─────────────────────────
+    # 청크의 세분화 필터 태그. 예: ["alcohol", "condition:liver"]
+    # 태그 값 사전은 ai_worker/data/interaction_tags.json에서 관리하며
+    # GIN 인덱스로 @> 연산자 매칭을 가속한다.
+    interaction_tags = fields.JSONField(
+        default=list,
+        description="JSONB array of interaction tags (see interaction_tags.json)",
     )
 
     # ── 타임스탬프 ─────────────────────────────────────────────────────
