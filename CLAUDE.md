@@ -96,6 +96,10 @@ To prevent Messy Data, strictly adhere to the following principles:
 ### 4.2 Technical Standards & Performance Optimization
 * **Time Data Processing**: All `datetime` objects MUST use timezone-included **Aware datetime** formats to maintain data precision.
 * **Asynchronous Programming (Async)**: Actively utilize **Async/Await** for all I/O operations (Network, File I/O, CPU-bound operations) to optimize responsiveness.
+* **HTTP Client**: All external API calls MUST use `httpx.AsyncClient` (no `requests` library). The `requests` library is synchronous and MUST NOT be used anywhere in the project.
+* **File Size Limit**: When a file exceeds **300 lines**, review and split into smaller modules before proceeding.
+* **Layered Architecture Enforcement**: Router -> Service -> Repository -> Model. Skipping layers is strictly prohibited.
+* **Model Migration**: When any model is changed, `aerich migrate` + `docs/db_schema.dbml` update is mandatory.
 
 ### 4.3 Multilingual Processing & Documentation Rules
 * **English Use (LLM/Internal)**: Source code comments, `.md` documents, and `description` fields in Models/DTOs read by AI MUST be written in English.
@@ -207,5 +211,37 @@ To prevent Messy Data, strictly adhere to the following principles:
 
 ---
 
-## 10. Final Language Check
+## 10. Research Checklist
+
+Before starting any implementation, the agent MUST verify the following:
+- [ ] Check official documentation (2024-2025 latest version, year required)
+- [ ] Research external Best Examples (official repos, production cases, source + year required)
+- [ ] Confirm similar implementation patterns within the project (`app/services/`, `app/repositories/`)
+- [ ] Check if new environment variables are needed (based on `envs/example.local.env`)
+- [ ] Identify related models (`app/models/` related tables)
+- [ ] Check related P0/P1 issues in `QA_AUDIT_PLAN.md` (conflict check)
+
+---
+
+## 11. Plan Review (Required before GO)
+
+### Sub-agent Parallel Review
+The AI MUST review plans from these 3 perspectives simultaneously:
+- **Architect**: Layered architecture violations, dependency direction between layers
+- **Critic**: Edge cases, missing exception handling, security vulnerabilities
+- **Document Specialist**: Missing Affected Files, DBML update requirements
+
+Review MUST reference external Best Examples from the Research Checklist (source + year required).
+
+### Review Checklist
+- [ ] Is the Goal clearly defined with completion criteria?
+- [ ] Were trade-off choices presented to the user first?
+- [ ] Is the external research from Research Checklist completed?
+- [ ] Are TDD Steps correctly split by business logic unit?
+- [ ] Are Affected Files filled in completely?
+- [ ] Is the core flow visualized with a Mermaid flowchart?
+
+---
+
+## 12. Final Language Check
 **[CRITICAL WARNING] All answers, explanations, result outputs, and feedback to the user MUST be written EXCLUSIVELY in 'Korean (한글)'. Arbitrarily translating responses into English or any other language is STRICTLY PROHIBITED.**
