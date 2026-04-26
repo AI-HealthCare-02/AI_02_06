@@ -15,13 +15,13 @@ from scripts.crawling import fetch_sample
 
 
 class TestCliInterface:
-    """CLI must expose --limit (default 50) and --api-key, plus sample defaults."""
+    """CLI must expose --limit (default 200, RAG 권장값) and --api-key, plus sample defaults."""
 
     def test_build_parser_exposes_limit(self) -> None:
         parser = fetch_sample.build_parser()
         ns = parser.parse_args([])
         assert hasattr(ns, "limit")
-        assert ns.limit == 50
+        assert ns.limit == 200
 
     def test_build_parser_accepts_custom_limit(self) -> None:
         parser = fetch_sample.build_parser()

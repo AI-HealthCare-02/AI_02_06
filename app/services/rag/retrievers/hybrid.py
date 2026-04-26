@@ -171,7 +171,7 @@ class HybridRetriever:
         WHERE {where_clause}
         ORDER BY distance ASC
         LIMIT ${idx}
-        """  # noqa: S608
+        """  # noqa: S608  # nosec B608  — where_conditions 모두 코드 내부 상수, 값은 $N 파라미터 바인딩
         params.append(limit)
 
         rows = await connection.execute_query_dict(sql, params)

@@ -120,10 +120,11 @@ class VectorQueryMixin:
         connection = connections.get("default")
         table_name = cls._meta.db_table
 
-        # NOTE: This uses f-strings for table/field names which are controlled by the model definition
-        # The actual query parameters use proper parameterization to prevent SQL injection
+        # NOTE: f-string 부분 (table/field/operator/order) 모두 모델 정의 또는
+        # 코드 내부 화이트리스트 상수에서만 옴. 사용자 입력은 %s 파라미터 바인딩
+        # 으로만 들어가므로 SQL injection 위험 없음. (bandit B608 false positive)
         sql = (
-            f"SELECT *, ({field_name} {operator} %s) as distance "  # noqa: S608
+            f"SELECT *, ({field_name} {operator} %s) as distance "  # noqa: S608  # nosec B608
             f"FROM {table_name} "
             f"WHERE ({field_name} {operator} %s) {'<' if distance_type != 'inner_product' else '>'} %s "
             f"ORDER BY distance {order} "

@@ -16,7 +16,8 @@ bad input returns an empty result instead of raising.
 
 from dataclasses import dataclass
 import logging
-from xml.etree import ElementTree as ET
+
+import defusedxml.ElementTree as ET  # noqa: N817 — stdlib ET 와 동일한 alias 관용 유지
 
 from app.models.medicine_chunk import MedicineChunkSection
 
@@ -96,7 +97,8 @@ def parse_doc_articles(xml: str | None) -> list[Article]:
         return []
 
     try:
-        root = ET.fromstring(xml)  # noqa: S314 — 공공데이터포털 신뢰 소스
+        # defusedxml.ElementTree.fromstring — XXE / billion-laughs 등 XML 공격 방어 후 stdlib API 와 동일 파싱.
+        root = ET.fromstring(xml)
     except ET.ParseError as exc:
         logger.warning("DOC XML parse failed: %s", exc)
         return []
