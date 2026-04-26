@@ -115,6 +115,7 @@ app/
 ├── models/               # Tortoise ORM models
 ├── dtos/                 # Pydantic schemas (request/response)
 ├── services/             # Business logic
+│   └── rag/                 # RAG pipeline (intent → rewrite → retrieval → generation)
 ├── repositories/         # Data access layer
 ├── dependencies/         # FastAPI dependency injection
 ├── utils/                # Utilities (JWT, security)
@@ -144,6 +145,75 @@ Tortoise ORM
     ↓
 PostgreSQL Database
 ```
+
+---
+
+## RAG Layer (app/services/rag/)
+
+### Pipeline Flow
+```
+ChatModal
+   │ POST /api/v1/messages/ask
+   ▼
+MessageService.ask_and_reply_with_owner_check
+   │
+   ▼
+RAGPipeline.ask
+   │
+   ├─(1) IntentClassifier       키워드·규칙 기반 (LLM 미사용)
+   │
+   ├─(2) RAGGenerator.rewrite_query   history 포함, self-contained 쿼리 생성
+   │                                    (OK / UNRESOLVABLE / FALLBACK)
+   │
+   ├─(3) EmbeddingProvider      SentenceTransformer (768d, ko-sroberta-multitask)
+   │
+   ├─(4) HybridRetriever        pgvector cosine 0.7 + 키워드 0.3
+   │        │                   (검색 대상: medicine_chunk, medicine_info FK join)
+   │        ▼
+   │    medicine_chunk          HNSW(vector_cosine_ops, m=16, ef_construction=64)
+   │
+   └─(5) RAGGenerator.generate_chat_response
+          OpenAI GPT-4o-mini (최근 3턴 history + 검색 context) → 응답
+```
+
+### Components
+
+| File | Role |
+|---|---|
+| `pipeline.py` | 5-stage orchestration (intent → rewrite → embed → retrieve → generate) |
+| `config.py` | `EMBEDDING_MODEL_NAME`, `EMBEDDING_DIMENSIONS` single source constants |
+| `intent/classifier.py` | Keyword-rule based IntentType classification |
+| `providers/sentence_transformer.py` | Local Korean embedding (L2 normalized) |
+| `retrievers/hybrid.py` | pgvector + keyword hybrid search |
+| `tools/` | Intent-specific tool routing (DB lookup / external API) |
+
+### Medicine Data Schema
+
+- `medicine_info`: Base drug data sourced from public API (DrugPrdtPrmsnInfoService07).
+  Monthly incremental sync keyed by `item_seq` (UPSERT key).
+- `medicine_chunk`: Section-level embedding chunks (13-value section enum).
+  `embedding vector(768)` with HNSW cosine index.
+- `medicine_ingredient`: Active-ingredient 1:N detail (public ingredient API).
+- `data_sync_log`: Sync history tracking (full/incremental, success/failure).
+
+### Data Ingestion Scripts (scripts/crawling/)
+
+| Script | Purpose |
+|---|---|
+| `sync_medicine_data.py` | Production full/incremental sync (all ~43k rows). Runs via CLI `--full` or monthly cron. |
+| `fetch_sample.py` | Local/CI sample loader. `--limit N` (default 50) caps the fetch, generates `medicine_chunk` rows, embeds with SentenceTransformer. `--skip-embed` keeps DB structure only. |
+| `dump_medicine_data.sh` | DB dump helper for backup/share. |
+
+Operational rule: `fetch_sample.py` is **local/CI only** and MUST NOT run on
+production EC2. Production data is populated via `sync_medicine_data.py`.
+
+### Model/Dimension Swap Procedure
+
+1. Update both constants in `app/services/rag/config.py`
+2. Add an Aerich migration altering `medicine_chunk.embedding` to the new `vector(N)`
+3. Re-ingest:
+   - Production: `sync_medicine_data.py --full` + re-embed chunks
+   - Local: `fetch_sample.py --limit N`
 
 ---
 

@@ -90,24 +90,17 @@ class TestMedicineChunkSchema:
         found = any(tuple(group) == expected or set(group) == set(expected) for group in unique_together)
         assert found, f"unique_together에 {expected} 누락. 현재값: {unique_together}"
 
-    def test_section_enum_has_13_values(self) -> None:
-        """section enum은 13종으로 고정 (스키마 락 조항)."""
+    def test_section_enum_has_6_values(self) -> None:
+        """section enum 은 v2 6종 으로 고정 (스키마 락 조항, 사용자 질문 패턴 기반)."""
         from app.models.medicine_chunk import MedicineChunkSection
 
         expected_values = {
-            "efficacy",
-            "usage",
-            "storage",
-            "ingredient",
-            "precaution_warning",
-            "precaution_contraindication",
-            "precaution_caution",
+            "overview",
+            "intake_guide",
+            "drug_interaction",
+            "lifestyle_interaction",
             "adverse_reaction",
-            "precaution_general",
-            "precaution_pregnancy",
-            "precaution_pediatric",
-            "precaution_elderly",
-            "precaution_overdose",
+            "special_event",
         }
         actual_values = {member.value for member in MedicineChunkSection}
         assert actual_values == expected_values, (

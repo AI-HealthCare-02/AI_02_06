@@ -1,8 +1,11 @@
-# Production Docker Compose for t3.micro (1GB RAM)
-# Next.js는 Vercel에서 별도 배포, EC2에는 API 서버만 배포
+# Production Docker Compose (t3.medium, 4GB RAM, 2 vCPU)
+# Next.js 는 Vercel 별도 배포. EC2 에는 API 서버 + 의존 인프라만.
+# 보안: backend 네트워크는 internal=true 로 인터넷 차단. postgres/redis 는
+# 호스트 포트 매핑 없음 — Docker 내부 전용.
 
 services:
-  # 1. PostgreSQL (Database) - 내부 전용
+  # PostgreSQL — 내부 전용, 인터넷 차단.
+  # 127.0.0.1 바인딩으로 EC2 외부에선 접근 불가, 호스트 SSH 터널(DBeaver)만 허용.
   postgres:
     image: postgres:15-alpine
     container_name: postgres
@@ -10,20 +13,49 @@ services:
       POSTGRES_USER: ${DB_USER:-downforce_admin}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME:-downforce_db}
-    ports:
-      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - backend
-    # 프로덕션에서는 포트 노출하지 않음 (내부 통신만)
+    ports:
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-downforce_admin} -d ${DB_NAME:-downforce_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
-    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # Redis — 내부 전용, 인터넷 차단.
+  # 127.0.0.1 바인딩으로 EC2 외부 접근 차단, 호스트에서는 redis-cli 로 점검 가능.
+  redis:
+    image: redis:alpine
+    container_name: redis
+    # 60 초마다 서버측 TCP keepalive PING — NAT idle drop 예방.
+    # 클라이언트 ``socket_keepalive`` + ``health_check_interval`` 와 양방향 보호.
+    command: ["redis-server", "--tcp-keepalive", "60"]
+    networks:
+      - backend
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
     deploy:
       resources:
         limits:
@@ -34,37 +66,10 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "20m"
-        max-file: "3"
-
-  # 2. Redis (메시지 브로커 및 캐싱) - 내부 전용
-  redis:
-    image: redis:alpine
-    container_name: redis
-    networks:
-      - backend
-    # 프로덕션에서는 포트 노출하지 않음 (내부 통신만)
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 128M
-        reservations:
-          memory: 64M
-    logging:
-      driver: "json-file"
-      options:
         max-size: "10m"
         max-file: "3"
 
-  # 3. API Server (FastAPI)
+  # FastAPI API 서버 — ML 추론은 ai-worker 에 위임
   fastapi:
     container_name: fastapi
     build:
@@ -75,7 +80,6 @@ services:
     volumes:
       - static_volume:/app/templates
       - media_volume:/app/media
-    restart: unless-stopped
     networks:
       - frontend
       - backend
@@ -94,16 +98,17 @@ services:
       resources:
         limits:
           cpus: '0.5'
-          memory: 300M
+          memory: 512M
         reservations:
-          memory: 128M
+          memory: 256M
     logging:
       driver: "json-file"
       options:
         max-size: "50m"
         max-file: "5"
 
-  # 4. AI Worker (OCR + LLM API 호출)
+  # AI Worker — ko-sroberta 상주 + PyTorch CPU + OpenAI async + 병렬 버퍼
+  # 피크 메모리 약 1.8GB. t3.medium 기준 2GB 한도.
   ai-worker:
     container_name: ai-worker
     build:
@@ -111,33 +116,32 @@ services:
       dockerfile: ai_worker/Dockerfile.prod
     env_file:
       - .env
-    restart: unless-stopped
     networks:
-      - frontend  # 외부 API 접근용 (CLOVA OCR, OpenAI)
-      - backend   # Redis 통신용
+      - frontend  # OpenAI / Kakao Local / CLOVA OCR 외부 호출
+      - backend   # Redis
     healthcheck:
       test: ["CMD", "python", "-c", "import redis; r=redis.from_url('redis://redis:6379/0'); r.ping()"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 90s
     depends_on:
       redis:
         condition: service_healthy
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 300M
+          cpus: '1.0'
+          memory: 2G
         reservations:
-          memory: 128M
+          memory: 1G
     logging:
       driver: "json-file"
       options:
         max-size: "50m"
         max-file: "5"
 
-  # 5. Nginx (Reverse Proxy) - HTTPS
+  # Nginx — HTTPS 리버스 프록시, Let's Encrypt 인증서
   nginx:
     container_name: nginx
     image: nginx:alpine
@@ -152,7 +156,6 @@ services:
       - "443:443"
     networks:
       - frontend
-    restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
       interval: 30s
@@ -166,9 +169,9 @@ services:
       resources:
         limits:
           cpus: '0.25'
-          memory: 64M
+          memory: 128M
         reservations:
-          memory: 32M
+          memory: 64M
     logging:
       driver: "json-file"
       options:
@@ -184,11 +187,13 @@ volumes:
     name: media_volume
 
 networks:
-  # 외부 접근용 네트워크 (nginx, fastapi)
+  # 외부 통신 가능 — 인바운드(nginx 80/443) + 아웃바운드(fastapi·ai-worker 외부 API)
   frontend:
     name: frontend
     driver: bridge
-  # 내부 서비스용 네트워크 (fastapi, redis, ai-worker)
+  # 내부 전용 — postgres/redis 의 인터넷 egress 차단. 해킹 당해도 C&C 통신 불가.
+  # fastapi/ai-worker 는 frontend 네트워크도 속해 있어 외부 API 호출 가능.
   backend:
     name: backend
     driver: bridge
+    internal: true

@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 
 from app.dependencies.security import get_current_account
-from app.dtos.challenge import ChallengeCreate, ChallengeResponse, ChallengeUpdate
+from app.dtos.challenge import ChallengeCreate, ChallengeResponse, ChallengeStartRequest, ChallengeUpdate
 from app.models.accounts import Account
 from app.services.challenge_service import ChallengeService
 
@@ -136,6 +136,35 @@ async def update_challenge(
         ChallengeResponse: Updated challenge information.
     """
     challenge = await service.update_challenge_with_owner_check(challenge_id, current_account.id, data)
+    return ChallengeResponse.model_validate(challenge)
+
+
+@router.patch(
+    "/{challenge_id}/start",
+    response_model=ChallengeResponse,
+    summary="Start challenge",
+)
+async def start_challenge(
+    challenge_id: UUID,
+    current_account: CurrentAccount,
+    service: ChallengeServiceDep,
+    data: ChallengeStartRequest | None = None,
+) -> ChallengeResponse:
+    """Activate a challenge and record its start time.
+
+    Optionally accepts difficulty and target_days to override the
+    AI-generated defaults before starting.
+
+    Args:
+        challenge_id: Challenge ID to activate.
+        current_account: Current authenticated account.
+        service: Challenge service instance.
+        data: Optional user customization (difficulty, target_days).
+
+    Returns:
+        ChallengeResponse: Updated challenge with is_active=True.
+    """
+    challenge = await service.start_challenge_with_owner_check(challenge_id, current_account.id, data)
     return ChallengeResponse.model_validate(challenge)
 
 

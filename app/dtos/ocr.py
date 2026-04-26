@@ -1,12 +1,30 @@
 """OCR DTO models module.
 
 This module contains data transfer objects for OCR (Optical Character Recognition)
-operations including medicine extraction, temporary storage, and confirmation.
+operations including medicine extraction, draft persistence, and confirmation.
 """
 
-from datetime import date
+from datetime import date, datetime
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
+
+
+class OcrDraftStatus(StrEnum):
+    """OCR 처리 상태 (프론트 폴링 응답용).
+
+    PENDING: ai-worker 가 처리 중. 프론트는 폴링을 계속한다.
+    READY:   처리 완료. ``medicines`` 필드에 결과가 채워져 있다.
+    NO_TEXT: OCR 결과에 텍스트가 없음 (블러·빈 이미지 등). 사용자에게 재촬영 안내.
+    NO_CANDIDATES: 텍스트는 있지만 약품명 후보 추출 실패. 사용자에게 다른 이미지 안내.
+    FAILED:  처리 중 예외 발생. 일반 에러 안내.
+    """
+
+    PENDING = "pending"
+    READY = "ready"
+    NO_TEXT = "no_text"
+    NO_CANDIDATES = "no_candidates"
+    FAILED = "failed"
 
 
 class ExtractedMedicine(BaseModel):
@@ -27,14 +45,50 @@ class ExtractedMedicine(BaseModel):
 
 
 class OcrExtractResponse(BaseModel):
-    """OCR extraction result response model.
+    """OCR extraction enqueue response — 즉시 200 응답.
 
-    Contains temporarily stored prescription information
-    with Redis-based draft ID for security.
+    Dedup 으로 기존 draft 가 재사용된 경우에도 동일 형식으로 응답한다 (프론트는
+    구분할 필요 없이 draft_id 로 result 페이지로 이동).
     """
 
-    draft_id: str = Field(description="Unique ID for prescription info temporarily stored in Redis")
-    medicines: list[ExtractedMedicine]
+    draft_id: str = Field(description="DB ocr_drafts.id (UUID) — 폴링·confirm 의 키")
+    medicines: list[ExtractedMedicine] = Field(default_factory=list)
+
+
+class OcrDraftPollResponse(BaseModel):
+    """폴링 응답 — 상태 + (READY 일 때만) medicines.
+
+    프론트는 ``status`` 를 보고 흐름을 분기한다:
+    - PENDING: 대기, 다시 폴링
+    - READY: medicines 표시 후 사용자 검수 화면으로
+    - NO_TEXT / NO_CANDIDATES / FAILED: 안내 메시지 + 재업로드 유도
+    """
+
+    draft_id: str
+    status: OcrDraftStatus
+    medicines: list[ExtractedMedicine] = Field(default_factory=list)
+
+
+class OcrDraftSummary(BaseModel):
+    """main 페이지 카드용 요약 — 활성 draft 1건의 메타.
+
+    제목은 프론트가 ``created_at`` 으로 "오후 5:43 업로드" 형태로 렌더링한다
+    (백엔드는 raw timestamp 만 전달, 사용자 timezone 변환은 클라이언트 책임).
+    """
+
+    draft_id: str = Field(description="DB ocr_drafts.id (UUID)")
+    status: OcrDraftStatus = Field(description="현재 처리 상태")
+    created_at: datetime = Field(description="업로드 시각 (서버 timezone, ISO8601)")
+
+
+class OcrActiveDraftsResponse(BaseModel):
+    """현재 사용자의 활성 draft 목록 (24h 안 + 미consume).
+
+    빈 리스트일 수 있다 (초기 사용자, 모두 consume 됨, 24h 경과). 빈 리스트는
+    에러가 아니라 정상 응답이다 — main 카드를 숨기는 신호.
+    """
+
+    drafts: list[OcrDraftSummary] = Field(default_factory=list)
 
 
 class ConfirmMedicationRequest(BaseModel):
@@ -44,5 +98,5 @@ class ConfirmMedicationRequest(BaseModel):
     the extracted medication data before final storage.
     """
 
-    draft_id: str = Field(description="Redis temporary storage ID")
+    draft_id: str = Field(description="Target draft ID (DB ocr_drafts.id)")
     confirmed_medicines: list[ExtractedMedicine]

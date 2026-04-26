@@ -2,32 +2,64 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import toast from 'react-hot-toast'
 import api, { parseApiError, showError } from '@/lib/api'
 import { config, securityUtils } from '@/config/env'
+import {
+  AUTH_STATUS,
+  LOGOUT_REASON,
+  consumeLogoutReason,
+  getAuthStatus,
+  markLoggedIn,
+  markLoggedOut,
+} from '@/lib/authStatus'
 import { Pill } from 'lucide-react'
 import LoadingSpinner from '@/components/common/LoadingSpinner'
+
+const LOGOUT_MESSAGE_BY_REASON = {
+  [LOGOUT_REASON.SESSION_EXPIRED]: '로그인 시간이 오래되어 로그아웃 되었습니다.',
+}
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isCheckingAuth, setIsCheckingAuth] = useState(true)
   const router = useRouter()
 
-  // 로그인 상태 확인
+  // 1) 직전 로그아웃 사유가 있으면 1회성 안내 토스트 — 새로고침·재방문 시 반복 금지
   useEffect(() => {
-    const checkAuthStatus = async () => {
-      try {
-        // 이미 로그인된 사용자인지 확인
-        await api.get('/api/v1/profiles', { skipAuthInterceptor: true })
-        // 로그인된 상태라면 메인으로 리다이렉트
-        router.replace('/main')
+    const reason = consumeLogoutReason()
+    const message = LOGOUT_MESSAGE_BY_REASON[reason]
+    if (message) toast(message)
+  }, [])
+
+  // 2) 로그인 힌트가 LOGIN 일 때만 서버 세션 유효성 확인.
+  //    NONE / LOGOUT 은 API 호출 자체를 생략해 401 노이즈를 제거한다.
+  useEffect(() => {
+    let cancelled = false
+
+    const verifySession = async () => {
+      if (getAuthStatus() !== AUTH_STATUS.LOGIN) {
+        if (!cancelled) setIsCheckingAuth(false)
         return
-      } catch (error) {
-        // 로그인되지 않은 상태 - 로그인 페이지 표시
-        setIsCheckingAuth(false)
+      }
+
+      try {
+        await api.get('/api/v1/profiles', { skipAuthInterceptor: true })
+        if (!cancelled) router.replace('/main')
+      } catch {
+        // LOGIN 힌트는 있었지만 서버 세션 만료 — 이번 세션 내에서 직접 안내.
+        markLoggedOut({ reason: LOGOUT_REASON.SESSION_EXPIRED })
+        if (!cancelled) {
+          toast(LOGOUT_MESSAGE_BY_REASON[LOGOUT_REASON.SESSION_EXPIRED])
+          setIsCheckingAuth(false)
+        }
       }
     }
 
-    checkAuthStatus()
+    verifySession()
+    return () => {
+      cancelled = true
+    }
   }, [router])
 
   // 보안 검증: 개발자 로그인 표시 여부
@@ -83,6 +115,9 @@ const handleTestLogin = async () => {
 
       // 2. 백엔드가 정상적으로 토큰(쿠키)과 JSON(200 OK)을 응답했다면?
       if (response.status === 200) {
+        // 로그인 성공 — 재접속자 판별용 힌트 기록 (kakao 정식 콜백과 동일 처리)
+        markLoggedIn()
+
         const { show_survey } = response.data
 
         // 프론트엔드가 주도적으로 화면 전환

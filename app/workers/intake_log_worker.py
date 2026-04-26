@@ -4,8 +4,8 @@ Generates today's IntakeLog records from active medications at 00:05 KST.
 Uses get_or_create for idempotency — safe to re-run.
 """
 
-import logging
 from datetime import date, time
+import logging
 from uuid import uuid4
 
 from app.models.intake_log import IntakeLog

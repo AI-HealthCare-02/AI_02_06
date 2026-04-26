@@ -1,3 +1,4 @@
+# FastAPI — 프로덕션 이미지. multi-stage 로 빌드 도구 최종 이미지에서 제외.
 FROM python:3.13-slim AS builder
 
 WORKDIR /app
@@ -12,20 +13,17 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 COPY pyproject.toml uv.lock ./
 RUN uv sync --group app --no-dev --frozen
 
-# Stage 2: Final
+# Final stage — builder 의 .venv 만 가져와서 이미지 크기 축소
 FROM python:3.13-slim
 
 WORKDIR /app
 
-# Non-root 사용자 생성
 RUN groupadd --gid 1000 appgroup && \
     useradd --uid 1000 --gid appgroup --shell /bin/bash --create-home appuser
 
-# builder에서 설치된 패키지만 복사
 COPY --from=builder /app/.venv /app/.venv
 COPY . .
 
-# PATH 설정
 ENV PATH="/app/.venv/bin:$PATH"
 
 RUN chown -R appuser:appgroup /app

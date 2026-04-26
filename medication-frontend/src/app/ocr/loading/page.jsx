@@ -1,8 +1,9 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CheckCircle } from 'lucide-react'
+import { CheckCircle, X } from 'lucide-react'
 import api from '@/lib/api'
+import { streamSSE } from '@/lib/sseClient'
 
 const STEPS = [
   '처방전 이미지를 읽고 있어요...',
@@ -10,6 +11,31 @@ const STEPS = [
   '복용 방법을 정리하고 있어요...',
   '거의 다 됐어요!',
 ]
+
+const TERMINAL_ERROR_MESSAGES = {
+  no_text: '이미지에서 텍스트를 찾지 못했어요.',
+  no_candidates: '약품 정보를 인식하지 못했어요.',
+  failed: '처리 중 오류가 발생했어요.',
+}
+
+/**
+ * SSE 연결을 ready/terminal 까지 자동 재연결하며 await for-of 로 소비한다.
+ * timeout event 가 오면 새 연결을 열어 계속 대기 — 사용자가 끄거나 ready
+ * 도달 전까지 무한 재연결.
+ *
+ * @yields {{status: string, medicines?: any[]}}  draft poll payload
+ */
+async function* watchDraftStatus(draftId, signal) {
+  while (true) {
+    let timedOut = false
+    for await (const ev of streamSSE(`/api/v1/ocr/draft/${draftId}/stream`, { signal })) {
+      if (ev.event === 'update') yield ev.data
+      else if (ev.event === 'timeout') { timedOut = true; break }
+      else if (ev.event === 'error') throw new Error(ev.data?.detail || 'sse error')
+    }
+    if (!timedOut) return // 정상 close (terminal 도달)
+  }
+}
 
 function MedCardSkeleton({ delay = 0 }) {
   return (
@@ -106,25 +132,51 @@ export default function OcrLoadingPage() {
   const [done, setDone] = useState(false)
 
   useEffect(() => {
-    const ticker = setInterval(() => {
+    const abortController = new AbortController()
+    let stepTicker = null
+
+    stepTicker = setInterval(() => {
       setStep((prev) => (prev < STEPS.length - 1 ? prev + 1 : prev))
     }, 1500)
+
+    // SSE 로 ai-worker 진행 상태를 받아오는 메인 루프.
+    // ready -> SuccessOverlay -> result push, terminal -> 안내 + /ocr 복귀.
+    const consumeStream = async (draftId) => {
+      try {
+        for await (const payload of watchDraftStatus(draftId, abortController.signal)) {
+          const status = payload.status
+          if (status === 'ready') {
+            clearInterval(stepTicker)
+            setDone(true)
+            setTimeout(() => router.push(`/ocr/result?draft_id=${draftId}`), 1200)
+            return
+          }
+          if (status in TERMINAL_ERROR_MESSAGES) {
+            clearInterval(stepTicker)
+            alert(`${TERMINAL_ERROR_MESSAGES[status]} 다시 촬영해주세요.`)
+            router.push('/ocr')
+            return
+          }
+          // status='pending' — STEPS 진행 (별도 ticker), 다음 SSE event 대기
+        }
+        // generator 종료 (no more events) — 이론상 ready/terminal 에서 return 으로 빠짐
+      } catch (err) {
+        if (abortController.signal.aborted) return
+        clearInterval(stepTicker)
+        const msg = err?.message || '분석 중 오류가 발생했습니다.'
+        router.push(`/ocr?error=${encodeURIComponent(msg)}`)
+      }
+    }
 
     const run = async () => {
       try {
         const fileData = sessionStorage.getItem('ocrFileData')
         const fileName = sessionStorage.getItem('ocrFileName')
         const fileType = sessionStorage.getItem('ocrFileType')
+        if (!fileData) { router.push('/ocr'); return }
 
-        if (!fileData) {
-          router.push('/ocr')
-          return
-        }
-
-        const res = await fetch(fileData)
-        const blob = await res.blob()
+        const blob = await (await fetch(fileData)).blob()
         const file = new File([blob], fileName, { type: fileType })
-
         const formData = new FormData()
         formData.append('file', file)
 
@@ -137,21 +189,37 @@ export default function OcrLoadingPage() {
         sessionStorage.removeItem('ocrFileName')
         sessionStorage.removeItem('ocrFileType')
 
-        clearInterval(ticker)
-        setDone(true)
-
-        const draftId = response.data.draft_id
-        setTimeout(() => router.push(`/ocr/result?draft_id=${draftId}`), 1200)
+        if (abortController.signal.aborted) return
+        await consumeStream(response.data.draft_id)
       } catch (err) {
+        clearInterval(stepTicker)
         const msg = err.parsed?.message || err.response?.data?.detail || '분석 중 오류가 발생했습니다.'
         router.push(`/ocr?error=${encodeURIComponent(typeof msg === 'string' ? msg : JSON.stringify(msg))}`)
       }
     }
 
     run()
-    return () => clearInterval(ticker)
+    return () => {
+      abortController.abort()
+      clearInterval(stepTicker)
+    }
   }, [router])
 
+  // 우측상단 닫기 X — 사용자가 main 으로 빠져나갈 수 있도록.
+  // 처리 자체는 ai-worker 가 백그라운드로 계속 수행 -> main 의 활성 draft 카드로 회수 가능.
+  const handleClose = () => router.push('/main')
+
   if (done) return <SuccessOverlay />
-  return <PrescriptionSkeleton step={step} />
+  return (
+    <>
+      <button
+        onClick={handleClose}
+        className="fixed top-4 right-4 z-30 w-10 h-10 bg-white border border-gray-200 rounded-full flex items-center justify-center shadow-sm hover:bg-gray-50 cursor-pointer"
+        aria-label="닫고 메인으로 이동"
+      >
+        <X size={18} className="text-gray-600" />
+      </button>
+      <PrescriptionSkeleton step={step} />
+    </>
+  )
 }
