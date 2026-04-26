@@ -24,7 +24,14 @@ from app.models.accounts import Account
 from app.models.profiles import Profile, RelationType
 from app.services.ocr_service import OCRService
 
-router = APIRouter(prefix="/ocr", tags=["AI Integration"])
+# 라우터 전역 인증 게이트 — 모든 OCR 엔드포인트는 로그인된 계정만 사용 가능.
+# extract / draft 는 결과 객체를 쓰지 않아 ``dependencies`` 로 주입하지 않고
+# 게이트만 걸고, confirm 은 함수 시그니처에서 ``current_account`` 를 받아 사용.
+router = APIRouter(
+    prefix="/ocr",
+    tags=["AI Integration"],
+    dependencies=[Depends(get_current_account)],
+)
 
 ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"]
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
