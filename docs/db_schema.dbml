@@ -305,12 +305,13 @@ Table medicine_info {
 Table medicine_chunk {
   id bigint [pk, increment, note: '청크 레코드 ID']
   medicine_info_id int [not null, ref: > medicine_info.id, note: '부모 약품 FK (ON DELETE CASCADE)']
-  section varchar(48) [not null, note: '청크 섹션 타입 (enum 13종: efficacy | usage | storage | ingredient | precaution_warning | precaution_contraindication | precaution_caution | adverse_reaction | precaution_general | precaution_pregnancy | precaution_pediatric | precaution_elderly | precaution_overdose)']
+  section varchar(48) [not null, note: '청크 섹션 타입 (v2 수요자 중심 enum 6종: overview | intake_guide | drug_interaction | lifestyle_interaction | adverse_reaction | special_event)']
   chunk_index int [not null, default: 0, note: 'ARTICLE 128토큰 초과 분할 시 순번']
   content text [not null, note: '헤더 프리픽스 포함 최종 임베딩 대상 문자열']
   token_count int [null, note: '토큰 수 (모니터링용)']
   embedding text [null, note: 'pgvector VECTOR(768) - Aerich migration 수동 SQL로 실제 타입은 vector(768)']
   model_version varchar(64) [not null, note: '임베딩 모델 버전 (재임베딩 트리거, 예: ko-sroberta-multitask-v1)']
+  interaction_tags text [not null, default: `'[]'::jsonb`, note: 'JSONB 배열 - 세분화 필터 태그 (예: ["alcohol", "condition:liver"]). 실제 타입은 jsonb, GIN 인덱스 적용']
   created_at timestamptz [not null, default: `now()`, note: '생성 일시']
   updated_at timestamptz [not null, default: `now()`, note: '수정 일시']
 
@@ -322,11 +323,24 @@ Table medicine_chunk {
   }
 
   Note: '''
-  약품 섹션별 임베딩 청크 (RAG 벡터 검색 대상)
+  약품 섹션별 임베딩 청크 (RAG 벡터 검색 대상, v2 수요자 중심 재설계)
   - 임베딩 모델: jhgan/ko-sroberta-multitask (768차원)
+  - section enum 6종 (사용자 질문 유형 기반):
+    * overview              : 약의 정체성/효능 ("이 약 뭐야?")
+    * intake_guide          : 복용법/타이밍/제형 ("공복?", "까먹었어")
+    * drug_interaction      : 약-약, 약-영양제/한약 ("홍삼이랑?")
+    * lifestyle_interaction : 음식/음주/카페인/운전/운동 ("커피?", "술?")
+    * adverse_reaction      : 부작용/이상반응/과량 ("두드러기?", "토했어")
+    * special_event         : 수술/시술/임신/수유/보관 ("레이저?", "임신 중")
+  - interaction_tags JSONB: 세분화 필터 태그 (GIN 인덱스 적용)
+    * prefix: food/beverage/drug/procedure/condition/activity/exposure/timing/demographic/emergency
+    * 시드 사전: ai_worker/data/interaction_tags.json
+    * 쿼리 예: WHERE interaction_tags @> ''["alcohol"]''
   - pgvector HNSW 인덱스: USING hnsw (embedding vector_cosine_ops) WITH (m=16, ef_construction=64)
-  - embedding 컬럼은 Aerich 마이그레이션에서 수동 SQL로 vector(768) 타입 적용
-  - 청킹 단위: 공공데이터 API XML의 DOC > SECTION > ARTICLE 자연경계
+  - GIN 인덱스 (Aerich migration 9번에서 생성):
+      CREATE INDEX idx_medicine_chunk_tags_gin
+        ON medicine_chunk USING gin (interaction_tags jsonb_path_ops)
+  - 청킹 단위: PARAGRAPH (v1 ARTICLE에서 세분화)
   - 증분 재임베딩: model_version 불일치 또는 medicine_info.change_date 변경 시
   '''
 }
