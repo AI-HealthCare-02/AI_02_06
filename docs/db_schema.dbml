@@ -101,7 +101,6 @@ Table medications {
   end_date date [null, note: '복용 종료 예정일 (누락 시 자동 연장)']
   dispensed_date date [null, note: '약품 조제일']
   expiration_date date [null, note: '약품 유효기간 만료일']
-  prescription_image_url varchar(512) [null, note: '처방전 이미지 URL (S3)']
   is_active boolean [not null, default: true, note: '현재 복용 중 여부']
   created_at timestamptz [not null, default: `now()`, note: '등록 일시']
   updated_at timestamptz [not null, default: `now()`, note: '수정 일시']
