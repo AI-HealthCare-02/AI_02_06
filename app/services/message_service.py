@@ -282,6 +282,8 @@ class MessageService:
         """
         return await self.repository.create_assistant_message(session_id, content)
 
+    # ── RAG 한 턴 처리 (오케스트레이션) ───────────────────────────────────
+    # 흐름: history 빌드 -> RAG 호출 -> 두 turn persist -> 요약 로깅
     async def ask_and_reply(self, session_id: UUID, content: str) -> tuple[ChatMessage, ChatMessage]:
         """Run RAG pipeline, then persist both turns with their metadata.
 
@@ -305,35 +307,50 @@ class MessageService:
         start = time.perf_counter()
         logger.info("[RAG] session=%s q=%r", sid, _preview(content))
 
-        # Get recent messages (returned in newest-first order). The current
-        # user turn is not persisted yet, so it won't appear in `recent`.
+        history, history_metadata, user_profile_id = await self._build_rag_context(session_id)
+        response = await self._invoke_rag_pipeline(
+            content=content,
+            history=history,
+            history_metadata=history_metadata,
+            user_profile_id=user_profile_id,
+        )
+        user_msg, assistant_msg = await self._persist_rag_turns(session_id, content, response)
+        self._log_rag_summary(sid=sid, response=response, took_ms=int((time.perf_counter() - start) * 1000))
+        return user_msg, assistant_msg
+
+    async def _build_rag_context(
+        self,
+        session_id: UUID,
+    ) -> tuple[list[dict[str, str]], list[dict], UUID | None]:
+        """RAG 입력 컨텍스트 — 최근 history + per-turn metadata + 활성 프로필 ID."""
         recent = await self.repository.get_recent_by_session(session_id, limit=10)
         chronological = list(reversed(recent))
         history = [
             {"role": "user" if m.sender_type == "USER" else "assistant", "content": m.content} for m in chronological
         ]
         history_metadata = [m.metadata or {} for m in chronological]
-
-        # Resolve the active profile so the RAG pipeline can inject the
-        # profile's health_survey (allergies, conditions, etc.) into the
-        # answer LLM prompt. A missing session falls through to the pipeline
-        # which will simply skip the medical-context block.
         session = await self.session_repository.get_by_id(session_id)
         user_profile_id = session.profile_id if session is not None else None
+        return history, history_metadata, user_profile_id
 
+    async def _invoke_rag_pipeline(
+        self,
+        *,
+        content: str,
+        history: list[dict[str, str]],
+        history_metadata: list[dict],
+        user_profile_id: UUID | None,
+    ) -> Any:
+        """RAG 파이프라인 호출 + 503 매핑 (원인은 stack trace 로 보존)."""
         try:
             pipeline = await get_rag_pipeline()
-            response = await pipeline.ask(
+            return await pipeline.ask(
                 question=content,
                 history=history,
                 history_metadata=history_metadata,
                 user_profile_id=user_profile_id,
             )
         except Exception as e:
-            # 503 으로 변환하기 전에 진짜 원인을 stack trace 와 함께 남긴다.
-            # 그렇지 않으면 broad except 가 RAG 파이프라인의 모든 예외를 삼켜
-            # 디버깅이 불가능하다. logger.exception 은 traceback 을 자동으로
-            # 첨부하므로 메시지에 ``e`` 를 다시 넣지 않는다 (Ruff TRY401).
             logger.exception("[RAG] ask pipeline failed")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -344,6 +361,13 @@ class MessageService:
                 },
             ) from e
 
+    async def _persist_rag_turns(
+        self,
+        session_id: UUID,
+        content: str,
+        response: Any,
+    ) -> tuple[ChatMessage, ChatMessage]:
+        """RAG 응답을 user/assistant 두 메시지로 영속 — 각 turn 별 metadata 부여."""
         user_metadata = {
             "intent": response.intent,
             "query_keywords": response.query_keywords,
@@ -352,13 +376,14 @@ class MessageService:
         assistant_metadata: dict = {"intent": response.intent}
         if response.token_usage is not None:
             assistant_metadata["llm"] = response.token_usage.model_dump()
-
         user_msg = await self.repository.create_user_message(session_id, content, metadata=user_metadata)
         assistant_msg = await self.repository.create_assistant_message(
             session_id, response.answer, metadata=assistant_metadata
         )
+        return user_msg, assistant_msg
 
-        took_ms = int((time.perf_counter() - start) * 1000)
+    def _log_rag_summary(self, *, sid: str, response: Any, took_ms: int) -> None:
+        """답변 길이 + 토큰 사용량 + 처리 시간을 한 줄로 로깅."""
         usage = response.token_usage
         usage_log = (
             f"tokens={usage.total_tokens}(p{usage.prompt_tokens}+c{usage.completion_tokens})"
@@ -373,7 +398,6 @@ class MessageService:
             usage_log,
             took_ms,
         )
-        return user_msg, assistant_msg
 
     async def ask_and_reply_with_owner_check(
         self, session_id: UUID, account_id: UUID, content: str
@@ -534,6 +558,9 @@ class MessageService:
         assistant_msg = await self.repository.create_assistant_message(session_id, answer)
         return AskResult(user_message=user_msg, assistant_message=assistant_msg, pending=None)
 
+    # ── pending GPS 턴 마무리 (오케스트레이션) ───────────────────────────
+    # 흐름: 입력 검증 -> claim+ownership -> geo 결과 수집
+    #       -> 2nd LLM 호출 -> assistant message persist
     async def resolve_pending_turn(
         self,
         *,
@@ -545,69 +572,29 @@ class MessageService:
     ) -> AskResult:
         """Complete a turn that was waiting on a GPS callback.
 
-        Called by the frontend once the user has either allowed or denied
-        geolocation access. Validation order is chosen so we never waste
-        the (atomic) ``claim`` on a known-bad request:
-
-        1. ``status="ok"`` but missing coords → ``400``.
-        2. Turn not in the store (expired / never existed) → ``410``.
-        3. Account does not own the turn → ``403``.
-
         Args:
             turn_id: Id returned to the client as ``AskPending.turn_id``.
-            account_id: Caller account id. Compared as a string against
-                the owner recorded on the pending turn.
+            account_id: Caller account id (string compare against pending owner).
             status: ``"ok"`` (user allowed GPS) or ``"denied"``.
             lat: Latitude (WGS84) when ``status="ok"``.
             lng: Longitude (WGS84) when ``status="ok"``.
 
         Returns:
-            ``AskResult`` with only ``assistant_message`` set — the user
-            turn was persisted when the pending was created.
+            ``AskResult`` with only ``assistant_message`` set — user turn 은
+            pending 생성 시점에 이미 저장됨.
 
         Raises:
-            HTTPException: 400 / 403 / 410 per above.
+            HTTPException: 400 / 403 / 410 (helper 들이 던짐).
         """
-        if status == _STATUS_OK and not _is_valid_coords(lat, lng):
-            raise HTTPException(
-                status_code=_HTTP_400_BAD_REQUEST,
-                detail="lat and lng must be finite numbers when status='ok'",
-            )
-
-        store = self._get_pending_store()
-        pending = await store.claim(turn_id)
-        if pending is None:
-            raise HTTPException(
-                status_code=_HTTP_410_GONE,
-                detail="Pending turn not found or expired.",
-            )
-
-        if pending.account_id != str(account_id):
-            raise HTTPException(
-                status_code=_HTTP_403_FORBIDDEN,
-                detail="Access denied to this pending turn.",
-            )
-
-        results = dict(pending.eager_results)
-        remaining_geo_calls = [
-            tc for tc in pending.tool_calls if tc.needs_geolocation and tc.tool_call_id not in results
-        ]
-
-        if status == _STATUS_OK:
-            geolocation = {"lat": lat, "lng": lng}
-            if remaining_geo_calls:
-                call_payload = [_tool_call_to_worker_dict(tc, geolocation=geolocation) for tc in remaining_geo_calls]
-                geo_results = await run_tool_calls_via_rq(calls=call_payload, queue=self._get_queue())
-                results.update(geo_results)
-        else:
-            for tc in remaining_geo_calls:
-                results[tc.tool_call_id] = {"error": _GEOLOCATION_DENIED_MESSAGE}
-
-        tool_messages = [_tool_result_message(call_id, result) for call_id, result in results.items()]
-        second_messages = [*pending.messages_snapshot, *tool_messages]
+        self._validate_resolve_payload(status, lat, lng)
+        pending = await self._claim_and_authorize(turn_id, account_id)
+        results = await self._collect_tool_results(pending, status=status, lat=lat, lng=lng)
 
         completion = await generate_chat_response_via_rq(
-            messages=second_messages,
+            messages=[
+                *pending.messages_snapshot,
+                *(_tool_result_message(cid, res) for cid, res in results.items()),
+            ],
             system_prompt=None,
             queue=self._get_queue(),
         )
@@ -616,8 +603,56 @@ class MessageService:
         session_uuid = UUID(pending.session_id)
         assistant_msg = await self.repository.create_assistant_message(session_uuid, answer)
         logger.info("[ToolCalling] resolved turn=%s status=%s", turn_id, status)
-
         return AskResult(user_message=None, assistant_message=assistant_msg, pending=None)
+
+    @staticmethod
+    def _validate_resolve_payload(status: str, lat: float | None, lng: float | None) -> None:
+        """status='ok' 인데 lat/lng 가 유효하지 않으면 즉시 400 — claim 낭비 방지."""
+        if status == _STATUS_OK and not _is_valid_coords(lat, lng):
+            raise HTTPException(
+                status_code=_HTTP_400_BAD_REQUEST,
+                detail="lat and lng must be finite numbers when status='ok'",
+            )
+
+    async def _claim_and_authorize(self, turn_id: str, account_id: UUID | str) -> PendingTurn:
+        """Pending 을 atomic 하게 claim + ownership 검증 — 각각 410/403."""
+        store = self._get_pending_store()
+        pending = await store.claim(turn_id)
+        if pending is None:
+            raise HTTPException(
+                status_code=_HTTP_410_GONE,
+                detail="Pending turn not found or expired.",
+            )
+        if pending.account_id != str(account_id):
+            raise HTTPException(
+                status_code=_HTTP_403_FORBIDDEN,
+                detail="Access denied to this pending turn.",
+            )
+        return pending
+
+    async def _collect_tool_results(
+        self,
+        pending: PendingTurn,
+        *,
+        status: str,
+        lat: float | None,
+        lng: float | None,
+    ) -> dict[str, Any]:
+        """Eager 결과 위에 geo 결과 (or denied) 를 합쳐 최종 results dict 를 만든다."""
+        results = dict(pending.eager_results)
+        remaining_geo_calls = [
+            tc for tc in pending.tool_calls if tc.needs_geolocation and tc.tool_call_id not in results
+        ]
+        if status == _STATUS_OK:
+            if remaining_geo_calls:
+                geolocation = {"lat": lat, "lng": lng}
+                call_payload = [_tool_call_to_worker_dict(tc, geolocation=geolocation) for tc in remaining_geo_calls]
+                geo_results = await run_tool_calls_via_rq(calls=call_payload, queue=self._get_queue())
+                results.update(geo_results)
+        else:
+            for tc in remaining_geo_calls:
+                results[tc.tool_call_id] = {"error": _GEOLOCATION_DENIED_MESSAGE}
+        return results
 
     async def delete_message(self, message_id: UUID) -> None:
         """Delete message (soft delete).
