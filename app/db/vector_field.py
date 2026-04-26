@@ -145,29 +145,3 @@ class VectorQueryMixin:
             instances.append((instance, similarity))
 
         return instances
-
-    @classmethod
-    async def hybrid_search(
-        cls,
-        query_vector: list[float] | np.ndarray,
-        keyword_filters: dict | None = None,
-        metadata_filters: dict | None = None,
-        vector_weight: float = 0.7,
-        keyword_weight: float = 0.3,
-        limit: int = 10,
-    ) -> list[tuple]:
-        """Perform hybrid search combining vector similarity and keyword matching.
-
-        Args:
-            query_vector: Query embedding vector
-            keyword_filters: Dictionary of keyword search filters
-            metadata_filters: Dictionary of metadata filters
-            vector_weight: Weight for vector similarity score
-            keyword_weight: Weight for keyword matching score
-            limit: Maximum number of results
-
-        Returns:
-            List of (model_instance, combined_score) tuples
-        """
-        # Implementation for hybrid search
-        # This would combine vector similarity with traditional text search
