@@ -22,6 +22,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 import hashlib
 import json
+import logging
 import os
 import time
 from typing import Any
@@ -44,6 +45,8 @@ from app.dtos.ocr import (
 from app.models.medication import Medication
 from app.models.ocr_draft import OcrDraft
 from app.repositories.ocr_draft_repository import OcrDraftRepository
+
+logger = logging.getLogger(__name__)
 
 _OCR_JOB_REF = "ai_worker.domains.ocr.jobs.process_ocr_task"
 
@@ -101,10 +104,59 @@ class OCRService:
         Returns:
             ``OcrDraftPollResponse`` 또는 ``None`` (없거나 타인 소유).
         """
-        draft = await self._repository.get_by_id(draft_id, profile_id)
+        draft = await self._get_owned_draft_or_audit(draft_id, profile_id, action="poll")
         if draft is None:
             return None
         return _to_poll_response(draft)
+
+    async def _get_owned_draft_or_audit(
+        self,
+        draft_id: UUID | str,
+        profile_id: UUID | str,
+        *,
+        action: str,
+    ) -> OcrDraft | None:
+        """소유 검증 + ownership 위반 시 audit 로깅.
+
+        repository.get_by_id 가 None 을 반환할 때 (a) 진짜 없음 vs (b) 타인 소유
+        인지 한 번 더 확인해, (b) 인 경우 warning 로깅한다. 응답 자체는 어느 쪽이든
+        ``None`` — 외부에는 정보 누설 없이 404 로 응답하면서, 운영팀은 의심
+        패턴을 추적할 수 있다.
+
+        Args:
+            draft_id: 조회 대상 draft ID.
+            profile_id: 요청자 프로필 ID.
+            action: 감사 로그에 남길 행위 라벨 (poll / stream / discard / confirm).
+
+        Returns:
+            본인 소유 draft 또는 ``None``.
+        """
+        draft = await self._repository.get_by_id(draft_id, profile_id)
+        if draft is not None:
+            return draft
+        await self._audit_ownership_miss(draft_id, profile_id, action=action)
+        return None
+
+    async def _audit_ownership_miss(
+        self,
+        draft_id: UUID | str,
+        profile_id: UUID | str,
+        *,
+        action: str,
+    ) -> None:
+        """타인 소유 draft 접근 시 warning 로깅. 진짜 없음/이미 consumed 인 경우는 침묵.
+
+        Atomic update (mark_consumed) 의 affected=0 케이스 분류용으로도 호출된다.
+        """
+        foreign = await OcrDraft.filter(id=str(draft_id)).only("id", "profile_id").first()
+        if foreign is not None and str(foreign.profile_id) != str(profile_id):
+            logger.warning(
+                "[OCR_OWNERSHIP] action=%s requester_profile=%s tried draft=%s owned_by=%s",
+                action,
+                profile_id,
+                draft_id,
+                foreign.profile_id,
+            )
 
     async def stream_draft_states(
         self,
@@ -134,7 +186,7 @@ class OCRService:
         deadline = time.monotonic() + max_seconds
         last_status: OcrDraftStatus | None = None
         while True:
-            draft = await self._repository.get_by_id(draft_id, profile_id)
+            draft = await self._get_owned_draft_or_audit(draft_id, profile_id, action="stream")
             if draft is None:
                 yield _sse_event("error", {"detail": "Draft not found."})
                 return
@@ -176,7 +228,10 @@ class OCRService:
         Returns:
             ``True`` 면 새로 폐기, ``False`` 면 이미 처리됨/없음/타인 소유.
         """
-        return await self._repository.mark_consumed(draft_id, profile_id)
+        consumed = await self._repository.mark_consumed(draft_id, profile_id)
+        if not consumed:
+            await self._audit_ownership_miss(draft_id, profile_id, action="discard")
+        return consumed
 
     async def confirm_and_save(
         self,
@@ -197,6 +252,7 @@ class OCRService:
         """
         consumed = await self._repository.mark_consumed(request.draft_id, profile_id)
         if not consumed:
+            await self._audit_ownership_miss(request.draft_id, profile_id, action="confirm")
             raise ValueError("이미 처리되었거나 만료된 처방전입니다. 새로 등록해주세요.")
 
         saved = [await self._save_one_medication(med, profile_id) for med in request.confirmed_medicines]
