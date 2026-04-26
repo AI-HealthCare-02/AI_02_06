@@ -32,9 +32,9 @@ class Config(BaseSettings):
     # External API settings
     OPENAI_API_KEY: str | None = None
 
-    # CLOVA OCR settings
-    CLOVA_OCR_URL: str | None = None
-    CLOVA_OCR_SECRET: str | None = None
+    # CLOVA OCR settings — 환경변수 이름과 정확히 일치 (.env 와 호환)
+    CLOVA_OCR_INVOKE_URL: str | None = None
+    CLOVA_OCR_SECRET_KEY: str | None = None
 
     # Public data API settings
     DATA_GO_KR_API_KEY: str | None = None

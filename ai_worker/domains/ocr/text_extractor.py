@@ -47,8 +47,8 @@ def extract_text_from_image_bytes(image_bytes: bytes, filename: str) -> str:
 
 def _resolve_credentials() -> tuple[str, str]:
     """CLOVA OCR URL / SECRET 환경변수를 검증·반환한다."""
-    invoke_url = config.CLOVA_OCR_URL
-    secret_key = config.CLOVA_OCR_SECRET
+    invoke_url = config.CLOVA_OCR_INVOKE_URL
+    secret_key = config.CLOVA_OCR_SECRET_KEY
     if not invoke_url or not secret_key:
         raise ValueError("OCR 처리 실패: CLOVA_OCR 설정이 누락되었습니다.")
     return invoke_url, secret_key
