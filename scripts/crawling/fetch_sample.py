@@ -15,10 +15,11 @@ dataset), this script collects a small sample and populates the RAG stack:
      L2-normalized for cosine similarity in pgvector.
 
 CLI:
-    # sample 50 rows, seed chunks + embeddings
+    # 운영 기본 — 200 rows (RAG 응답 다양성 확보용 권장 값)
     uv run python -m scripts.crawling.fetch_sample
 
-    # different sample size
+    # 더 큰/작은 sample
+    uv run python -m scripts.crawling.fetch_sample --limit 500
     uv run python -m scripts.crawling.fetch_sample --limit 10
 
     # DB structure only (no chunks, no embeddings)
@@ -80,7 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Fetch a small medicine data sample and seed RAG chunks.",
     )
-    parser.add_argument("--limit", type=int, default=50, help="Max rows to fetch (default: 50)")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=200,
+        help="Max rows to fetch (default: 200 — RAG 응답 다양성 권장값)",
+    )
     parser.add_argument("--api-key", type=str, default=None, help="data.go.kr API key (default: .env)")
     parser.add_argument(
         "--skip-embed",
@@ -231,14 +237,14 @@ async def _embed_and_insert_chunks(medicine: MedicineInfo) -> int:
 
 
 async def fetch_sample_run(
-    limit: int = 50,
+    limit: int = 200,
     skip_embed: bool = False,
     api_key: str | None = None,
 ) -> dict[str, int]:
     """End-to-end sample ingestion: fetch -> upsert -> chunk + embed.
 
     Args:
-        limit: Max rows to fetch from the API.
+        limit: Max rows to fetch from the API (default: 200, RAG 권장값).
         skip_embed: When True, MedicineInfo rows are upserted but no
             chunks or embeddings are produced.
         api_key: data.go.kr API key; defaults to config.DATA_GO_KR_API_KEY.
