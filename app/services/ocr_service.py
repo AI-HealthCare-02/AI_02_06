@@ -1,238 +1,153 @@
-"""OCR service module.
+"""OCR service module — Producer 측 (FastAPI).
 
-This module provides OCR (Optical Character Recognition) functionality
-for processing prescription images and extracting medication information.
+본 서비스는 HTTP 흐름의 thin layer 다:
+
+- ``enqueue_ocr_task``: 업로드 bytes 를 RQ ``ai`` 큐에 enqueue, draft_id 즉시 반환
+- ``get_draft_data``: Redis 폴링 — ``ocr_status`` / ``ocr_draft`` 키를 종합해 상태 반환
+- ``confirm_and_save``: 사용자 검수가 끝난 약품 메타를 DB 에 영구 저장
+
+OCR 자체 (CLOVA 호출 + 텍스트 정규화 + DB 매칭) 는 ai-worker 의
+``ai_worker.domains.ocr.jobs.process_ocr_task`` 가 비동기로 처리한다.
+LLM 은 더 이상 사용하지 않는다 — 약품 식별은 pg_trgm 매칭만으로 수행.
 """
 
 from datetime import datetime
-import json
 import os
-from pathlib import Path
-import shutil
-import tempfile
-import time
 from typing import Any
 import uuid
 
-from fastapi import BackgroundTasks, UploadFile
-import httpx
-from openai import AsyncOpenAI, OpenAIError
-from pydantic import BaseModel
+from fastapi import UploadFile
+from rq import Queue
 
 from app.core.config import config
-from app.core.redis_client import make_async_redis
-from app.dtos.ocr import ConfirmMedicationRequest, ExtractedMedicine, OcrExtractResponse
+from app.core.redis_client import make_async_redis, make_sync_redis
+from app.dtos.ocr import (
+    ConfirmMedicationRequest,
+    ExtractedMedicine,
+    OcrDraftPollResponse,
+    OcrDraftStatus,
+    OcrExtractResponse,
+)
 from app.models.medication import Medication
 
-# 공유 볼륨 경로 (Docker Compose의 ai-worker와 공유되어야 함)
-_UPLOAD_DIR = Path(os.environ.get("ALLOWED_IMAGE_DIR", tempfile.gettempdir())) / "ocr_images"
-_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-
-# Internal Pydantic model for LLM parsing results
-class LlmExtractionResult(BaseModel):
-    """LLM extraction result model for structured OCR parsing.
-
-    Attributes:
-        medicines: List of extracted medicine information.
-    """
-
-    medicines: list[ExtractedMedicine]
-
-
-async def _call_clova_ocr(image_path: Path) -> str:
-    invoke_url = os.environ.get("CLOVA_OCR_INVOKE_URL")
-    secret_key = os.environ.get("CLOVA_OCR_SECRET_KEY")
-    if not invoke_url or not secret_key:
-        raise ValueError("OCR processing failed: CLOVA_OCR environment variables not set.")
-
-    ext = image_path.suffix.lstrip(".").lower()
-    request_json = {
-        "images": [{"format": ext, "name": image_path.stem}],
-        "requestId": str(uuid.uuid4()),
-        "version": "V2",
-        "timestamp": round(time.time() * 1000),
-    }
-    with image_path.open("rb") as f:
-        image_data = f.read()
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(
-            invoke_url,
-            headers={"X-OCR-SECRET": secret_key},
-            data={"message": json.dumps(request_json).encode("UTF-8")},
-            files=[("file", (image_path.name, image_data))],
-        )
-    response.raise_for_status()
-    fields = response.json()["images"][0]["fields"]
-    return " ".join(field["inferText"] for field in fields)
+_OCR_JOB_REF = "ai_worker.domains.ocr.jobs.process_ocr_task"
+_DRAFT_TTL_SEC = 600  # 10분 — 사용자가 결과를 검수·확정하는 윈도우
+_TERMINAL_STATUSES: dict[str, OcrDraftStatus] = {
+    "no_text": OcrDraftStatus.NO_TEXT,
+    "no_candidates": OcrDraftStatus.NO_CANDIDATES,
+    "failed": OcrDraftStatus.FAILED,
+}
 
 
 class OCRService:
-    """OCR service for prescription image processing.
-
-    This service handles OCR processing of prescription images,
-    extracts medication information using LLM, and manages temporary data storage.
-    """
+    """FastAPI 측 OCR thin service — RQ producer + 결과 폴링 + DB 저장."""
 
     def __init__(self) -> None:
-        # Redis 연결 — keepalive + retry 옵션은 make_async_redis 일괄 적용
+        # 폴링·삭제용 async client + RQ enqueue 용 sync client. keepalive 일괄 적용.
         redis_url = os.environ.get("REDIS_URL", "redis://redis:6379")
         self.redis = make_async_redis(redis_url, decode_responses=True)
+        self._queue = Queue("ai", connection=make_sync_redis(redis_url))
 
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다.")
-        self.client = AsyncOpenAI(api_key=api_key)
+    async def enqueue_ocr_task(self, file: UploadFile) -> OcrExtractResponse:
+        """업로드 이미지를 ai-worker 로 enqueue 하고 draft_id 를 즉시 반환한다.
 
-    async def extract_and_parse_image(self, file: UploadFile) -> OcrExtractResponse:
-        # 1. 파일 임시 저장
-        image_path = _UPLOAD_DIR / f"{uuid.uuid4()}_{file.filename}"
-        with image_path.open("wb") as f:
-            shutil.copyfileobj(file.file, f)
+        Args:
+            file: 사용자가 업로드한 처방전 이미지 (UploadFile).
 
-        try:
-            # 2. Clova OCR 호출
-            raw_ocr_text = await _call_clova_ocr(image_path)
-            if not raw_ocr_text.strip():
-                raise ValueError("이미지에서 텍스트를 추출할 수 없습니다.")
+        Returns:
+            ``OcrExtractResponse`` — 빈 ``medicines`` 리스트와 ``draft_id`` 만 채워짐.
+            프론트는 이 ID 로 폴링한다.
+        """
+        image_bytes = await file.read()
+        draft_id = str(uuid.uuid4())
+        filename = file.filename or "prescription.jpg"
+        self._queue.enqueue(_OCR_JOB_REF, image_bytes, filename, draft_id)
+        return OcrExtractResponse(draft_id=draft_id, medicines=[])
 
-            # 3. LLM을 사용한 구조화 데이터 파싱 (Structured Outputs 적용)
-            parsed_data = await self._parse_text_with_llm(raw_ocr_text)
+    async def get_draft_data(self, draft_id: str) -> OcrDraftPollResponse:
+        """폴링 — ai-worker 의 처리 상태를 종합해 반환한다.
 
-            if not parsed_data.medicines:
-                raise ValueError("처방전에서 인식된 약 정보가 없습니다. 사진을 다시 찍어주세요.")
+        우선순위:
+        1. ``ocr_status:{draft_id}`` 가 있고 terminal (no_text/no_candidates/failed) → 해당 상태
+        2. ``ocr_draft:{draft_id}`` 가 있으면 → READY + medicines
+        3. 둘 다 없으면 → PENDING (아직 처리 중)
 
-            # 4. Redis에 임시 저장 (10분 만료)
-            draft_id = str(uuid.uuid4())
-            response_obj = OcrExtractResponse(draft_id=draft_id, medicines=parsed_data.medicines)
+        Args:
+            draft_id: enqueue 응답의 draft_id.
 
-            # Pydantic 모델을 JSON 문자열로 변환하여 Redis 저장
-            await self.redis.setex(
-                f"ocr_draft:{draft_id}",
-                600,  # 600초 (10분)
-                response_obj.model_dump_json(),
+        Returns:
+            ``OcrDraftPollResponse`` — 항상 status 를 동봉.
+        """
+        terminal = await self._read_terminal_status(draft_id)
+        if terminal is not None:
+            return OcrDraftPollResponse(draft_id=draft_id, status=terminal, medicines=[])
+
+        draft_json = await self.redis.get(f"ocr_draft:{draft_id}")
+        if draft_json:
+            extracted = OcrExtractResponse.model_validate_json(draft_json)
+            return OcrDraftPollResponse(
+                draft_id=draft_id,
+                status=OcrDraftStatus.READY,
+                medicines=extracted.medicines,
             )
+        return OcrDraftPollResponse(draft_id=draft_id, status=OcrDraftStatus.PENDING, medicines=[])
 
-            return response_obj
-
-        finally:
-            image_path.unlink(missing_ok=True)
-
-    async def _parse_text_with_llm(self, text: str) -> LlmExtractionResult:
-        """OCR 원문 텍스트를 LLM에 전달하여 정형화된 JSON 데이터로 파싱합니다."""
-        prompt = f"""당신은 한국 처방전 데이터 파싱 전문가입니다. 아래 OCR 텍스트에서 약품 정보를 추출하세요.
-
-[OCR 텍스트]
-{text}
-
-[추출 규칙]
-1. medicine_name: 약품명 오탈자를 보정하세요. (예: '타이레뉼' -> '타이레놀')
-2. dispensed_date: 처방전에 적힌 처방일(조제일)을 YYYY-MM-DD 형식으로 추출하세요. \
-모든 약품에 동일하게 적용됩니다. 없으면 null.
-3. department: 처방 진료과를 추출하세요. (예: '내과', '정형외과') 없으면 null.
-4. category: 약품 분류를 추론하세요. (예: '해열진통제', '항생제', '소화제') 없으면 null.
-5. dose_per_intake: 1회 복용량을 단위 포함하여 추출하세요. (예: '1정', '2캡슐', '5ml') 없으면 null.
-6. daily_intake_count: 하루에 몇 번 복용하는지 정수로 추출하세요. (예: 1일 3회 -> 3) 없으면 null.
-7. total_intake_days: 총 며칠간 복용하는지 정수로 추출하세요. (예: 5일치 -> 5) \
-daily_intake_count와 다른 값입니다. 없으면 null.
-8. intake_instruction: 복용 시점만 추출하세요. (예: '식후 30분', '취침 전', '공복') 없으면 null.
-
-[중요] daily_intake_count(1일 횟수)와 total_intake_days(총 일수)는 반드시 다른 값입니다.
-예시: "1일 3회 5일분" -> daily_intake_count=3, total_intake_days=5
-알 수 없는 필드는 반드시 null로 설정하세요."""
-        try:
-            response = await self.client.beta.chat.completions.parse(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                response_format=LlmExtractionResult,
-            )
-            return response.choices[0].message.parsed
-        except OpenAIError as e:
-            raise ValueError(f"LLM 파싱 실패: {e}") from e
-
-    async def get_draft_data(self, draft_id: str) -> OcrExtractResponse | None:
-        """Redis에서 워커가 완료한 데이터를 조회합니다 (Polling 대상)."""
-        data_json = await self.redis.get(f"ocr_draft:{draft_id}")
-        if data_json:
-            return OcrExtractResponse.model_validate_json(data_json)
-        return None
+    async def _read_terminal_status(self, draft_id: str) -> OcrDraftStatus | None:
+        """``ocr_status:{draft_id}`` 키에 terminal 상태가 있으면 반환."""
+        status_value = await self.redis.get(f"ocr_status:{draft_id}")
+        if status_value is None:
+            return None
+        return _TERMINAL_STATUSES.get(status_value)
 
     async def confirm_and_save(
         self,
         request: ConfirmMedicationRequest,
         profile_id: str,
-        background_tasks: BackgroundTasks,
     ) -> dict[str, Any]:
-        """최종 데이터를 DB에 저장하고, 가이드를 생성한 뒤 Redis를 정리합니다."""
-        saved_meds = []
+        """사용자 검수 완료된 약품 메타를 DB 에 영구 저장한다.
 
-        # 1. Redis 원자적 삭제 (중복 저장 방지 게이트)
-        # delete()는 삭제된 키 개수를 반환합니다. 0이면 이미 처리된 요청입니다.
+        Redis 의 draft 키는 atomic delete 로 게이트해 중복 저장을 방지한다.
+
+        Args:
+            request: 사용자가 검수·수정한 최종 약품 리스트.
+            profile_id: 약품을 등록할 프로필 ID.
+
+        Returns:
+            ``{"status": "success", "message": str}``.
+
+        Raises:
+            ValueError: 이미 처리되었거나 만료된 draft.
+        """
         deleted = await self.redis.delete(f"ocr_draft:{request.draft_id}")
         if deleted == 0:
             raise ValueError("이미 처리된 요청입니다. 새로 처방전을 등록해주세요.")
+        await self.redis.delete(f"ocr_status:{request.draft_id}")
 
-        # 2. DB 영구 저장 (Tortoise ORM)
-        for med in request.confirmed_medicines:
-            daily_count = med.daily_intake_count or 1
-            total_days = med.total_intake_days or 1
-            total_count = daily_count * total_days
-
-            today = datetime.now(tz=config.TIMEZONE).date()
-            new_med = await Medication.create(
-                profile_id=profile_id,
-                medicine_name=med.medicine_name,
-                department=med.department,
-                category=med.category,
-                dose_per_intake=med.dose_per_intake,
-                intake_instruction=med.intake_instruction,
-                daily_intake_count=daily_count,
-                total_intake_days=total_days,
-                intake_times=[],  # TODO: 복용 시간 설정 기능 (다음 sprint)
-                total_intake_count=total_count,
-                remaining_intake_count=total_count,
-                start_date=med.dispensed_date or today,
-                dispensed_date=med.dispensed_date,
-                is_active=True,
-            )
-            saved_meds.append(new_med)
-
-        # 3. LLM 복약 가이드 생성은 백그라운드에서 비동기 처리 (응답 블로킹 방지)
-        background_tasks.add_task(self._generate_final_guide, request.confirmed_medicines)
-
+        saved = [await self._save_one_medication(med, profile_id) for med in request.confirmed_medicines]
         return {
             "status": "success",
-            "message": f"{len(saved_meds)}개의 약품이 성공적으로 저장되었습니다.",
+            "message": f"{len(saved)}개의 약품이 성공적으로 저장되었습니다.",
         }
 
-    async def _generate_final_guide(self, medicines: list[ExtractedMedicine]) -> str:
-        """확정된 약품 리스트를 바탕으로 LLM을 호출하여 복약 가이드를 문자열로 만듭니다."""
-        medicines_text = "\n".join(
-            f"- {m.medicine_name} (1회 {m.dose_per_intake or '적정량'}, {m.intake_instruction or '지시대로 복용'})"
-            for m in medicines
+    async def _save_one_medication(self, med: ExtractedMedicine, profile_id: str) -> Medication:
+        """확정된 약품 한 건을 ``Medication`` 으로 저장."""
+        daily_count = med.daily_intake_count or 1
+        total_days = med.total_intake_days or 1
+        total_count = daily_count * total_days
+        today = datetime.now(tz=config.TIMEZONE).date()
+        return await Medication.create(
+            profile_id=profile_id,
+            medicine_name=med.medicine_name,
+            department=med.department,
+            category=med.category,
+            dose_per_intake=med.dose_per_intake,
+            intake_instruction=med.intake_instruction,
+            daily_intake_count=daily_count,
+            total_intake_days=total_days,
+            intake_times=[],  # TODO: 복용 시간 설정 기능 (다음 sprint)
+            total_intake_count=total_count,
+            remaining_intake_count=total_count,
+            start_date=med.dispensed_date or today,
+            dispensed_date=med.dispensed_date,
+            is_active=True,
         )
-
-        prompt = f"""당신은 친절하고 전문적인 약사 AI입니다.
-        아래 환자가 복용할 최종 확정된 약물 리스트를 바탕으로 복약 가이드를 작성해주세요.
-
-        [환자 복용 약물]
-        {medicines_text}
-
-        지침:
-        1. 각 약품의 일반적인 효능과 주요 주의사항(졸음, 위장장애 등)을 알기 쉽게 설명하세요.
-        2. 병용 금기나 주의해야 할 음식이 있다면 반드시 강조하세요.
-        3. 문장은 부드럽고 격려하는 톤으로 작성하세요.
-        4. 마지막에 반드시 다음 면책 문구를 포함하세요:
-           "⚠️ 이 안내는 참고용이며, 정확한 진단과 처방은 반드시 전문 의료인과 상의하십시오."
-        """
-        try:
-            response = await self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-            )
-            return response.choices[0].message.content or "가이드를 생성할 수 없습니다."
-        except OpenAIError:
-            return "약품은 정상적으로 저장되었으나, 복약 가이드를 생성하는 중 오류가 발생했습니다."

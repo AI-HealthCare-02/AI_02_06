@@ -1,33 +1,37 @@
 """OCR API router module.
 
-This module contains HTTP endpoints for OCR (Optical Character Recognition)
-operations including image processing, medication extraction, and data confirmation.
+본 라우터는 HTTP I/O 만 담당한다. CLOVA OCR 호출과 약품 매칭은
+ai-worker 의 ``process_ocr_task`` 가 비동기로 처리하며, FastAPI 는
+업로드 bytes 를 RQ 에 enqueue 하고 draft_id 를 즉시 반환한다.
+
+흐름:
+1. ``POST /ocr/extract`` -> 즉시 200 + draft_id (medicines=[])
+2. ``GET  /ocr/draft/{id}`` -> status (pending/ready/no_text/...) + medicines
+3. ``POST /ocr/confirm`` -> DB 영구 저장
 """
 
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from app.dependencies.security import get_current_account
-from app.dtos.ocr import ConfirmMedicationRequest, OcrExtractResponse
+from app.dtos.ocr import (
+    ConfirmMedicationRequest,
+    OcrDraftPollResponse,
+    OcrExtractResponse,
+)
 from app.models.accounts import Account
 from app.models.profiles import Profile, RelationType
 from app.services.ocr_service import OCRService
 
 router = APIRouter(prefix="/ocr", tags=["AI Integration"])
 
-# Allowed image MIME types
 ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"]
-# Maximum file size (5MB)
-MAX_FILE_SIZE = 5 * 1024 * 1024
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 
 
 def get_ocr_service() -> OCRService:
-    """Get OCR service instance for dependency injection.
-
-    Returns:
-        OCRService: OCR service instance.
-    """
+    """OCRService 인스턴스를 반환 (의존성 주입용)."""
     return OCRService()
 
 
@@ -35,109 +39,96 @@ def get_ocr_service() -> OCRService:
     "/extract",
     response_model=OcrExtractResponse,
     status_code=status.HTTP_200_OK,
-    summary="[PHASE 1] Extract prescription image and temporary storage",
+    summary="처방전 이미지 업로드 후 OCR 비동기 처리 시작",
 )
 async def extract_medication_from_image(
     file: Annotated[UploadFile, File(description="Prescription/medicine bag image to recognize")],
     ocr_service: Annotated[OCRService, Depends(get_ocr_service)],
 ) -> OcrExtractResponse:
-    """Extract structured data from prescription image using OCR and LLM.
+    """이미지를 ai-worker 로 enqueue 하고 draft_id 를 즉시 반환한다.
 
-    Processes the image through OCR and LLM pipeline to extract structured data,
-    then temporarily stores the result in Redis for security and returns a draft_id.
+    실제 OCR 처리는 ai-worker 의 RQ task 가 비동기로 수행한다. 프론트는
+    응답으로 받은 ``draft_id`` 로 ``/ocr/draft/{id}`` 를 폴링해 결과를 회수한다.
 
     Args:
-        file: Uploaded prescription or medicine bag image file.
-        ocr_service: OCR service instance.
+        file: 업로드된 처방전/약봉투 이미지 파일.
+        ocr_service: OCR 서비스 인스턴스.
 
     Returns:
-        OcrExtractResponse: Extracted medication data with draft_id.
+        ``OcrExtractResponse`` — ``draft_id`` 와 빈 ``medicines`` 리스트.
 
     Raises:
-        HTTPException: If file format unsupported, file too large, or processing fails.
+        HTTPException: 형식 미지원·크기 초과·파일 누락.
     """
-    # Validate file format
+    _validate_upload(file)
+    await file.seek(0)
+    return await ocr_service.enqueue_ocr_task(file)
+
+
+def _validate_upload(file: UploadFile) -> None:
+    """업로드 파일의 형식·크기를 검증한다."""
     if file.content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(status_code=400, detail="Unsupported file format.")
-
-    # Validate file size
-    # FastAPI's UploadFile provides size directly via .size attribute
-    if file.size > MAX_FILE_SIZE:
+    if file.size and file.size > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=413,
             detail=f"File size too large. (Max: {MAX_FILE_SIZE // (1024 * 1024)}MB)",
         )
 
-    # Reset file pointer to beginning before analysis
-    await file.seek(0)
-
-    try:
-        # Call service
-        result = await ocr_service.extract_and_parse_image(file)
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
 
 @router.get(
     "/draft/{draft_id}",
-    response_model=OcrExtractResponse,
-    summary="Get temporarily stored prescription data",
+    response_model=OcrDraftPollResponse,
+    summary="OCR 처리 결과 폴링 (status + medicines)",
 )
 async def get_draft_medication(
     draft_id: str,
     ocr_service: Annotated[OCRService, Depends(get_ocr_service)],
-) -> OcrExtractResponse:
-    """Safely retrieve data from frontend result page using draft_id.
+) -> OcrDraftPollResponse:
+    """폴링 — ai-worker 의 처리 상태를 종합해 반환한다.
+
+    응답의 ``status`` 가 ``pending`` 이면 프론트는 다시 폴링해야 하고,
+    ``ready`` 면 ``medicines`` 가 채워져 있다. 그 외(``no_text``,
+    ``no_candidates``, ``failed``)는 사용자에게 안내 메시지를 보여준다.
 
     Args:
-        draft_id: Draft ID for temporarily stored data.
-        ocr_service: OCR service instance.
+        draft_id: enqueue 응답의 draft_id.
+        ocr_service: OCR 서비스 인스턴스.
 
     Returns:
-        OcrExtractResponse: Retrieved prescription data.
-
-    Raises:
-        HTTPException: If draft data expired or not found.
+        ``OcrDraftPollResponse``.
     """
-    draft_data = await ocr_service.get_draft_data(draft_id)
-    if not draft_data:
-        raise HTTPException(status_code=404, detail="Expired or non-existent data.")
-    return draft_data
+    return await ocr_service.get_draft_data(draft_id)
 
 
 @router.post(
     "/confirm",
     status_code=status.HTTP_201_CREATED,
-    summary="[PHASE 3] Save modified prescription data to DB and generate guide",
+    summary="검수 완료 약품 메타를 DB 에 영구 저장",
 )
 async def confirm_and_save_medication(
     request: ConfirmMedicationRequest,
-    background_tasks: BackgroundTasks,
     ocr_service: Annotated[OCRService, Depends(get_ocr_service)],
     current_account: Annotated[Account, Depends(get_current_account)],
 ) -> dict:
-    """Save finalized medication list from frontend to DB and return medication guide.
+    """사용자가 검수·수정한 최종 약품 리스트를 DB 에 저장한다.
 
     Args:
-        request: Confirmation request with finalized medication data.
-        background_tasks: Background task runner for async guide generation.
-        ocr_service: OCR service instance.
-        current_account: Current authenticated account.
+        request: 검수 완료된 약품 리스트와 draft_id.
+        ocr_service: OCR 서비스 인스턴스.
+        current_account: 현재 인증된 계정.
 
     Returns:
-        dict: Response with saved medications and generated guide.
+        ``{"status": "success", "message": "N개 저장"}``.
 
     Raises:
-        HTTPException: If user profile not found or processing fails.
+        HTTPException: 프로필 없음 또는 처리 실패.
     """
-    # Find logged-in account's 'SELF' profile
     profile = await Profile.filter(
         account_id=current_account.id,
         relation_type=RelationType.SELF,
         deleted_at__isnull=True,
     ).first()
-
     if not profile:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -145,19 +136,6 @@ async def confirm_and_save_medication(
         )
 
     try:
-        result = await ocr_service.confirm_and_save(request, str(profile.id), background_tasks)
-        return result
-    except Exception as e:
-        # Print full error details to terminal in red
-        import traceback
-
-        print("\n" + "=" * 50)
-        print("🚨 Backend 500 error occurred! Detailed log:")
-        traceback.print_exc()
-        print("=" * 50 + "\n")
-
-        # Send detailed content to frontend response (Network tab)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Backend Error: {e!s} | Trace: {traceback.format_exc()}",
-        ) from e
+        return await ocr_service.confirm_and_save(request, str(profile.id))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
