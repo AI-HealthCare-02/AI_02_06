@@ -165,6 +165,18 @@ class LifestyleGuideService:
         return await self.enqueue_guide_generation(profile_id)
 
     async def get_guide_with_owner_check(self, guide_id: UUID, account_id: UUID) -> LifestyleGuide:
+        """Fetch one guide with ownership check.
+
+        Args:
+            guide_id: Target guide UUID.
+            account_id: Requesting account UUID.
+
+        Returns:
+            LifestyleGuide instance owned by ``account_id``.
+
+        Raises:
+            HTTPException: 404 if not found, 403 if owned by another account.
+        """
         guide = await self.guide_repo.get_by_id(guide_id)
         if not guide:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lifestyle guide not found.")
@@ -176,6 +188,18 @@ class LifestyleGuideService:
         profile_id: UUID,
         account_id: UUID,
     ) -> LifestyleGuide:
+        """Return the most recent guide of ``profile_id`` after ownership check.
+
+        Args:
+            profile_id: Owner profile UUID.
+            account_id: Requesting account UUID.
+
+        Returns:
+            Most recent LifestyleGuide for the profile.
+
+        Raises:
+            HTTPException: 404 if no guide exists, 403 if profile not owned.
+        """
         await self._verify_profile_ownership(profile_id, account_id)
         guide = await self.guide_repo.get_latest_by_profile(profile_id)
         if not guide:
@@ -190,6 +214,15 @@ class LifestyleGuideService:
         profile_id: UUID,
         account_id: UUID,
     ) -> list[LifestyleGuide]:
+        """List all guides of ``profile_id`` after ownership check.
+
+        Args:
+            profile_id: Owner profile UUID.
+            account_id: Requesting account UUID.
+
+        Returns:
+            All guides for the profile (newest first).
+        """
         await self._verify_profile_ownership(profile_id, account_id)
         return await self.guide_repo.get_all_by_profile(profile_id)
 
@@ -210,6 +243,18 @@ class LifestyleGuideService:
         guide_id: UUID,
         account_id: UUID,
     ) -> list[Challenge]:
+        """List challenges associated with a guide after ownership check.
+
+        Args:
+            guide_id: Source guide UUID.
+            account_id: Requesting account UUID.
+
+        Returns:
+            Challenges linked to the guide (may be empty).
+
+        Raises:
+            HTTPException: 404 if guide missing, 403 if owned by another account.
+        """
         guide = await self.guide_repo.get_by_id(guide_id)
         if not guide:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lifestyle guide not found.")

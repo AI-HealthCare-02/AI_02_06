@@ -137,6 +137,12 @@ Returns configuration needed for frontend to redirect to Kakao login page.
     """,
 )
 async def get_kakao_oauth_config() -> OAuthConfigResponse:
+    """Return Kakao OAuth client config (authorize URL + client_id) for the frontend.
+
+    Returns:
+        OAuthConfigResponse: ``authorize_url`` adapts to environment
+        (local → mock server, dev/prod → real Kakao endpoint).
+    """
     # authorize_url: Browser must access external URL
     # - local: Mock server (development convenience)
     # - dev/prod: Actual Kakao server
@@ -188,6 +194,23 @@ async def kakao_callback(
     error: Annotated[str | None, Query(description="에러 코드")] = None,
     error_description: Annotated[str | None, Query(description="에러 설명")] = None,
 ) -> JSONResponse:
+    """Handle Kakao OAuth callback — exchange code for tokens and issue JWT.
+
+    Args:
+        request: FastAPI Request (used to read client IP for audit).
+        oauth_service: Injected ``OAuthService``.
+        code: Kakao authorization code (success path).
+        state: CSRF protection state.
+        error: Kakao-side error code (failure path).
+        error_description: Human-readable Kakao error description.
+
+    Returns:
+        JSONResponse with access/refresh tokens on success.
+
+    Raises:
+        HTTPException: 400 on Kakao error reply or missing code,
+            502 on upstream Kakao failure, 429 on rate limit.
+    """
     # 카카오에서 에러 응답이 온 경우
     if error:
         raise HTTPException(
@@ -298,6 +321,19 @@ async def refresh_token(
     request: Request,
     oauth_service: Annotated[OAuthService, Depends(get_oauth_service)],
 ) -> JSONResponse:
+    """Refresh access token using the rotating refresh-token cookie.
+
+    Args:
+        request: FastAPI Request (refresh_token cookie source).
+        oauth_service: Injected ``OAuthService`` for RTR rotation.
+
+    Returns:
+        JSONResponse with new access/refresh token pair.
+
+    Raises:
+        HTTPException: 401 if refresh token missing/invalid,
+            403 if reuse detected (account compromised, force re-login).
+    """
     # 쿠키에서 refresh token 추출
     refresh_token_str = request.cookies.get("refresh_token")
 
@@ -361,6 +397,16 @@ async def delete_account(
     current_account: Annotated[Account, Depends(get_current_account)],
     oauth_service: Annotated[OAuthService, Depends(get_oauth_service)],
 ) -> Response:
+    """Soft-delete the current account and invalidate all tokens.
+
+    Args:
+        request: FastAPI Request (reserved for future audit log).
+        current_account: Authenticated account to delete.
+        oauth_service: Injected ``OAuthService``.
+
+    Returns:
+        204 No Content with both auth cookies cleared.
+    """
     await oauth_service.delete_account(current_account)
 
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -392,6 +438,17 @@ async def delete_account(
 async def get_me(
     current_account: Annotated[Account, Depends(get_current_account)],
 ) -> AuthMeResponse:
+    """Return the authenticated account id.
+
+    Used by the frontend to verify whether the access_token cookie is valid
+    without parsing the JWT client-side.
+
+    Args:
+        current_account: Authenticated account (raises 401 upstream if missing).
+
+    Returns:
+        AuthMeResponse: ``{"account_id": "<uuid>"}``.
+    """
     return AuthMeResponse(account_id=str(current_account.id))
 
 
@@ -408,6 +465,15 @@ async def logout(
     request: Request,
     oauth_service: Annotated[OAuthService, Depends(get_oauth_service)],
 ) -> Response:
+    """Revoke the refresh token in DB and clear both auth cookies.
+
+    Args:
+        request: FastAPI Request (refresh_token cookie source).
+        oauth_service: Injected ``OAuthService``.
+
+    Returns:
+        204 No Content with cookies cleared.
+    """
     # 쿠키에서 refresh token 추출
     refresh_token = request.cookies.get("refresh_token")
 

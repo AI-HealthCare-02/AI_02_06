@@ -71,6 +71,7 @@ class InMemoryPendingTurnStore:
         self._store: dict[str, tuple[PendingTurn, float]] = {}
 
     async def create(self, turn: PendingTurn) -> str:
+        """Persist a pending turn and return its newly assigned ``turn_id``."""
         turn_id = str(uuid.uuid4())
         stamped = turn.model_copy(update={"turn_id": turn_id})
         expires_at = self._clock() + self._ttl
@@ -78,6 +79,7 @@ class InMemoryPendingTurnStore:
         return turn_id
 
     async def claim(self, turn_id: str) -> PendingTurn | None:
+        """Atomically pop a pending turn — returns ``None`` if missing/expired."""
         record = self._store.get(turn_id)
         if record is None:
             return None
@@ -89,6 +91,7 @@ class InMemoryPendingTurnStore:
         return turn
 
     async def exists(self, turn_id: str) -> bool:
+        """Return whether a non-expired entry exists for ``turn_id``."""
         record = self._store.get(turn_id)
         if record is None:
             return False
@@ -107,6 +110,7 @@ class RedisPendingTurnStore:
         self._ttl = ttl_sec
 
     async def create(self, turn: PendingTurn) -> str:
+        """Persist ``turn`` to Redis with TTL and return the newly assigned id."""
         turn_id = str(uuid.uuid4())
         stamped = turn.model_copy(update={"turn_id": turn_id})
         await self._redis.setex(_key(turn_id), self._ttl, stamped.model_dump_json())
@@ -114,6 +118,7 @@ class RedisPendingTurnStore:
         return turn_id
 
     async def claim(self, turn_id: str) -> PendingTurn | None:
+        """Atomic GETDEL — returns the stored turn or ``None`` if missing/stale."""
         raw = await self._redis.getdel(_key(turn_id))
         if raw is None:
             logger.warning("[ToolCalling] pending store claim miss turn=%s (expired or unknown)", turn_id)
@@ -130,4 +135,5 @@ class RedisPendingTurnStore:
         return pending
 
     async def exists(self, turn_id: str) -> bool:
+        """Cheap presence check (does NOT consume the key)."""
         return bool(await self._redis.exists(_key(turn_id)))

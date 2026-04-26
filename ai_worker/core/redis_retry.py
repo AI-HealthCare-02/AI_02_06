@@ -58,10 +58,12 @@ def redis_retry(
     """
 
     def decorator(func: Callable) -> Callable:
+        """Inner decorator — picks sync or async wrapper based on ``func``."""
         if asyncio.iscoroutinefunction(func):
 
             @functools.wraps(func)
             async def async_wrapper(*args, **kwargs):
+                """Async retry wrapper — exponential backoff on Redis IO error."""
                 last_exc: BaseException | None = None
                 for attempt in range(1, max_attempts + 1):
                     try:
@@ -86,6 +88,7 @@ def redis_retry(
 
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs):
+            """Sync retry wrapper — exponential backoff on Redis IO error."""
             last_exc: BaseException | None = None
             for attempt in range(1, max_attempts + 1):
                 try:
