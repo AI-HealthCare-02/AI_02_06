@@ -1,127 +1,148 @@
-"""OCR service module — Producer 측 (FastAPI).
+"""OCR service — Producer 측 (FastAPI), DB 영속 저장 정책.
 
 본 서비스는 HTTP 흐름의 thin layer 다:
 
-- ``enqueue_ocr_task``: 업로드 bytes 를 RQ ``ai`` 큐에 enqueue, draft_id 즉시 반환
-- ``get_draft_data``: Redis 폴링 — ``ocr_status`` / ``ocr_draft`` 키를 종합해 상태 반환
-- ``confirm_and_save``: 사용자 검수가 끝난 약품 메타를 DB 에 영구 저장
+- ``enqueue_ocr_task``: 업로드 bytes -> dedup 체크 -> ocr_drafts INSERT
+  (또는 기존 활성 draft 재사용) -> RQ ``ai`` 큐에 enqueue -> draft_id 반환
+- ``get_draft_data``: ocr_drafts SELECT -> ``OcrDraftPollResponse``
+- ``list_active_drafts``: main 페이지 카드용 — 24h 안 미consume draft 리스트
+- ``confirm_and_save``: ocr_drafts 의 consumed_at 을 atomic 으로 설정한 뒤
+  Medication 영구 저장
 
 OCR 자체 (CLOVA 호출 + 텍스트 정규화 + DB 매칭) 는 ai-worker 의
-``ai_worker.domains.ocr.jobs.process_ocr_task`` 가 비동기로 처리한다.
-LLM 은 더 이상 사용하지 않는다 — 약품 식별은 pg_trgm 매칭만으로 수행.
+``ai_worker.domains.ocr.jobs.process_ocr_task`` 가 비동기로 처리하고
+ocr_drafts 를 직접 UPDATE 한다. Redis 는 더 이상 결과 저장에 사용하지 않으며
+RQ 큐 broker 로만 쓰인다.
 """
 
 from datetime import datetime
+import hashlib
 import os
 from typing import Any
-import uuid
+from uuid import UUID
 
 from fastapi import UploadFile
 from rq import Queue
 
 from app.core.config import config
-from app.core.redis_client import make_async_redis, make_sync_redis
+from app.core.redis_client import make_sync_redis
 from app.dtos.ocr import (
     ConfirmMedicationRequest,
     ExtractedMedicine,
+    OcrActiveDraftsResponse,
     OcrDraftPollResponse,
     OcrDraftStatus,
+    OcrDraftSummary,
     OcrExtractResponse,
 )
 from app.models.medication import Medication
+from app.models.ocr_draft import OcrDraft
+from app.repositories.ocr_draft_repository import OcrDraftRepository
 
 _OCR_JOB_REF = "ai_worker.domains.ocr.jobs.process_ocr_task"
-_DRAFT_TTL_SEC = 600  # 10분 — 사용자가 결과를 검수·확정하는 윈도우
-_TERMINAL_STATUSES: dict[str, OcrDraftStatus] = {
-    "no_text": OcrDraftStatus.NO_TEXT,
-    "no_candidates": OcrDraftStatus.NO_CANDIDATES,
-    "failed": OcrDraftStatus.FAILED,
-}
 
 
 class OCRService:
-    """FastAPI 측 OCR thin service — RQ producer + 결과 폴링 + DB 저장."""
+    """FastAPI 측 OCR thin service — RQ producer + DB 영속 + 결과 폴링."""
 
-    def __init__(self) -> None:
-        # 폴링·삭제용 async client + RQ enqueue 용 sync client. keepalive 일괄 적용.
+    def __init__(self, repository: OcrDraftRepository | None = None) -> None:
+        # RQ enqueue 용 sync client. keepalive 일괄 적용. 결과 저장은 DB 가
+        # 담당하므로 polling/delete 용 redis client 는 불필요.
         redis_url = os.environ.get("REDIS_URL", "redis://redis:6379")
-        self.redis = make_async_redis(redis_url, decode_responses=True)
         self._queue = Queue("ai", connection=make_sync_redis(redis_url))
+        self._repository = repository or OcrDraftRepository()
 
-    async def enqueue_ocr_task(self, file: UploadFile) -> OcrExtractResponse:
-        """업로드 이미지를 ai-worker 로 enqueue 하고 draft_id 를 즉시 반환한다.
+    async def enqueue_ocr_task(self, file: UploadFile, profile_id: UUID | str) -> OcrExtractResponse:
+        """업로드 bytes 를 ai-worker 로 enqueue 한다 (dedup 적용).
+
+        같은 사용자 + 같은 image_hash + 미consume 인 draft 가 이미 있으면
+        새 enqueue 없이 기존 draft_id 를 반환한다.
 
         Args:
-            file: 사용자가 업로드한 처방전 이미지 (UploadFile).
+            file: 사용자가 업로드한 처방전 이미지.
+            profile_id: 업로드한 프로필 ID.
 
         Returns:
-            ``OcrExtractResponse`` — 빈 ``medicines`` 리스트와 ``draft_id`` 만 채워짐.
-            프론트는 이 ID 로 폴링한다.
+            ``OcrExtractResponse`` — draft_id 와 빈 medicines 리스트.
         """
         image_bytes = await file.read()
-        draft_id = str(uuid.uuid4())
+        image_hash = hashlib.sha256(image_bytes).hexdigest()
         filename = file.filename or "prescription.jpg"
-        self._queue.enqueue(_OCR_JOB_REF, image_bytes, filename, draft_id)
-        return OcrExtractResponse(draft_id=draft_id, medicines=[])
 
-    async def get_draft_data(self, draft_id: str) -> OcrDraftPollResponse:
-        """폴링 — ai-worker 의 처리 상태를 종합해 반환한다.
+        existing = await self._repository.find_active_by_hash(profile_id, image_hash)
+        if existing is not None:
+            return OcrExtractResponse(draft_id=str(existing.id), medicines=[])
 
-        우선순위:
-        1. ``ocr_status:{draft_id}`` 가 있고 terminal (no_text/no_candidates/failed) → 해당 상태
-        2. ``ocr_draft:{draft_id}`` 가 있으면 → READY + medicines
-        3. 둘 다 없으면 → PENDING (아직 처리 중)
+        draft = await self._repository.create_pending(profile_id, image_hash, filename)
+        self._queue.enqueue(_OCR_JOB_REF, image_bytes, filename, str(draft.id))
+        return OcrExtractResponse(draft_id=str(draft.id), medicines=[])
+
+    async def get_draft_data(
+        self,
+        draft_id: UUID | str,
+        profile_id: UUID | str,
+    ) -> OcrDraftPollResponse | None:
+        """폴링 — DB 에서 draft 를 조회해 status + medicines 를 반환한다.
 
         Args:
             draft_id: enqueue 응답의 draft_id.
+            profile_id: 요청자 프로필 ID (ownership 검증).
 
         Returns:
-            ``OcrDraftPollResponse`` — 항상 status 를 동봉.
+            ``OcrDraftPollResponse`` 또는 ``None`` (없거나 타인 소유).
         """
-        terminal = await self._read_terminal_status(draft_id)
-        if terminal is not None:
-            return OcrDraftPollResponse(draft_id=draft_id, status=terminal, medicines=[])
-
-        draft_json = await self.redis.get(f"ocr_draft:{draft_id}")
-        if draft_json:
-            extracted = OcrExtractResponse.model_validate_json(draft_json)
-            return OcrDraftPollResponse(
-                draft_id=draft_id,
-                status=OcrDraftStatus.READY,
-                medicines=extracted.medicines,
-            )
-        return OcrDraftPollResponse(draft_id=draft_id, status=OcrDraftStatus.PENDING, medicines=[])
-
-    async def _read_terminal_status(self, draft_id: str) -> OcrDraftStatus | None:
-        """``ocr_status:{draft_id}`` 키에 terminal 상태가 있으면 반환."""
-        status_value = await self.redis.get(f"ocr_status:{draft_id}")
-        if status_value is None:
+        draft = await self._repository.get_by_id(draft_id, profile_id)
+        if draft is None:
             return None
-        return _TERMINAL_STATUSES.get(status_value)
+        return _to_poll_response(draft)
+
+    async def list_active_drafts(self, profile_id: UUID | str) -> OcrActiveDraftsResponse:
+        """Main 페이지 카드용 — 사용자의 활성 draft 요약 목록.
+
+        Args:
+            profile_id: 요청자 프로필 ID.
+
+        Returns:
+            ``OcrActiveDraftsResponse`` — 빈 리스트일 수 있음 (초기 사용자 등).
+        """
+        drafts = await self._repository.list_active(profile_id)
+        return OcrActiveDraftsResponse(drafts=[_to_summary(d) for d in drafts])
+
+    async def discard_draft(self, draft_id: UUID | str, profile_id: UUID | str) -> bool:
+        """사용자가 검수 화면에서 "다시 촬영" 등으로 draft 를 폐기 처리.
+
+        ``consumed_at`` 을 설정해 active list 와 dedup 검색에서 제외시킨다
+        (soft delete). row 자체는 24h 까지 보관 — 통계·감사용.
+
+        Args:
+            draft_id: 폐기할 draft ID.
+            profile_id: 요청자 프로필 ID (ownership 검증).
+
+        Returns:
+            ``True`` 면 새로 폐기, ``False`` 면 이미 처리됨/없음/타인 소유.
+        """
+        return await self._repository.mark_consumed(draft_id, profile_id)
 
     async def confirm_and_save(
         self,
         request: ConfirmMedicationRequest,
-        profile_id: str,
+        profile_id: UUID | str,
     ) -> dict[str, Any]:
-        """사용자 검수 완료된 약품 메타를 DB 에 영구 저장한다.
-
-        Redis 의 draft 키는 atomic delete 로 게이트해 중복 저장을 방지한다.
+        """검수 완료된 약품을 DB 에 영구 저장하고 draft 를 consume 처리.
 
         Args:
-            request: 사용자가 검수·수정한 최종 약품 리스트.
-            profile_id: 약품을 등록할 프로필 ID.
+            request: 검수된 약품 리스트 + draft_id.
+            profile_id: 요청자 프로필 ID.
 
         Returns:
             ``{"status": "success", "message": str}``.
 
         Raises:
-            ValueError: 이미 처리되었거나 만료된 draft.
+            ValueError: draft 가 이미 처리됐거나 만료·없음·타인 소유.
         """
-        deleted = await self.redis.delete(f"ocr_draft:{request.draft_id}")
-        if deleted == 0:
-            raise ValueError("이미 처리된 요청입니다. 새로 처방전을 등록해주세요.")
-        await self.redis.delete(f"ocr_status:{request.draft_id}")
+        consumed = await self._repository.mark_consumed(request.draft_id, profile_id)
+        if not consumed:
+            raise ValueError("이미 처리되었거나 만료된 처방전입니다. 새로 등록해주세요.")
 
         saved = [await self._save_one_medication(med, profile_id) for med in request.confirmed_medicines]
         return {
@@ -129,14 +150,14 @@ class OCRService:
             "message": f"{len(saved)}개의 약품이 성공적으로 저장되었습니다.",
         }
 
-    async def _save_one_medication(self, med: ExtractedMedicine, profile_id: str) -> Medication:
+    async def _save_one_medication(self, med: ExtractedMedicine, profile_id: UUID | str) -> Medication:
         """확정된 약품 한 건을 ``Medication`` 으로 저장."""
         daily_count = med.daily_intake_count or 1
         total_days = med.total_intake_days or 1
         total_count = daily_count * total_days
         today = datetime.now(tz=config.TIMEZONE).date()
         return await Medication.create(
-            profile_id=profile_id,
+            profile_id=str(profile_id),
             medicine_name=med.medicine_name,
             department=med.department,
             category=med.category,
@@ -151,3 +172,21 @@ class OCRService:
             dispensed_date=med.dispensed_date,
             is_active=True,
         )
+
+
+def _to_poll_response(draft: OcrDraft) -> OcrDraftPollResponse:
+    """OcrDraft → 폴링 응답 DTO 매핑."""
+    return OcrDraftPollResponse(
+        draft_id=str(draft.id),
+        status=OcrDraftStatus(draft.status),
+        medicines=[ExtractedMedicine.model_validate(m) for m in (draft.medicines or [])],
+    )
+
+
+def _to_summary(draft: OcrDraft) -> OcrDraftSummary:
+    """OcrDraft → main 카드 summary 매핑."""
+    return OcrDraftSummary(
+        draft_id=str(draft.id),
+        status=OcrDraftStatus(draft.status),
+        created_at=draft.created_at,
+    )

@@ -53,25 +53,24 @@ _MEDICINE_NAME_SUFFIXES: tuple[str, ...] = (
 _FALLBACK_MIN_LENGTH = 3
 
 
-def match_candidates_to_medicines(candidates: list[str]) -> list[ExtractedMedicine]:
-    """후보 토큰 리스트를 medicine_info 의 약품 객체 리스트로 매핑한다.
+async def search_candidates_in_open_db(candidates: list[str]) -> list[ExtractedMedicine]:
+    """후보 토큰 리스트를 약품 매칭한다 — Tortoise 가 이미 init 된 상태 가정.
 
-    동기 RQ task 내부에서 호출되므로 ``asyncio.run`` 으로 비동기 검색을
-    감싸 실행한다. ai-worker 는 Tortoise 가 init 되어 있지 않으므로 본
-    함수가 init/close 를 책임진다.
+    호출자가 lifecycle 을 관리하므로 (예: jobs.py 의 ``_async_db_part``) 본 함수는
+    init/close 를 하지 않는다. ai-worker 안의 RQ task 가 1회 init 으로 매칭 +
+    ``ocr_drafts`` UPDATE 를 모두 묶어 처리하기 위함.
 
-    DB 매칭에 실패한 후보 중 약품명 패턴 (정/캡슐/시럽/...) 을 가진 토큰은
-    raw 상태로 추가한다 — 사용자가 검수 화면에서 직접 등록·수정할 수 있도록
-    OCR 결과를 잃지 않기 위함.
+    DB 매칭 실패한 후보 중 약품명 패턴 (정/캡슐/시럽/...) 을 가진 토큰은 raw
+    상태로 추가한다.
 
     Args:
         candidates: ``extract_medicine_candidates`` 가 반환한 토큰 리스트.
 
     Returns:
-        중복 제거된 ``ExtractedMedicine`` 리스트. DB 매칭 우선, fallback 후순.
+        중복 제거된 ``ExtractedMedicine`` 리스트 (DB 매칭 우선, fallback 후순).
     """
     matched: list[ExtractedMedicine] = []
-    db_match_count = asyncio.run(_run_with_db_lifecycle(candidates, matched))
+    db_match_count = await _search_into(candidates, matched)
     fallback_count = len(matched) - db_match_count
     logger.info(
         "DB matching: %d candidates -> %d matched (db=%d, fallback=%d)",
@@ -83,15 +82,27 @@ def match_candidates_to_medicines(candidates: list[str]) -> list[ExtractedMedici
     return matched
 
 
-async def _run_with_db_lifecycle(candidates: list[str], matched: list[ExtractedMedicine]) -> int:
-    """Tortoise init -> 검색 -> close 를 묶어 한 번의 lifecycle 로 실행.
+def match_candidates_to_medicines(candidates: list[str]) -> list[ExtractedMedicine]:
+    """후보 토큰 리스트를 약품 객체로 매핑한다 — 자체 Tortoise lifecycle 포함.
+
+    스크립트·테스트 등 Tortoise 가 init 되지 않은 환경에서도 안전하게 호출할
+    수 있도록 init/close 를 직접 관리한다. RQ task 안에서는 lifecycle 중복을
+    피하기 위해 ``search_candidates_in_open_db`` 를 직접 호출하는 게 권장된다.
+
+    Args:
+        candidates: ``extract_medicine_candidates`` 가 반환한 토큰 리스트.
 
     Returns:
-        DB 매칭으로 추가된 약품 개수 (fallback 제외 — 호출자 통계용).
+        중복 제거된 ``ExtractedMedicine`` 리스트.
     """
+    return asyncio.run(_run_with_db_lifecycle(candidates))
+
+
+async def _run_with_db_lifecycle(candidates: list[str]) -> list[ExtractedMedicine]:
+    """Tortoise init -> 검색 -> close 를 묶어 한 번의 lifecycle 로 실행."""
     await Tortoise.init(config=TORTOISE_ORM)
     try:
-        return await _search_into(candidates, matched)
+        return await search_candidates_in_open_db(candidates)
     finally:
         await Tortoise.close_connections()
 
