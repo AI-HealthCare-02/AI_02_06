@@ -154,9 +154,9 @@ class MedicineInfo(models.Model):
         description="Shelf-life description (VALID_TERM)",
     )
     pack_unit = fields.CharField(
-        max_length=256,
+        max_length=2048,
         null=True,
-        description="Packaging unit description (PACK_UNIT)",
+        description="Packaging unit description (PACK_UNIT) — 일부 품목은 256 자 초과 가능",
     )
     atc_code = fields.CharField(
         max_length=32,

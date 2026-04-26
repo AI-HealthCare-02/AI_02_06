@@ -45,10 +45,10 @@ class TestMedicineInfoSchemaChange:
         assert fields_map["valid_term"].null is True
 
     def test_pack_unit_column_added(self) -> None:
-        """포장단위(PACK_UNIT) 컬럼이 VARCHAR(256)로 추가되어야 한다."""
+        """포장단위(PACK_UNIT) 컬럼이 VARCHAR(2048)로 추가되어야 한다."""
         fields_map = MedicineInfo._meta.fields_map
         assert "pack_unit" in fields_map
-        assert fields_map["pack_unit"].max_length == 256
+        assert fields_map["pack_unit"].max_length == 2048
         assert fields_map["pack_unit"].null is True
 
     def test_atc_code_column_added(self) -> None:
