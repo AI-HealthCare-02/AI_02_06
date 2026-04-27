@@ -31,6 +31,7 @@ TORTOISE_APP_MODELS: list[str] = [
     "app.models.intake_log",
     "app.models.data_sync_log",
     "app.models.ocr_draft",
+    "app.models.drug_recall",
 ]
 
 # Tortoise ORM configuration

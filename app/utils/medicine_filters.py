@@ -34,6 +34,40 @@ _SELF_INJECT_KEYWORDS: tuple[str, ...] = (
     "프리필드",
 )
 
+# ── 의약외품·생활용품 차단 키워드 (Phase 7 — 회수 API 노이즈 필터) ────
+# 식약처 회수 API 는 의약외품(치약·칫솔·생리대·붕대 등) 도 함께 반환한다.
+# 우리 서비스는 처방약 도메인이므로 적재 단계에서 제외.
+# `RECALL_FILTER_NON_DRUG` env 토글로 비활성 가능.
+_NON_DRUG_KEYWORDS: tuple[str, ...] = (
+    "칫솔",
+    "치약",
+    "구강세정제",
+    "마우스워시",
+    "생리대",
+    "탐폰",
+    "팬티라이너",
+    "기저귀",
+    "붕대",
+    "거즈",
+    "반창고",
+    "밴드",
+    "콘돔",
+    "마스크",
+    "체온계",
+    "혈압계",
+    "혈당계",
+    "안경",
+    "콘택트렌즈",
+    "보청기",
+    "소독제",
+    "손세정제",
+    "세척제",
+    "비누",
+    "샴푸",
+    "린스",
+    "로션",
+)
+
 
 def is_hospital_only(product_name: str) -> bool:
     """Check whether a product name indicates a hospital-only formulation.
@@ -60,3 +94,23 @@ def is_hospital_only(product_name: str) -> bool:
 
     has_self_inject = any(kw in product_name for kw in _SELF_INJECT_KEYWORDS)
     return not has_self_inject
+
+
+def is_non_drug_product(product_name: str) -> bool:
+    """Check whether a product is a consumer non-drug item (toothbrush, etc.).
+
+    Toggle via ``config.RECALL_FILTER_NON_DRUG`` at the call site —
+    this predicate is purely a keyword check.
+
+    Args:
+        product_name: Korean product name as returned by the recall API.
+
+    Returns:
+        True if the product matches a non-drug keyword and should be
+        excluded from the consumer-medication recall corpus. Empty input
+        returns False.
+    """
+    if not product_name:
+        return False
+
+    return any(kw in product_name for kw in _NON_DRUG_KEYWORDS)
