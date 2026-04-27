@@ -4,6 +4,9 @@ This module contains the FastAPI application setup, middleware configuration,
 and global exception handlers.
 """
 
+import logging
+import traceback
+
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +18,10 @@ from app.core.config import Env, config
 from app.db.databases import initialize_tortoise
 from app.middlewares.rate_limit import RateLimitMiddleware
 from app.middlewares.security import SecurityMiddleware
+from app.services.rag import get_rag_pipeline
 from app.workers.scheduler import scheduler_lifespan
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     docs_url="/api/docs",
@@ -104,8 +110,6 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
     Returns:
         JSONResponse: 500 Internal Server Error response.
     """
-    import traceback
-
     print(f"[ERROR] {request.method} {request.url.path}: {type(exc).__name__}: {exc}")
     traceback.print_exc()
 
@@ -164,12 +168,7 @@ app.include_router(v1_routers)
 @app.on_event("startup")
 async def startup_preload_rag() -> None:
     """Pre-load RAG pipeline on startup to avoid first-request latency."""
-    import logging
-
-    logger = logging.getLogger(__name__)
     try:
-        from app.services.rag import get_rag_pipeline
-
         logger.info("Pre-loading RAG pipeline...")
         await get_rag_pipeline()
         logger.info("RAG pipeline pre-loaded successfully.")

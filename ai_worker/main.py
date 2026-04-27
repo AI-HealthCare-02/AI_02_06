@@ -13,6 +13,8 @@ import time
 # Add project root to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from rq import Queue, SimpleWorker
+
 from ai_worker.core.config import config
 from ai_worker.core.logger import get_logger
 from ai_worker.core.redis_client import make_sync_redis
@@ -104,9 +106,6 @@ def main() -> None:
     # Warm up the embedding model before accepting jobs so the first
     # user-facing request does not pay the cold-start cost.
     warmup_embedding_model()
-
-    # Import RQ components (inside function for version compatibility)
-    from rq import Queue, SimpleWorker
 
     # ── Redis 연결 옵션 (BLPOP 자연 반환 후 reconnect 안정화) ──────────
     # SimpleWorker.work() 은 BLPOP 타임아웃(=worker_ttl-15s) 이 풀릴 때마다

@@ -26,6 +26,10 @@ async def get_rag_pipeline() -> "RAGPipeline":  # noqa: F821  # forward ref reso
     global _pipeline
 
     if _pipeline is None:
+        # 의도적 lazy import — top-level 로 올리면 ``app.services.rag`` 패키지의
+        # 초기화 단계에서 ``app.dtos.rag`` → ``app.services.rag.config`` 의 순환
+        # import 가 발생한다. CLAUDE.md §8.5 의 lazy import 금지 정책 예외 (circular
+        # 회피 + 무거운 RAGPipeline graph 의 startup-trigger 최소화).
         from rq import Queue
 
         from app.core.config import config

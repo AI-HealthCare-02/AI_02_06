@@ -6,6 +6,11 @@ primitives in/out). 실제 로직은 도메인 안의 함수형 모듈에 위임
 - ``embed_text_job`` → ``embedding_provider.encode_text``
 - ``rewrite_query_job`` → ``query_rewriter.rewrite_user_query``
 - ``generate_chat_response_job`` → ``response_generator.generate_response``
+
+각 job 함수 안에서 implementation 모듈을 lazy import 하는 이유:
+worker process 의 cold start latency (sentence-transformers / torch /
+transformers 같은 무거운 의존성 로드) 를 첫 task 시점까지 미루기 위함.
+CLAUDE.md §8.5 의 lazy import 금지 정책 예외 (성능 critical path).
 """
 
 from app.dtos.rag import RewriteStatus

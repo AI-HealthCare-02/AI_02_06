@@ -18,10 +18,7 @@ import asyncio
 import time
 from typing import Any
 
-try:
-    from rq import Queue  # pragma: no cover — type hint only
-except ImportError:  # pragma: no cover
-    Queue = Any  # type: ignore[misc, assignment]
+from rq import Queue
 
 from app.dtos.rag import (
     ChatCompletion,

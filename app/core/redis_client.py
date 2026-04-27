@@ -19,6 +19,7 @@ Idle drop / 좀비 커넥션 대비:
 
 import redis
 from redis.asyncio import Redis as AsyncRedis
+from redis.asyncio import from_url as async_from_url
 from redis.backoff import ExponentialBackoff
 from redis.retry import Retry
 
@@ -58,7 +59,5 @@ def make_async_redis(url: str, **overrides) -> AsyncRedis:
         Hardened ``redis.asyncio.Redis`` instance — PendingTurnStore 등
         FastAPI 라우터 흐름 안에서 await 가능.
     """
-    from redis.asyncio import from_url as async_from_url
-
     kwargs = {**_KEEPALIVE_KWARGS, **overrides}
     return async_from_url(url, **kwargs)

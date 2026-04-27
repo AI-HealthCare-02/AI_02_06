@@ -3,6 +3,9 @@
 FastAPI 측 ``SessionCompactService`` 가 ``ai`` 큐로 enqueue 한다. 오염
 필터(out_of_scope / general_chat 제거) 는 FastAPI 측에서 미리 수행된다고
 가정하며, 본 워커 측 job 은 LLM 호출과 직렬화만 담당한다.
+
+job 함수 안의 lazy import 는 ``ai_worker/domains/rag/jobs.py`` 와 동일한
+의도 — worker cold start 단축 (CLAUDE.md §8.5 의 lazy 금지 정책 예외).
 """
 
 

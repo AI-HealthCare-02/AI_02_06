@@ -7,6 +7,7 @@ including creation, AI response generation, and ownership verification.
 from datetime import UTC, datetime
 import json
 import logging
+import math
 import time
 from typing import Any
 from uuid import UUID
@@ -53,8 +54,6 @@ def _is_valid_coords(lat: float | None, lng: float | None) -> bool:
     내려가 Kakao API 호출에서 ValueError 로 터지는 것을 callback 진입 단계에서
     명확한 400 으로 끊는다.
     """
-    import math
-
     if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
         return False
     if isinstance(lat, bool) or isinstance(lng, bool):  # bool 은 int 의 서브클래스
