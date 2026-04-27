@@ -1,13 +1,29 @@
 """Lifestyle guide DTO models module.
 
 This module contains data transfer objects for lifestyle guide operations
-including LLM response parsing and API request/response serialization.
+including LLM response parsing, async-pipeline status payloads, and API
+request/response serialization.
 """
 
 from datetime import date, datetime
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class LifestyleGuideStatus(StrEnum):
+    """Lifecycle status used by the SSE / poll API (DTO-level alias).
+
+    Mirrors ``LifestyleGuideStatusValue`` in the model layer so router/service
+    can stay framework-agnostic without importing Tortoise.
+    """
+
+    PENDING = "pending"
+    READY = "ready"
+    NO_ACTIVE_MEDS = "no_active_meds"
+    FAILED = "failed"
+
 
 # ── LLM response parsing schemas ───────────────────────────────────────────
 
@@ -63,18 +79,33 @@ class LifestyleGuideResponse(BaseModel):
     Attributes:
         id: Guide UUID.
         profile_id: Owner profile UUID.
-        content: GPT-generated guide content (5 categories).
+        status: Async generation status (pending/ready/...).
+        content: GPT-generated guide content (5 categories — empty until ready).
         medication_snapshot: Active medication list at generation time.
         created_at: Guide creation timestamp.
+        processed_at: Terminal-status set time (None while pending).
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID = Field(..., description="가이드 ID")
     profile_id: UUID = Field(..., description="프로필 ID")
-    content: dict = Field(..., description="5개 카테고리 가이드 내용")
-    medication_snapshot: list = Field(..., description="가이드 생성 시점 활성 약물 목록")
-    created_at: datetime = Field(..., description="가이드 생성 일시")
+    status: LifestyleGuideStatus = Field(..., description="비동기 생성 상태")
+    content: dict = Field(default_factory=dict, description="5개 카테고리 가이드 내용 (pending 일 때 빈 dict)")
+    medication_snapshot: list = Field(default_factory=list, description="가이드 생성 시점 활성 약물 목록")
+    created_at: datetime = Field(..., description="가이드 생성 일시 (= enqueue 시점)")
+    processed_at: datetime | None = Field(None, description="ai-worker 가 terminal status 로 진입한 시점")
+
+
+class LifestyleGuidePendingResponse(BaseModel):
+    """Lifestyle guide enqueue response — pending row id + status.
+
+    POST /lifestyle-guides/generate 가 즉시 반환하는 thin payload. 프론트는
+    이 ``id`` 로 GET ``/{id}/stream`` SSE 를 연결한다.
+    """
+
+    id: UUID = Field(..., description="생성된 pending 가이드 ID")
+    status: LifestyleGuideStatus = Field(LifestyleGuideStatus.PENDING, description="enqueue 직후 상태 (=pending)")
 
 
 # ── Daily symptom log schemas ───────────────────────────────────────────────

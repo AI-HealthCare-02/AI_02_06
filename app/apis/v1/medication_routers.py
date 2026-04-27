@@ -11,7 +11,14 @@ from fastapi import APIRouter, Depends, status
 
 from app.dependencies.security import get_current_account
 from app.dtos.drug_info import DrugInfoResponse
-from app.dtos.medication import MedicationCreate, MedicationResponse, MedicationUpdate, PrescriptionDateItem
+from app.dtos.medication import (
+    MedicationBulkDeleteRequest,
+    MedicationBulkDeleteResponse,
+    MedicationCreate,
+    MedicationResponse,
+    MedicationUpdate,
+    PrescriptionDateItem,
+)
 from app.models.accounts import Account
 from app.services.medication_service import MedicationService
 
@@ -200,3 +207,33 @@ async def delete_medication(
         service: Medication service instance.
     """
     await service.delete_medication_with_owner_check(medication_id, current_account.id)
+
+
+# ── DELETE /medications (bulk) ──────────────────────────────────────────
+# 흐름: 본문 ids -> 계정 소유 프로필 scope -> 단일 UPDATE soft delete
+#       -> {deleted_count, skipped_ids} 반환 (200 OK)
+@router.delete(
+    "",
+    response_model=MedicationBulkDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Bulk delete medications (soft delete)",
+)
+async def bulk_delete_medications(
+    request: MedicationBulkDeleteRequest,
+    current_account: CurrentAccount,
+    service: MedicationServiceDep,
+) -> MedicationBulkDeleteResponse:
+    """다건 medication 을 한 번에 soft delete 한다.
+
+    타인 소유·존재하지 않음·이미 삭제됨인 ids 는 ``skipped_ids`` 로 보고된다.
+    부분 실패 없이 한 번의 UPDATE 로 처리되어 일관성을 유지한다.
+
+    Args:
+        request: 삭제할 medication ID 목록 (1~100건).
+        current_account: 인증된 계정.
+        service: medication 서비스 인스턴스.
+
+    Returns:
+        ``MedicationBulkDeleteResponse`` — 처리된 개수 + 건너뛴 ids.
+    """
+    return await service.bulk_delete_with_owner_check(request.ids, current_account.id)

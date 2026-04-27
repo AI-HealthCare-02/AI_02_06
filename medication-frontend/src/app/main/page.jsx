@@ -1,11 +1,80 @@
 'use client'
-import { useState, useEffect, useRef, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
-import { Pill, Flame, Plus, MessageCircle } from 'lucide-react'
+import { Pill, Flame, Plus, MessageCircle, FileText, Loader2, X, Trash2 } from 'lucide-react'
 import ChatModal from '@/components/chat/ChatModal'
 import SurveyModal from '@/components/common/SurveyModal'
 import { useProfile } from '@/contexts/ProfileContext'
+
+// 활성 OCR draft 카드 — main 우측하단 floating (챗봇 아이콘 위)
+// 사용자가 X 로 카드 전체를 숨길 수 있고 (새로고침 시 다시 표시),
+// 각 항목 좌측의 휴지통으로 개별 draft 를 폐기할 수도 있다.
+function ActiveDraftsCard({ drafts, onSelect, onDelete }) {
+  const [dismissed, setDismissed] = useState(false)
+  if (!drafts || drafts.length === 0 || dismissed) return null
+
+  const formatTime = (iso) => {
+    const d = new Date(iso)
+    return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+  }
+  const STATUS_LABEL = {
+    pending: '처리 중',
+    ready: '확인 대기',
+    no_text: '텍스트 없음',
+    no_candidates: '인식 실패',
+    failed: '오류',
+  }
+
+  return (
+    <div className="fixed right-6 bottom-44 z-40 w-72 bg-white rounded-2xl border border-gray-200 shadow-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <FileText size={16} className="text-gray-700" />
+          <p className="font-bold text-sm text-gray-900">처방전 ({drafts.length}건)</p>
+        </div>
+        <button
+          onClick={() => setDismissed(true)}
+          className="text-gray-400 hover:text-gray-700 cursor-pointer"
+          aria-label="카드 숨기기"
+        >
+          <X size={16} />
+        </button>
+      </div>
+      <ul className="space-y-1 max-h-56 overflow-y-auto">
+        {drafts.map((d) => (
+          <li key={d.draft_id} className="flex items-center gap-1">
+            <button
+              onClick={() => onDelete(d.draft_id)}
+              className="text-gray-300 hover:text-red-500 cursor-pointer flex-shrink-0 p-2 rounded-lg hover:bg-red-50 transition-colors"
+              aria-label="처방전 폐기"
+            >
+              <Trash2 size={14} />
+            </button>
+            <button
+              onClick={() => onSelect(d.draft_id)}
+              className="flex-1 flex items-center justify-between gap-3 px-3 py-2 rounded-xl hover:bg-gray-50 cursor-pointer transition-colors text-left"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                {d.status === 'pending' ? (
+                  <Loader2 size={14} className="text-blue-500 animate-spin flex-shrink-0" />
+                ) : (
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+                )}
+                <span className="text-sm font-bold text-gray-900 truncate">
+                  {formatTime(d.created_at)} 업로드
+                </span>
+              </div>
+              <span className="text-xs text-gray-400 flex-shrink-0">
+                {STATUS_LABEL[d.status] || d.status}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
 
 // 스켈레톤은 main의 레이아웃을 따름
 function MainSkeleton() {
@@ -33,6 +102,7 @@ function MainPageContent() {
   const [showChat, setShowChat] = useState(false)
   const [medications, setMedications] = useState([])
   const [activeChallenge, setActiveChallenge] = useState(null)
+  const [activeDrafts, setActiveDrafts] = useState([])
   const [greeting, setGreeting] = useState({ msg: '반가워요', sub: '오늘 하루도 건강하게 시작해봐요' })
 
   const { selectedProfileId, selectedProfile } = useProfile()
@@ -57,11 +127,13 @@ function MainPageContent() {
         } else {
           setIsRefreshing(true)
         }
-        const [medRes, challengeRes] = await Promise.all([
+        const [medRes, challengeRes, draftsRes] = await Promise.all([
           api.get(`/api/v1/medications?profile_id=${selectedProfileId}&active_only=true`),
           api.get(`/api/v1/challenges?profile_id=${selectedProfileId}`).catch(() => ({ data: [] })),
+          api.get('/api/v1/ocr/drafts/active').catch(() => ({ data: { drafts: [] } })),
         ])
         setMedications(medRes.data || [])
+        setActiveDrafts(draftsRes.data?.drafts || [])
         const inProgress = (challengeRes.data || []).filter(c => c.challenge_status === 'IN_PROGRESS')
         if (inProgress.length > 0) {
           const random = inProgress[Math.floor(Math.random() * inProgress.length)]
@@ -82,6 +154,50 @@ function MainPageContent() {
     initPage()
   }, [selectedProfileId])
 
+  // ── 활성 draft 재동기화 ───────────────────────────────────────────────
+  // 흐름: 1) result 페이지가 sessionStorage 에 남긴 consumed marker 즉시 반영
+  //       2) window focus 시 백엔드 재조회 (App Router page cache 우회 안전망)
+  useEffect(() => {
+    const consumedId = typeof window !== 'undefined' && sessionStorage.getItem('ocr_consumed_draft_id')
+    if (consumedId) {
+      setActiveDrafts((prev) => prev.filter((d) => d.draft_id !== consumedId))
+      sessionStorage.removeItem('ocr_consumed_draft_id')
+    }
+
+    if (!selectedProfileId) return
+    const refetchActiveDrafts = async () => {
+      try {
+        const res = await api.get('/api/v1/ocr/drafts/active')
+        setActiveDrafts(res.data?.drafts || [])
+      } catch {
+        // ignore — 사용자 흐름 차단하지 않음
+      }
+    }
+    window.addEventListener('focus', refetchActiveDrafts)
+    return () => window.removeEventListener('focus', refetchActiveDrafts)
+  }, [selectedProfileId])
+
+  // 처리 중이거나 확인 대기 중인 draft 가 있으면 그쪽으로 이동, 없으면 업로드 페이지로.
+  // 업로드 버튼 + 빈 약 카드의 등록 버튼 모두 동일 분기를 공유한다.
+  const goToOcrFlow = useCallback(() => {
+    if (activeDrafts.length > 0) {
+      router.push(`/ocr/result?draft_id=${activeDrafts[0].draft_id}`)
+    } else {
+      router.push('/ocr')
+    }
+  }, [activeDrafts, router])
+
+  // 카드에서 개별 draft 폐기 — 백엔드 DELETE 후 즉시 목록에서 제외.
+  // 실패 시에도 사용자 흐름을 차단하지 않고 silently skip (24h 후 자동 정리됨).
+  const handleDeleteDraft = useCallback(async (draftId) => {
+    try {
+      await api.delete(`/api/v1/ocr/draft/${draftId}`)
+    } catch {
+      // ignore
+    }
+    setActiveDrafts((prev) => prev.filter((d) => d.draft_id !== draftId))
+  }, [])
+
   if (isLoading) return <MainSkeleton />
 
   return (
@@ -98,7 +214,7 @@ function MainPageContent() {
             {greeting.msg},<br /><span className="text-gray-600">{userName} 님</span>
           </h1>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <button onClick={() => router.push('/ocr')} className="px-8 py-4 bg-white text-black font-bold rounded-full hover:bg-gray-100 transition-all cursor-pointer">처방전 등록하기</button>
+            <button onClick={goToOcrFlow} className="px-8 py-4 bg-white text-black font-bold rounded-full hover:bg-gray-100 transition-all cursor-pointer">처방전 등록하기</button>
             <button onClick={() => setShowChat(true)} className="px-8 py-4 bg-gray-900 text-white font-bold rounded-full border border-gray-800 hover:bg-gray-800 transition-all cursor-pointer flex items-center gap-2 justify-center">
               <MessageCircle size={20}/> AI 상담하기
             </button>
@@ -127,7 +243,7 @@ function MainPageContent() {
                 </div>
                 <p className="text-gray-400 font-bold mb-1">등록된 약이 없어요</p>
                 <p className="text-gray-300 text-sm mb-6">처방전을 촬영해서 약을 등록해보세요</p>
-                <button onClick={() => router.push('/ocr')} className="px-6 py-3 bg-gray-900 text-white text-sm font-bold rounded-full cursor-pointer hover:bg-gray-800 transition-colors">
+                <button onClick={goToOcrFlow} className="px-6 py-3 bg-gray-900 text-white text-sm font-bold rounded-full cursor-pointer hover:bg-gray-800 transition-colors">
                   처방전 등록하기
                 </button>
               </div>
@@ -179,6 +295,13 @@ function MainPageContent() {
           </div>
         </div>
       </main>
+
+      {/* 처리 중·확인 대기 OCR draft 카드 (우측하단 floating) */}
+      <ActiveDraftsCard
+        drafts={activeDrafts}
+        onSelect={(draftId) => router.push(`/ocr/result?draft_id=${draftId}`)}
+        onDelete={handleDeleteDraft}
+      />
     </div>
   )
 }

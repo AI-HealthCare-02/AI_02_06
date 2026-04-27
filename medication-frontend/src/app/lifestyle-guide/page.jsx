@@ -13,6 +13,30 @@ import api, { showError } from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
 import StartChallengeModal from '@/components/common/StartChallengeModal'
 import toast from 'react-hot-toast'
+import { streamSSE } from '@/lib/sseClient'
+
+const GUIDE_TERMINAL_ERROR_MESSAGES = {
+  no_active_meds: '활성 약물이 없어 가이드를 만들 수 없어요. 복약 등록 후 다시 시도해주세요.',
+  failed: '가이드 생성 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.',
+}
+
+/**
+ * 가이드 생성 SSE 를 ready/terminal 까지 자동 재연결하며 await for-of 로 소비.
+ * timeout event 시 새 연결 — 무한 재시도 (cancel 또는 ready 까지).
+ *
+ * @yields {{id, profile_id, status, content, medication_snapshot, created_at, processed_at}}
+ */
+async function* watchGuideStatus(guideId, signal) {
+  while (true) {
+    let timedOut = false
+    for await (const ev of streamSSE(`/api/v1/lifestyle-guides/${guideId}/stream`, { signal })) {
+      if (ev.event === 'update') yield ev.data
+      else if (ev.event === 'timeout') { timedOut = true; break }
+      else if (ev.event === 'error') throw new Error(ev.data?.detail || 'sse error')
+    }
+    if (!timedOut) return
+  }
+}
 
 // ── 탭 메타데이터 ──────────────────────────────────────────────────────────────
 // key: API 응답 content 객체의 키값 및 challenge.category 매핑 값과 일치해야 함
@@ -353,22 +377,55 @@ export default function LifestyleGuidePage() {
     (c) => c.category === activeTab && c.challenge_status !== 'DELETED'
   ) || null
 
-  // ── 가이드 생성 ──
-  // POST /api/v1/lifestyle-guides/generate → 서버가 AI로 새 가이드 생성
-  // 생성 완료 후 목록 맨 앞에 추가하고 즉시 선택 상태로 전환
+  // ── 가이드 생성 (RQ + SSE) ──
+  // 1) POST /api/v1/lifestyle-guides/generate → 즉시 202 + {id, status:'pending'}
+  // 2) pending placeholder 를 selectedGuide + guides 에 삽입 (스켈레톤 렌더 유도)
+  // 3) GET /lifestyle-guides/{id}/stream SSE 로 status 변화 수신
+  // 4) ready 도달 시 받은 payload 로 guides/selectedGuide 교체
+  // 5) terminal error 시 안내 + placeholder 제거
   const handleGenerate = async () => {
     if (!profileId || isGenerating) return
     setIsGenerating(true)
+    const abortController = new AbortController()
+
     try {
-      // GPT 호출이 10~30초 걸릴 수 있으므로 이 요청만 타임아웃을 60초로 늘림
-      const res = await api.post(`/api/v1/lifestyle-guides/generate?profile_id=${profileId}`, null, { timeout: 60000 })
-      const newGuide = res.data
-      setGuides((prev) => [newGuide, ...prev])
-      setSelectedGuide(newGuide)
-      toast.success('새 가이드가 생성되었습니다!')
+      const enqueueRes = await api.post(
+        `/api/v1/lifestyle-guides/generate?profile_id=${profileId}`,
+        null,
+      )
+      const pendingId = enqueueRes.data.id
+      const pendingGuide = {
+        id: pendingId,
+        profile_id: profileId,
+        status: 'pending',
+        content: {},
+        medication_snapshot: [],
+        created_at: new Date().toISOString(),
+        processed_at: null,
+      }
+      setGuides((prev) => [pendingGuide, ...prev])
+      setSelectedGuide(pendingGuide)
+
+      for await (const payload of watchGuideStatus(pendingId, abortController.signal)) {
+        const status = payload.status
+        if (status === 'ready') {
+          setGuides((prev) => prev.map((g) => (g.id === pendingId ? payload : g)))
+          setSelectedGuide(payload)
+          toast.success('새 가이드가 생성되었습니다!')
+          return
+        }
+        if (status in GUIDE_TERMINAL_ERROR_MESSAGES) {
+          showError(GUIDE_TERMINAL_ERROR_MESSAGES[status])
+          setGuides((prev) => prev.filter((g) => g.id !== pendingId))
+          setSelectedGuide((prev) => (prev?.id === pendingId ? null : prev))
+          return
+        }
+        // status='pending' — 다음 update 대기 (스켈레톤 유지)
+      }
     } catch (err) {
-      showError(err.parsed?.message || '가이드 생성에 실패했습니다. 잠시 후 다시 시도해주세요.')
+      showError(err.parsed?.message || err.message || '가이드 생성에 실패했습니다. 잠시 후 다시 시도해주세요.')
     } finally {
+      abortController.abort()
       setIsGenerating(false)
     }
   }

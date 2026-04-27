@@ -5,6 +5,29 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Trash2 } from 'lucide-react'
 import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
+import { streamSSE } from '@/lib/sseClient'
+
+const TERMINAL_ERROR_MESSAGES = {
+  no_text: '이미지에서 텍스트를 찾지 못했어요.',
+  no_candidates: '약품 정보를 인식하지 못했어요.',
+  failed: '처리 중 오류가 발생했어요.',
+}
+
+/**
+ * SSE 연결을 ready/terminal 까지 자동 재연결하며 await for-of 로 소비.
+ * timeout event 시 새 연결 — 무한 재시도 (cancel 또는 ready 까지).
+ */
+async function* watchDraftStatus(draftId, signal) {
+  while (true) {
+    let timedOut = false
+    for await (const ev of streamSSE(`/api/v1/ocr/draft/${draftId}/stream`, { signal })) {
+      if (ev.event === 'update') yield ev.data
+      else if (ev.event === 'timeout') { timedOut = true; break }
+      else if (ev.event === 'error') throw new Error(ev.data?.detail || 'sse error')
+    }
+    if (!timedOut) return
+  }
+}
 
 // 로딩 스켈레톤 UI
 function ResultSkeleton() {
@@ -47,26 +70,37 @@ function OcrResultContent() {
       return
     }
 
-    // 백엔드에서 draft_id로 임시 저장된 데이터 로드
-    const fetchDraftData = async () => {
+    // SSE 로 ai-worker 진행 상태를 수신. status='ready' 까지 isLoading=true 유지
+    // -> 사용자에게 ResultSkeleton 노출. terminal status 시 안내 + /ocr 복귀.
+    // (단발 GET 폐기 — 이미 ready 인 draft 도 SSE 가 첫 yield 즉시 보내므로 비용 동일)
+    const abortController = new AbortController()
+
+    const consumeStream = async () => {
       try {
-        // API 인스턴스로 조회
-        const response = await api.get(`/api/v1/ocr/draft/${draftId}`)
-        const medicines = response.data.medicines
-        setMeds(medicines)
-        // 첫 번째 약품에서 처방일 초기값 설정 (처방전 전체 공통)
-        const firstDate = medicines[0]?.dispensed_date || ''
-        setPrescriptionDate(firstDate)
+        for await (const payload of watchDraftStatus(draftId, abortController.signal)) {
+          const { status, medicines } = payload
+          if (status === 'ready') {
+            setMeds(medicines || [])
+            setPrescriptionDate(medicines?.[0]?.dispensed_date || '')
+            setIsLoading(false)
+            return
+          }
+          if (status in TERMINAL_ERROR_MESSAGES) {
+            alert(`${TERMINAL_ERROR_MESSAGES[status]} 다시 촬영해주세요.`)
+            router.push('/ocr')
+            return
+          }
+          // status='pending' — 다음 update 대기 (스켈레톤 유지)
+        }
       } catch (err) {
-        // 데이터가 만료(10분 경과)되었거나 서버 에러 시 튕겨냅니다.
+        if (abortController.signal.aborted) return
         alert('데이터가 만료되었거나 불러올 수 없습니다. 다시 촬영해주세요.')
         router.push('/ocr')
-      } finally {
-        setIsLoading(false)
       }
     }
 
-    fetchDraftData()
+    consumeStream()
+    return () => abortController.abort()
   }, [draftId, router])
 
   // 사용자가 텍스트를 수정할 때 상태 업데이트하는 함수
@@ -80,6 +114,19 @@ function OcrResultContent() {
   const handleDelete = (index) => {
     const updatedMeds = meds.filter((_, i) => i !== index)
     setMeds(updatedMeds)
+  }
+
+  // 다시 촬영 — 현재 draft 를 백엔드에서 폐기 처리한 뒤 업로드 페이지로 이동.
+  // 폐기 실패해도 사용자 흐름은 막지 않음 (UX 우선, 24h 후 자동 정리됨).
+  const handleRetake = async () => {
+    if (draftId) {
+      try {
+        await api.delete(`/api/v1/ocr/draft/${draftId}`)
+      } catch {
+        // ignore — 사용자 흐름 차단하지 않음
+      }
+    }
+    router.push('/ocr')
   }
 
   // 최종 확인 버튼 (Phase 3으로 연결될 부분)
@@ -102,6 +149,9 @@ function OcrResultContent() {
         confirmed_medicines: confirmedMedicines,
       }, { timeout: 60000 })
 
+      // confirm 직후 main 페이지의 활성 카드에서 즉시 제거되도록 마킹.
+      // (client cache 로 main useEffect 재실행 보장이 안 되므로 단방향 신호)
+      sessionStorage.setItem('ocr_consumed_draft_id', draftId)
       alert('저장 완료! 복약 목록에서 확인해보세요.')
       router.push('/medication')
 
@@ -115,9 +165,15 @@ function OcrResultContent() {
 
   return (
     <main className="min-h-screen bg-gray-50 pb-24">
-      {/* 상단 헤더 영역 */}
+      {/* 상단 헤더 영역 — ← 는 메인으로, "다시 촬영" 은 /ocr 로 분리 */}
       <div className="bg-white border-b border-gray-200 px-10 py-4 flex items-center gap-4">
-        <button onClick={() => router.push('/ocr')} className="text-gray-400 hover:text-black cursor-pointer text-xl">←</button>
+        <button
+          onClick={() => router.push('/main')}
+          className="text-gray-400 hover:text-black cursor-pointer text-xl"
+          aria-label="메인으로 이동"
+        >
+          ←
+        </button>
         <div>
           <h1 className="font-bold text-gray-900">처방전 확인 및 수정</h1>
           <p className="text-xs text-gray-400">오탈자가 있다면 직접 수정해주세요</p>
@@ -214,7 +270,7 @@ function OcrResultContent() {
         {/* 하단 액션 버튼 */}
         <div className="flex gap-3 pb-10">
           <button
-            onClick={() => router.push('/ocr')}
+            onClick={handleRetake}
             className="flex-1 bg-white border border-gray-200 py-4 rounded-xl text-gray-500 text-sm font-bold cursor-pointer hover:bg-gray-50 transition-colors"
           >
             다시 촬영

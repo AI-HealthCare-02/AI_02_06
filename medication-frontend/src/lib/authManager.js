@@ -4,7 +4,7 @@
  */
 
 import api from './api';
-import { showError } from './errors';
+import { LOGOUT_REASON, markLoggedOut } from './authStatus';
 
 let isRefreshing = false;
 let refreshSubscribers = [];
@@ -37,7 +37,7 @@ export async function refreshToken() {
 
   if (refreshAttempts >= MAX_REFRESH_ATTEMPTS) {
     console.error('Token refresh max attempts exceeded');
-    handleLogout('로그아웃 되었습니다.');
+    handleLogout();
     return null;
   }
 
@@ -51,12 +51,10 @@ export async function refreshToken() {
     return true;
   } catch (error) {
     const status = error.response?.status;
-    const errorCode = error.response?.data?.detail?.error;
-
-    if (status === 403 && errorCode === 'token_compromised') {
-      handleLogout('보안을 위해 로그아웃 되었습니다.');
-    } else if (status === 401) {
-      handleLogout('로그아웃 되었습니다.');
+    // 401 (refresh 만료) / 403 token_compromised 모두 자동 로그아웃 → 세션 만료 안내로 수렴.
+    // 구분 메시지가 필요해지면 LOGOUT_REASON 에 케이스 추가해 이 분기만 바꿀 것.
+    if (status === 401 || status === 403) {
+      handleLogout();
     } else {
       console.error('Token refresh failed:', error);
     }
@@ -68,19 +66,21 @@ export async function refreshToken() {
   }
 }
 
-export async function handleLogout(message) {
+/**
+ * 자동 로그아웃 — RTR 완전 실패 / 재시도 한도 초과 시 호출.
+ * 사유는 SESSION_EXPIRED 고정. 로그인 페이지에서 localStorage 힌트를 소비해
+ * 안내 문구를 표시한다 (redirect 중 토스트가 사라지는 문제 회피).
+ */
+export async function handleLogout() {
   refreshAttempts = 0;
   try {
     await api.post('/api/v1/auth/logout');
   } catch {
-    // 무시
+    // 서버 세션이 이미 무효일 가능성. 로컬 정리만 진행한다.
   }
 
-  if (message) {
-    showError(message);
-  }
+  markLoggedOut({ reason: LOGOUT_REASON.SESSION_EXPIRED });
 
-  // AuthGuard가 이미 리다이렉트를 처리하므로 지연 제거
   if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
     window.location.href = '/login';
   }

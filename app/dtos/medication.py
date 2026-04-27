@@ -42,7 +42,6 @@ class BaseMedication(BaseModel):
     end_date: date | None = Field(None, description="복용 종료 예정일")
     dispensed_date: date | None = Field(None, description="약품 조제일")
     expiration_date: date | None = Field(None, description="약품 유효기간 만료일")
-    prescription_image_url: str | None = Field(None, max_length=512, description="처방전 이미지 URL")
     is_active: bool = Field(True, description="현재 복용 중 여부")
 
 
@@ -76,7 +75,6 @@ class MedicationUpdate(BaseModel):
     end_date: date | None = Field(None, description="복용 종료 예정일")
     dispensed_date: date | None = Field(None, description="약품 조제일")
     expiration_date: date | None = Field(None, description="약품 유효기간 만료일")
-    prescription_image_url: str | None = Field(None, max_length=512, description="처방전 이미지 URL")
     is_active: bool | None = Field(None, description="현재 복용 중 여부")
 
 
@@ -94,3 +92,22 @@ class MedicationResponse(BaseMedication):
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     deleted_at: datetime | None = Field(None, description="Deletion timestamp")
+
+
+class MedicationBulkDeleteRequest(BaseModel):
+    """Bulk soft-delete request — 계정 소유 medication ids 묶음.
+
+    타인 소유·이미 삭제·존재하지 않는 ids 는 응답의 ``skipped_ids`` 로 보고된다.
+    """
+
+    ids: list[UUID] = Field(..., min_length=1, max_length=100, description="삭제할 medication ID 목록")
+
+
+class MedicationBulkDeleteResponse(BaseModel):
+    """Bulk soft-delete 결과 — UI 토스트/안내용."""
+
+    deleted_count: int = Field(..., description="실제 soft delete 처리된 개수")
+    skipped_ids: list[UUID] = Field(
+        default_factory=list,
+        description="ownership/존재하지 않음/이미 삭제됨으로 건너뛴 ID",
+    )

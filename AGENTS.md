@@ -207,5 +207,120 @@ To prevent Messy Data, strictly adhere to the following principles:
 
 ---
 
+### 7.3. Commit Separation
+
+Each step MUST be a **separate commit**.
+
+| Step | Prefix | Example |
+|------|--------|---------|
+| Tidy First | `refactor:` | `refactor: restructure DUR service` |
+| Test First | `test:` | `test: add drug interaction tests` |
+| Implement | `feat:`/`fix:` | `feat: implement drug interaction check` |
+
+**FORBIDDEN:**
+- Mixing `refactor` and `feat` in a single commit.
+- Implementing features without tests.
+
+### 7.4. Agent Behavior Guidelines
+
+When user requests a feature implementation:
+
+1. **Ask first:**
+   - "Should I tidy the related code first? (Tidy First)"
+   - "Should I write tests first? (TDD)"
+
+2. **Document in PLAN.md:**
+   ```markdown
+   ## Implementation Plan
+
+   ### Phase 1: Tidy First
+   - [ ] Analyze existing code structure
+   - [ ] Clean up imports
+   - [ ] Extract functions if needed
+
+   ### Phase 2: Test First
+   - [ ] Design test cases
+   - [ ] Write test code
+   - [ ] Verify Red state
+
+   ### Phase 3: Implement
+   - [ ] Minimal implementation
+   - [ ] Verify Green state
+   - [ ] Additional tidying if needed
+   ```
+
+3. **Get user confirmation at each step:**
+   - After Tidy: "Structure cleanup complete. Proceed to write tests?"
+   - After Test: "Tests written. Proceed to implementation?"
+
+### 7.5. Tidy First Checklist
+
+- [ ] Remove unnecessary imports
+- [ ] Sort imports (stdlib -> third-party -> local)
+- [ ] Single responsibility per function/class?
+- [ ] Any functions too long? (>20 lines)
+- [ ] Any duplicate code?
+- [ ] Clear naming?
+- [ ] Modern type hints? (See Section 4.2)
+- [ ] Early return pattern applicable?
+
+---
+
+## 8. Mandatory Ruff Validation
+
+**CRITICAL: All code changes MUST pass Ruff checks before committing.**
+
+### 8.1. Required Checks Before Every Commit
+
+Run the following commands and ensure all pass with zero errors:
+
+```bash
+# 1. Ruff lint check (must pass)
+uv run ruff check app/ ai_worker/
+
+# 2. Ruff format check (must pass)
+uv run ruff format --check app/ ai_worker/
+```
+
+Or run the integrated script:
+
+```bash
+./scripts/ci/code_fommatting.sh
+```
+
+### 8.2. Auto-fix Before Checking
+
+Before running checks, apply auto-fixes:
+
+```bash
+uv run ruff check --fix app/ ai_worker/
+uv run ruff format app/ ai_worker/
+```
+
+### 8.3. Agent Behavior Rule
+
+* After writing or modifying ANY Python file, the agent MUST run Ruff checks.
+* If Ruff reports errors, fix them BEFORE proceeding to the next step.
+* NEVER commit code that fails Ruff lint or format checks.
+* Include Ruff check results in the commit recommendation output.
+
+### 8.4. Commit Recommendation Format
+
+When recommending a commit, always include Ruff validation status:
+
+```
+[Ruff 검사 결과]
+- ruff check: PASS
+- ruff format: PASS
+
+[Git Add 대상 파일]
+- app/services/example_service.py
+
+[커밋 제목]
+feat: 예시 서비스 구현
+```
+
+---
+
 ## 10. Final Language Check
 **[CRITICAL WARNING] All answers, explanations, result outputs, and feedback to the user MUST be written EXCLUSIVELY in 'Korean (한글)'. Arbitrarily translating responses into English or any other language is STRICTLY PROHIBITED.**

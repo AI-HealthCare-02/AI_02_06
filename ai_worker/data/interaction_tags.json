@@ -1,0 +1,63 @@
+{
+  "_comment": "RAG 청크 interaction_tags 시드 사전 (v2 수요자 중심 설계). 각 태그 키는 'prefix:value' 또는 'prefix' 형식이며, value 배열은 한국어/영어 키워드를 포함한다. tagger.py 가 청크 본문에서 이 키워드를 검색해 태그를 자동 부여한다.",
+  "_version": "v1-seed-20260423",
+  "_schema_lock": "이 사전의 태그 키는 medicine_chunk.interaction_tags JSONB 값의 정의이다. 키 추가/변경 시 팀 공지 필수.",
+
+  "food:grapefruit": ["자몽", "포도즙", "grapefruit"],
+  "food:dairy": ["우유", "유제품", "치즈", "요거트", "칼슘"],
+  "food:vitamin_k": ["녹색 채소", "시금치", "브로콜리", "케일", "비타민K", "비타민 K"],
+  "food:high_fiber": ["식이섬유", "고섬유"],
+  "food:tyramine": ["치즈", "와인", "절인", "발효", "티라민"],
+
+  "beverage:alcohol": ["음주", "술", "알코올", "맥주", "소주", "와인", "양주", "음료"],
+  "beverage:caffeine": ["커피", "카페인", "에너지드링크", "에너지 드링크", "홍차", "녹차"],
+
+  "drug:herbal": ["한약", "한방약", "생약", "보약", "한의원"],
+  "drug:anticoagulant": ["와파린", "항응고제", "혈액응고", "아스피린"],
+  "drug:nsaid": ["이부프로펜", "NSAIDs", "비스테로이드성", "나프록센", "디클로페낙"],
+  "drug:statin": ["스타틴", "심바스타틴", "아토르바스타틴", "로수바스타틴"],
+  "drug:ssri": ["SSRI", "플루옥세틴", "파록세틴", "세르트랄린"],
+  "drug:oral_contraceptive": ["경구피임약", "피임약", "에스트로겐"],
+  "drug:antacid": ["제산제", "위장약", "알루미늄 염", "마그네슘 염"],
+
+  "procedure:surgery": ["수술", "시술", "마취", "외과"],
+  "procedure:laser": ["레이저", "laser", "피부 레이저", "미용 레이저"],
+  "procedure:imaging_mri": ["MRI", "자기공명영상"],
+  "procedure:imaging_ct": ["CT", "컴퓨터단층촬영", "조영제"],
+  "procedure:dental": ["치과", "발치", "스케일링", "임플란트"],
+  "procedure:tattoo": ["타투", "문신"],
+  "procedure:vaccination": ["예방접종", "백신", "주사"],
+  "procedure:blood_donation": ["헌혈"],
+
+  "condition:pregnancy": ["임신", "임부", "임산부", "태아", "임신 중"],
+  "condition:breastfeeding": ["수유", "수유부", "모유", "수유 중"],
+  "condition:liver": ["간", "간염", "간경화", "간기능", "간질환", "간손상"],
+  "condition:kidney": ["신장", "신부전", "콩팥", "신기능", "신질환"],
+  "condition:diabetes": ["당뇨", "당뇨병", "혈당"],
+  "condition:hypertension": ["고혈압"],
+  "condition:glaucoma": ["녹내장"],
+  "condition:asthma": ["천식"],
+  "condition:heart": ["심부전", "심장병", "부정맥", "심혈관"],
+
+  "activity:driving": ["운전", "자동차", "기계 조작"],
+  "activity:exercise": ["운동", "헬스", "조깅"],
+  "activity:swimming": ["수영", "수영장"],
+  "activity:heavy_machinery": ["중장비", "고소 작업", "위험 작업"],
+
+  "exposure:sunlight": ["햇빛", "자외선", "광과민성", "선크림", "일광"],
+  "exposure:heat": ["고온", "사우나", "찜질"],
+  "exposure:cold": ["저온", "한랭"],
+
+  "timing:empty_stomach": ["공복", "식전", "아침 공복"],
+  "timing:post_meal": ["식후", "식사 후"],
+  "timing:bedtime": ["자기 전", "취침", "밤", "수면 전"],
+  "timing:morning": ["아침", "기상 후"],
+
+  "demographic:pediatric": ["소아", "어린이", "영아", "신생아"],
+  "demographic:elderly": ["고령자", "고령", "노인"],
+  "demographic:adolescent": ["청소년"],
+
+  "emergency:anaphylaxis": ["아나필락시스", "과민반응", "혈관부종"],
+  "emergency:overdose": ["과량", "과다 복용", "과량투여"],
+  "emergency:severe_allergy": ["알레르기", "두드러기", "발진", "호흡곤란"]
+}

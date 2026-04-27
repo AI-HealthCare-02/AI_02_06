@@ -16,26 +16,29 @@ from tortoise import fields, models
 
 
 class MedicineChunkSection(StrEnum):
-    """RAG 청크 섹션 타입 (스키마 락: 13종 고정).
+    """RAG 청크 섹션 타입 (스키마 락 ②: 6종 고정, v2 수요자 중심 재설계).
 
-    공공데이터 API 의 EE_DOC / UD_DOC / NB_DOC ARTICLE 구조와
-    medicine_info 메타 필드를 기반으로 고정된 분류 체계이다.
+    초기 v1은 공공데이터 API ARTICLE title 기반 13종이었으나, 실제 사용자
+    질의 유형을 역설계하여 6종으로 축약했다. 세분화 필터는 `interaction_tags`
+    JSONB 레이어가 담당한다.
+
+    각 섹션이 커버하는 대표 사용자 질문 유형:
+    - OVERVIEW              : "이 약 뭐야?", "두통에 뭐 먹어?"
+    - INTAKE_GUIDE          : "공복?", "쪼개 먹어도?", "약 까먹었어"
+    - DRUG_INTERACTION      : "홍삼이랑 먹어도?", "와파린 같이 먹어도?"
+    - LIFESTYLE_INTERACTION : "커피?", "술?", "운전해도?"
+    - ADVERSE_REACTION      : "두드러기 나는데?", "토했어"
+    - SPECIAL_EVENT         : "레이저 시술?", "수술 앞두고?", "임신 중"
+
     팀원에게 공유되는 계약이므로 값 추가/변경 시 팀 공지 필수.
     """
 
-    EFFICACY = "efficacy"
-    USAGE = "usage"
-    STORAGE = "storage"
-    INGREDIENT = "ingredient"
-    PRECAUTION_WARNING = "precaution_warning"
-    PRECAUTION_CONTRAINDICATION = "precaution_contraindication"
-    PRECAUTION_CAUTION = "precaution_caution"
+    OVERVIEW = "overview"
+    INTAKE_GUIDE = "intake_guide"
+    DRUG_INTERACTION = "drug_interaction"
+    LIFESTYLE_INTERACTION = "lifestyle_interaction"
     ADVERSE_REACTION = "adverse_reaction"
-    PRECAUTION_GENERAL = "precaution_general"
-    PRECAUTION_PREGNANCY = "precaution_pregnancy"
-    PRECAUTION_PEDIATRIC = "precaution_pediatric"
-    PRECAUTION_ELDERLY = "precaution_elderly"
-    PRECAUTION_OVERDOSE = "precaution_overdose"
+    SPECIAL_EVENT = "special_event"
 
 
 class MedicineChunk(models.Model):
@@ -103,6 +106,15 @@ class MedicineChunk(models.Model):
     model_version = fields.CharField(
         max_length=64,
         description="Embedding model version (e.g. ko-sroberta-multitask-v1)",
+    )
+
+    # ── 상호작용 태그 JSONB (스키마 락 ④, v2) ─────────────────────────
+    # 청크의 세분화 필터 태그. 예: ["alcohol", "condition:liver"]
+    # 태그 값 사전은 ai_worker/data/interaction_tags.json에서 관리하며
+    # GIN 인덱스로 @> 연산자 매칭을 가속한다.
+    interaction_tags = fields.JSONField(
+        default=list,
+        description="JSONB array of interaction tags (see interaction_tags.json)",
     )
 
     # ── 타임스탬프 ─────────────────────────────────────────────────────

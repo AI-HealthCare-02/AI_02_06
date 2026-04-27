@@ -147,7 +147,6 @@ class MedicationRepository:
         end_date: date | None = None,
         dispensed_date: date | None = None,
         expiration_date: date | None = None,
-        prescription_image_url: str | None = None,
     ) -> Medication:
         """Create new medication.
 
@@ -163,7 +162,6 @@ class MedicationRepository:
             end_date: Optional expected end date.
             dispensed_date: Optional dispensing date.
             expiration_date: Optional expiration date.
-            prescription_image_url: Optional prescription image URL.
 
         Returns:
             Medication: Created medication.
@@ -181,7 +179,6 @@ class MedicationRepository:
             end_date=end_date,
             dispensed_date=dispensed_date,
             expiration_date=expiration_date,
-            prescription_image_url=prescription_image_url,
             is_active=True,
         )
 
@@ -225,3 +222,29 @@ class MedicationRepository:
         medication.deleted_at = datetime.now(tz=config.TIMEZONE)
         await medication.save()
         return medication
+
+    async def bulk_soft_delete(
+        self,
+        ids: list[UUID],
+        profile_ids: list[UUID],
+    ) -> int:
+        """Soft delete 다건 — 단일 UPDATE 로 처리하고 affected rows 를 반환.
+
+        ownership 은 ``profile_ids`` 로 좁혀 강제한다 (호출자가 계정 소유
+        프로필 목록을 미리 계산해 전달). 이미 deleted 인 row 는 자연스럽게
+        제외 (deleted_at IS NULL 필터).
+
+        Args:
+            ids: 삭제할 medication ID 목록.
+            profile_ids: 계정이 소유한 프로필 ID 목록 (ownership scope).
+
+        Returns:
+            실제 deleted_at 이 새로 채워진 row 수.
+        """
+        if not ids or not profile_ids:
+            return 0
+        return await Medication.filter(
+            id__in=ids,
+            profile_id__in=profile_ids,
+            deleted_at__isnull=True,
+        ).update(deleted_at=datetime.now(tz=config.TIMEZONE))

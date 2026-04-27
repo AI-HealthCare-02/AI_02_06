@@ -26,7 +26,6 @@ class Medication(models.Model):
         end_date: Expected end date.
         dispensed_date: Medication dispensing date.
         expiration_date: Medication expiration date.
-        prescription_image_url: Prescription image URL.
         is_active: Whether currently taking medication.
         created_at: Record creation timestamp.
         updated_at: Last update timestamp.
@@ -56,7 +55,6 @@ class Medication(models.Model):
     end_date = fields.DateField(null=True, description="Expected end date")
     dispensed_date = fields.DateField(null=True, description="Medication dispensing date")
     expiration_date = fields.DateField(null=True, description="Medication expiration date")
-    prescription_image_url = fields.CharField(max_length=512, null=True, description="Prescription image URL")
 
     is_active = fields.BooleanField(default=True, description="Currently taking medication")
 

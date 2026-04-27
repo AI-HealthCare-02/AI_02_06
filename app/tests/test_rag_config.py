@@ -1,0 +1,29 @@
+"""Tests for RAG embedding configuration constants.
+
+Verifies that embedding model and dimension constants are exposed from
+`app.services.rag.config` as a single source of truth. Swapping models
+should only require changing these constants plus a migration.
+"""
+
+from app.services.rag import config as rag_config
+
+
+class TestEmbeddingConfigConstants:
+    """Tests for centralized embedding configuration."""
+
+    def test_embedding_model_name_is_defined(self) -> None:
+        """EMBEDDING_MODEL_NAME constant must exist and be a non-empty string."""
+        assert hasattr(rag_config, "EMBEDDING_MODEL_NAME")
+        assert isinstance(rag_config.EMBEDDING_MODEL_NAME, str)
+        assert rag_config.EMBEDDING_MODEL_NAME
+
+    def test_embedding_dimensions_is_defined(self) -> None:
+        """EMBEDDING_DIMENSIONS constant must exist and be a positive int."""
+        assert hasattr(rag_config, "EMBEDDING_DIMENSIONS")
+        assert isinstance(rag_config.EMBEDDING_DIMENSIONS, int)
+        assert rag_config.EMBEDDING_DIMENSIONS > 0
+
+    def test_embedding_defaults_match_current_model(self) -> None:
+        """Current defaults: ko-sroberta-multitask, 768 dimensions."""
+        assert rag_config.EMBEDDING_MODEL_NAME == "jhgan/ko-sroberta-multitask"
+        assert rag_config.EMBEDDING_DIMENSIONS == 768
