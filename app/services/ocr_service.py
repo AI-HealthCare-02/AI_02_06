@@ -45,6 +45,7 @@ from app.dtos.ocr import (
 from app.models.medication import Medication
 from app.models.ocr_draft import OcrDraft
 from app.repositories.ocr_draft_repository import OcrDraftRepository
+from app.services.recall_notification_service import check_and_alert_on_medication_save
 
 logger = logging.getLogger(__name__)
 
@@ -284,38 +285,18 @@ class OCRService:
             is_active=True,
         )
 
-        # ── F3: OCR 확정 직후 회수 체크 (Phase 7) ───────────────────
-        # 흐름: drug_recall_repo.find_match -> 매칭되면 알림 dispatch
-        await self._dispatch_recall_alert_if_any(medication)
-
-        return medication
-
-    @staticmethod
-    async def _dispatch_recall_alert_if_any(medication: Medication) -> None:
-        """For OCR-confirmed medication, send a recall alert if matched.
-
-        Failures are logged but never propagate — OCR confirm must
-        not roll back over a notification problem.
-        """
-        import logging
-
-        from app.repositories.drug_recall_repository import DrugRecallRepository
-        from app.services.recall_notification_service import send_recall_alert
-
-        log = logging.getLogger(__name__)
+        # ── F3: OCR 확정 직후 회수 체크 (Phase 7, PLAN §16.3.2 헬퍼 위임) ──
+        # OCR 경로는 medication_service 를 거치지 않으므로 동일 헬퍼를
+        # 직접 호출해야 한다 (PLAN §16.3.1 우회 경로 가드).
         try:
-            recalls = await DrugRecallRepository().find_match(medication)
-            for recall in recalls:
-                await send_recall_alert(
-                    profile_id=medication.profile_id,
-                    recall=recall,
-                    medication=medication,
-                )
+            await check_and_alert_on_medication_save(medication)
         except Exception:
-            log.exception(
-                "[F3-OCR] recall match dispatch failed for medication=%s",
+            logger.exception(
+                "[F3-OCR] recall hook failed for medication=%s",
                 getattr(medication, "id", "?"),
             )
+
+        return medication
 
 
 def _to_poll_response(draft: OcrDraft) -> OcrDraftPollResponse:

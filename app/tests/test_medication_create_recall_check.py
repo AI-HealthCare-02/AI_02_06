@@ -1,19 +1,25 @@
-"""F3 — `create_medication` 시 즉시 회수 체크 (Phase 7 Step 7).
+"""F3 — `create_medication` 시 즉시 회수 체크 hook 통합 테스트 (PLAN §16.3.2).
 
-검증 포인트:
-- F3-1: 회수 약 등록 → send_recall_alert 1회 호출
-- F3-2: 비회수 약 등록 → send_recall_alert 호출 없음
-- F3-4: medicine_info FK 없는 회수 약명 → ILIKE fallback 매칭 후 알림
-- 알림 dispatch 가 실패해도 medication 자체는 정상 반환 (격리)
+리팩터 후 양쪽 service 의 hook 은 `check_and_alert_on_medication_save`
+헬퍼 호출 한 줄로 축소되었으므로, 이 테스트는 다음만 검증한다:
+
+- F3-1: create_medication 가 헬퍼를 정확히 1회 호출 (medication 인자 그대로)
+- F3-2: 헬퍼 예외는 medication 등록 흐름을 망치지 않는다 (격리)
+
+매칭 로직 자체의 정확성은 `test_recall_notification_service.py::TestCheckAndAlertOnMedicationSave`
+에서 단위 테스트로 커버.
 """
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+
+_HELPER = "app.services.medication_service.check_and_alert_on_medication_save"
 
 
 def _build_medication() -> Any:
@@ -24,54 +30,56 @@ def _build_medication() -> Any:
     return med
 
 
-_FIND_MATCH = "app.repositories.drug_recall_repository.DrugRecallRepository.find_match"
-_SEND_ALERT = "app.services.recall_notification_service.send_recall_alert"
+def _build_create_dto() -> Any:
+    """`MedicationCreate` 형태의 가벼운 stub."""
+    dto = MagicMock()
+    dto.medicine_name = "마데카솔케어연고"
+    dto.dose_per_intake = "1정"
+    dto.intake_instruction = "식후 30분"
+    dto.intake_times = ["08:00"]
+    dto.total_intake_count = 30
+    dto.remaining_intake_count = None
+    dto.start_date = date(2026, 4, 27)
+    dto.end_date = None
+    dto.dispensed_date = None
+    dto.expiration_date = None
+    return dto
 
 
 @pytest.mark.asyncio
-async def test_f3_1_recall_match_dispatches_alert() -> None:
-    """F3-1: 회수 약 등록 시 알림 1건 발송."""
+async def test_f3_1_create_medication_invokes_helper_once() -> None:
+    """create_medication 은 신규 row 와 함께 헬퍼를 단 1회 호출해야 한다."""
     from app.services.medication_service import MedicationService
 
+    service = MedicationService()
     medication = _build_medication()
+    service.repository = MagicMock(create=AsyncMock(return_value=medication))
 
-    with (
-        patch(_FIND_MATCH, new=AsyncMock(return_value=[MagicMock()])),
-        patch(_SEND_ALERT, new=AsyncMock()) as send,
-    ):
-        await MedicationService._dispatch_recall_alert_if_any(medication)
+    with patch(_HELPER, new=AsyncMock(return_value=None)) as helper:
+        result = await service.create_medication(profile_id=uuid4(), data=_build_create_dto())
 
-    send.assert_awaited_once()
+    assert result is medication
+    helper.assert_awaited_once()
+    args, kwargs = helper.await_args
+    # 헬퍼가 받은 medication 인스턴스가 repository 가 만든 그것과 동일한지
+    assert (args[0] if args else kwargs["medication"]) is medication
 
 
 @pytest.mark.asyncio
-async def test_f3_2_no_match_no_alert() -> None:
-    """F3-2: 회수 매칭 없으면 알림 호출 없음."""
+async def test_f3_2_helper_exception_does_not_break_create() -> None:
+    """헬퍼 raise 시에도 medication 자체는 정상 반환되어야 한다 (격리)."""
     from app.services.medication_service import MedicationService
 
+    service = MedicationService()
     medication = _build_medication()
-
-    with (
-        patch(_FIND_MATCH, new=AsyncMock(return_value=[])),
-        patch(_SEND_ALERT, new=AsyncMock()) as send,
-    ):
-        await MedicationService._dispatch_recall_alert_if_any(medication)
-
-    send.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_f3_4_dispatch_error_does_not_break_caller() -> None:
-    """알림 발송 실패는 medication 등록 흐름을 망치지 않는다."""
-    from app.services.medication_service import MedicationService
-
-    medication = _build_medication()
+    service.repository = MagicMock(create=AsyncMock(return_value=medication))
 
     async def boom(*_args: Any, **_kwargs: Any) -> Any:
         msg = "boom"
         raise RuntimeError(msg)
 
-    # find_match 예외도 흡수되어야 함
-    with patch(_FIND_MATCH, new=AsyncMock(side_effect=boom)):
-        # 예외가 전파되지 않아야 한다 (격리)
-        await MedicationService._dispatch_recall_alert_if_any(medication)
+    with patch(_HELPER, new=AsyncMock(side_effect=boom)):
+        result = await service.create_medication(profile_id=uuid4(), data=_build_create_dto())
+
+    # 예외가 위로 새지 않고 medication 객체가 그대로 반환됨
+    assert result is medication
