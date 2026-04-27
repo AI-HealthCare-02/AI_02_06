@@ -107,6 +107,17 @@ class Config(BaseSettings):
     OPENAI_API_KEY: str | None = None
     DATA_GO_KR_API_KEY: str | None = None
 
+    # 식약처 회수·판매중지 API (Phase 7) ────────────────────────────────
+    # base URL 의 service number 는 04 고정, list/detail method 는 03
+    # (식약처가 메서드 버전 갱신 시 코드 수정 없이 env 만 교체)
+    DATA_GO_KR_RECALL_BASE_URL: str = "http://apis.data.go.kr/1471000/MdcinRtrvlSleStpgeInfoService04"
+    DATA_GO_KR_RECALL_LIST_METHOD: str = "getMdcinRtrvlSleStpgeList03"
+    DATA_GO_KR_RECALL_DETAIL_METHOD: str = "getMdcinRtrvlSleStpgeItem03"
+    # None 이면 DATA_GO_KR_API_KEY 폴백
+    DATA_GO_KR_RECALL_API_KEY: str | None = None
+    # 의약외품(치약·칫솔 등) 차단 토글
+    RECALL_FILTER_NON_DRUG: bool = True
+
     # Kakao OAuth settings
     KAKAO_CLIENT_ID: str = _DEFAULT_KAKAO_CLIENT_ID
     KAKAO_CLIENT_SECRET: str = _DEFAULT_KAKAO_CLIENT_SECRET

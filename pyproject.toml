@@ -270,6 +270,15 @@ ignore = [
     "PLR2004", # Magic value used in comparison (normal in tests)
     "SLF001",  # Private member accessed (Tortoise _meta introspection)
 ]
+"app/tests/mock_data/*" = [
+    "E501",    # Line too long (seed dicts intentionally one-line per row)
+    "S101",
+    "D",
+    "ANN",
+    "PLR2004",
+    "SLF001",
+    "RUF001",  # Ambiguous Korean punctuation (real source data)
+]
 "scripts/*" = [
     "T201",    # print found (normal in scripts)
     "S602",    # subprocess call with shell=True
