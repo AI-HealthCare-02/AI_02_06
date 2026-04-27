@@ -4,10 +4,12 @@ This module provides data access layer for the intake_logs table,
 handling medication intake tracking operations.
 """
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID, uuid4
 
 from app.models.intake_log import IntakeLog
+
+_KST = timezone(timedelta(hours=9))
 
 
 class IntakeLogRepository:
@@ -113,10 +115,8 @@ class IntakeLogRepository:
         Returns:
             IntakeLog: Created intake log.
         """
-        from app.core import config
-
         if scheduled_time.tzinfo is None:
-            scheduled_time = scheduled_time.replace(tzinfo=config.TIMEZONE)
+            scheduled_time = scheduled_time.replace(tzinfo=_KST)
 
         return await IntakeLog.create(
             id=uuid4(),
