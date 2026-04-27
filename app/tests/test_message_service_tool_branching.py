@@ -75,40 +75,54 @@ def stub_message_repo(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return captured
 
 
-# ── A. Router → text → RAG 폴백 ────────────────────────────────
+# ── A. Router → text → 직접 답변 persist (옵션 C: RAG 폴백 폐기) ──
 
 
-class TestRagFallbackBranch:
+class TestRouterTextDirectPersist:
     @pytest.mark.asyncio
-    async def test_text_route_falls_back_to_ask_and_reply(
+    async def test_text_route_persists_router_text_directly(
         self,
         monkeypatch: pytest.MonkeyPatch,
         stub_session_ownership: None,  # noqa: ARG002
-        stub_message_repo: dict,  # noqa: ARG002
+        stub_message_repo: dict,
     ) -> None:
+        """옵션 C: Router 가 text 로 응답하면 그 text 를 그대로 assistant turn 으로 저장.
+
+        이전 동작 (RAG 폴백) 은 폐기됨 — Router system prompt 가 도메인 외/명확화
+        를 직접 답변하므로 별도 RAG 호출 불필요.
+        """
         session_id = uuid4()
         account_id = uuid4()
 
         async def fake_route(*_, **__) -> RouteResult:
-            return RouteResult(kind="text", text="안녕하세요", assistant_message={"role": "assistant"})
+            return RouteResult(
+                kind="text",
+                text="저는 약 정보와 병원/약국 검색을 도와드려요.",
+                assistant_message={"role": "assistant"},
+            )
 
         monkeypatch.setattr("app.services.message_service.route_intent_via_rq", fake_route)
 
-        legacy_user = _StubChatMessage(message_id="u", content="안녕", sender_type="USER")
-        legacy_assistant = _StubChatMessage(message_id="a", content="RAG 답변", sender_type="ASSISTANT")
-
-        async def fake_legacy_ask(self, sid, content):  # noqa: ARG001
-            return legacy_user, legacy_assistant
-
-        monkeypatch.setattr(MessageService, "ask_and_reply", fake_legacy_ask)
+        # ask_and_reply 가 더 이상 존재하지 않아야 함 (옵션 C 4단계 삭제)
+        assert not hasattr(MessageService, "ask_and_reply")
+        assert not hasattr(MessageService, "ask_and_reply_with_owner_check")
 
         service = MessageService()
-        result = await service.ask_with_tools(session_id=session_id, account_id=account_id, content="안녕")
+        result = await service.ask_with_tools(
+            session_id=session_id,
+            account_id=account_id,
+            content="대한민국 대통령이 누구야?",
+        )
 
         assert isinstance(result, AskResult)
-        assert result.user_message is legacy_user
-        assert result.assistant_message is legacy_assistant
+        assert result.user_message is not None
+        assert result.user_message.content == "대한민국 대통령이 누구야?"
+        assert result.assistant_message is not None
+        assert result.assistant_message.content == "저는 약 정보와 병원/약국 검색을 도와드려요."
         assert result.pending is None
+        # user + assistant 각 1건 저장
+        assert len(stub_message_repo["user"]) == 1
+        assert len(stub_message_repo["assistant"]) == 1
 
 
 # ── B. Router → keyword-only tool_calls → 즉시 실행 ───────────
