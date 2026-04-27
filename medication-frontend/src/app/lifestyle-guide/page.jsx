@@ -800,6 +800,15 @@ export default function LifestyleGuidePage() {
       </div>
 
 
+      <ChallengeBanner
+        challenge={activeBannerChallenge}
+        isViewingHistory={isViewingHistory}
+        onStart={handleChallengeStart}
+        onCheck={handleChallengeCheck}
+        isProcessing={!!processingChallengeId}
+        onGoToChallenge={() => router.push('/challenge')}
+      />
+
       <BottomNav />
 
       {/* ── 챌린지 시작 모달 (난이도·기간 선택 바텀시트) ── */}
