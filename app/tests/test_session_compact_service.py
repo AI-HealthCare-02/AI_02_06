@@ -15,15 +15,16 @@ from app.services.chat.session_compact_service import (
     CompactMessage,
     SessionCompactService,
 )
-from app.services.rag.intent.intents import IntentType
+
+# 옵션 C 에서 IntentType enum 폐기 — legacy intent string 으로 직접 표기.
+_INTENT_MEDICATION_INFO = "medication_info"
+_INTENT_OUT_OF_SCOPE = "out_of_scope"
+_INTENT_GENERAL_CHAT = "general_chat"
+_INTENT_SUPPLEMENT_INFO = "supplement_info"
 
 
-def _user(content: str, intent: IntentType | None = IntentType.MEDICATION_INFO) -> CompactMessage:
-    return CompactMessage(
-        role="user",
-        content=content,
-        intent=intent.value if intent else None,
-    )
+def _user(content: str, intent: str | None = _INTENT_MEDICATION_INFO) -> CompactMessage:
+    return CompactMessage(role="user", content=content, intent=intent)
 
 
 def _asst(content: str) -> CompactMessage:
@@ -38,7 +39,7 @@ class TestCompactFilter:
         messages = [
             _user("타이레놀 복용 중인데 두통이 있어요"),
             _asst("타이레놀은 하루 최대 4g..."),
-            _user("주식 추천해줘", intent=IntentType.OUT_OF_SCOPE),
+            _user("주식 추천해줘", intent=_INTENT_OUT_OF_SCOPE),
             _asst("복약 및 건강 관련 질문만..."),
             _user("아스피린이랑 같이 먹어도 되나요?"),
             _asst("두 약은 둘 다 NSAID 계열..."),
@@ -55,9 +56,9 @@ class TestCompactFilter:
     def test_filter_drops_general_chat_pair(self) -> None:
         service = SessionCompactService(rag_generator=AsyncMock())
         messages = [
-            _user("안녕", intent=IntentType.GENERAL_CHAT),
+            _user("안녕", intent=_INTENT_GENERAL_CHAT),
             _asst("안녕하세요!"),
-            _user("비타민D 하루 권장량 얼마예요?", intent=IntentType.SUPPLEMENT_INFO),
+            _user("비타민D 하루 권장량 얼마예요?", intent=_INTENT_SUPPLEMENT_INFO),
             _asst("성인은 하루 400~800 IU..."),
         ]
 
@@ -84,9 +85,9 @@ class TestCompactFilter:
         """Out-of-scope USER without a following ASSISTANT turn is also dropped."""
         service = SessionCompactService(rag_generator=AsyncMock())
         messages = [
-            _user("타이레놀 부작용", intent=IntentType.MEDICATION_INFO),
+            _user("타이레놀 부작용", intent=_INTENT_MEDICATION_INFO),
             _asst("타이레놀 부작용은..."),
-            _user("주식 추천해줘", intent=IntentType.OUT_OF_SCOPE),
+            _user("주식 추천해줘", intent=_INTENT_OUT_OF_SCOPE),
         ]
 
         kept = service.filter_noise(messages)
@@ -107,7 +108,7 @@ class TestCompactServiceSummarize:
             CompactInput(
                 prev_summary=None,
                 messages=[
-                    _user("안녕", intent=IntentType.GENERAL_CHAT),
+                    _user("안녕", intent=_INTENT_GENERAL_CHAT),
                     _asst("안녕하세요"),
                 ],
             )
@@ -136,7 +137,7 @@ class TestCompactServiceSummarize:
                 messages=[
                     _user("타이레놀 복용 중"),
                     _asst("타이레놀 안내..."),
-                    _user("주식 추천", intent=IntentType.OUT_OF_SCOPE),
+                    _user("주식 추천", intent=_INTENT_OUT_OF_SCOPE),
                     _asst("복약만 도와드려요"),
                     _user("아스피린도 같이?"),
                     _asst("두 약 모두..."),

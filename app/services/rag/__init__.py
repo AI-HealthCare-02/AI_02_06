@@ -10,7 +10,6 @@
   ``session_compact_service`` 가 ``summarize_messages`` 만 사용
 - ``app.services.rag.protocols`` — ``EmbeddingProvider`` / ``Retriever``
   Protocol 정의 (HybridRetriever 시그니처용)
-- ``app.services.rag.intent`` — Step 6 에서 폐기 예정 (지금은 보존)
 
 Public 진입점은 explicit submodule path 로만 노출한다.
 """
