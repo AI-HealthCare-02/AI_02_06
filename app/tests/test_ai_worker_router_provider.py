@@ -65,7 +65,12 @@ class TestRouteWithToolsCallContract:
         msgs = [{"role": "user", "content": "강남역 약국 알려줘"}]
         result = await router_provider.route_with_tools(messages=msgs)
 
-        assert captured["messages"] == msgs
+        # 옵션 C: route_with_tools 가 ROUTER_SYSTEM_PROMPT 를 system role 로
+        # 자동 prepend 한다. 호출 측 messages 는 그 뒤에 그대로 따라붙어야 함.
+        sent = captured["messages"]
+        assert sent[0]["role"] == "system"
+        assert sent[0]["content"] == router_provider.ROUTER_SYSTEM_PROMPT
+        assert sent[1:] == msgs
         assert captured["tools"] == TOOL_SCHEMAS
         assert captured["tool_choice"] == "auto"
         assert captured["parallel_tool_calls"] is True
