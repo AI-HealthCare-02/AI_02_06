@@ -1,4 +1,4 @@
-"""Tool-calling RQ jobs — Phase Y.
+"""Tool-calling RQ jobs — Phase Y / 옵션 C.
 
 두 가지 RQ task:
 - ``route_intent_job(messages)`` — Router LLM 호출 → assistant message dict
@@ -8,13 +8,23 @@
 import 는 모듈 상단에 둔다. 실제 호출은 runtime monkeypatch 가능하도록
 모듈 attribute 로 노출되므로 테스트는
 ``monkeypatch.setattr(jobs, "search_hospitals_by_keyword", ...)`` 로 대체 가능.
+
+옵션 C 변경 (Tortoise lifecycle):
+RAG retrieval tool (``search_medicine_knowledge_base``) 은 medicine_chunk
+DB 쿼리가 필요하므로 ``run_tool_calls_job`` 이 호출 시작 시 Tortoise.init,
+종료 시 close_connections 를 한 번 묶어 처리한다. RAG 호출이 없으면 lifecycle
+스킵 — 위치 검색만 도는 turn 은 DB 연결 비용을 지지 않는다.
 """
 
 import asyncio
 import logging
 from typing import Any
 
+from tortoise import Tortoise
+
+from ai_worker.domains.rag.retrieval import retrieve_medicine_chunks
 from ai_worker.domains.tool_calling import router_llm as router_provider
+from app.db.databases import TORTOISE_ORM
 from app.dtos.tools import KakaoPlace
 from app.services.tools.maps.hospital_search import (
     DEFAULT_RADIUS_M,
@@ -29,6 +39,8 @@ _CATEGORY_TO_ENUM: dict[str, HospitalCategory] = {
     "약국": HospitalCategory.PHARMACY,
     "병원": HospitalCategory.HOSPITAL,
 }
+
+_MEDICINE_KNOWLEDGE_TOOL_NAME = "search_medicine_knowledge_base"
 
 
 async def route_intent_job(messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -55,6 +67,9 @@ def _log_route_summary(result: dict[str, Any]) -> None:
     logger.info("[ToolCalling] route_intent_job done tool_calls=%d%s", len(tool_calls), names_suffix)
 
 
+# ── tool_calls 병렬 dispatch (RQ Task) ──────────────────────────────
+# 흐름: 빈 calls 단축 -> RAG 포함 여부에 따라 Tortoise lifecycle
+#       -> asyncio.gather 로 dispatch 병행 -> 결과 merge -> lifecycle close
 async def run_tool_calls_job(calls: list[dict[str, Any]]) -> dict[str, Any]:
     """[RQ Task] 모든 tool_call 을 병행 실행해 ``{tool_call_id: result}`` 반환.
 
@@ -63,16 +78,29 @@ async def run_tool_calls_job(calls: list[dict[str, Any]]) -> dict[str, Any]:
             location 호출은 ``geolocation: {lat, lng}`` 도 필요.
 
     Returns:
-        성공 결과는 ``{"places": [...]}``, 실패는 ``{"error": str}``.
+        성공 결과는 ``{"places": [...]}`` (병원/약국) 또는
+        ``{"chunks": [...]}`` (의학 지식), 실패는 ``{"error": str}``.
     """
     if not calls:
         return {}
 
     _log_run_start(calls)
-    results = await asyncio.gather(*[_dispatch(call) for call in calls], return_exceptions=False)
+    needs_db = _needs_tortoise(calls)
+    if needs_db:
+        await Tortoise.init(config=TORTOISE_ORM)
+    try:
+        results = await asyncio.gather(*[_dispatch(call) for call in calls], return_exceptions=False)
+    finally:
+        if needs_db:
+            await Tortoise.close_connections()
     merged = {call["tool_call_id"]: result for call, result in zip(calls, results, strict=True)}
     _log_run_done(merged)
     return merged
+
+
+def _needs_tortoise(calls: list[dict[str, Any]]) -> bool:
+    """``calls`` 안에 DB 접근이 필요한 tool 이 하나라도 있는지."""
+    return any(call.get("name") == _MEDICINE_KNOWLEDGE_TOOL_NAME for call in calls)
 
 
 def _log_run_start(calls: list[dict[str, Any]]) -> None:
@@ -98,10 +126,19 @@ async def _dispatch(call: dict[str, Any]) -> dict[str, Any]:
             return await _run_keyword(call)
         if name == "search_hospitals_by_location":
             return await _run_location(call)
+        if name == _MEDICINE_KNOWLEDGE_TOOL_NAME:
+            return await _run_medicine_knowledge(call)
     except Exception as exc:
         logger.exception("[ToolCalling] tool call %r failed", name)
         return {"error": f"{type(exc).__name__}: {exc}"}
     return {"error": f"unknown function: {name}"}
+
+
+async def _run_medicine_knowledge(call: dict[str, Any]) -> dict[str, Any]:
+    """RAG retrieval 을 실행한다 (Tortoise lifecycle 은 호출자가 관리)."""
+    arguments = call.get("arguments") or {}
+    query = arguments.get("query", "")
+    return await retrieve_medicine_chunks(query=query)
 
 
 async def _run_keyword(call: dict[str, Any]) -> dict[str, Any]:
