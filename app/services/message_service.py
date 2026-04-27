@@ -38,6 +38,14 @@ _HTTP_400_BAD_REQUEST = 400
 _HTTP_403_FORBIDDEN = 403
 _HTTP_410_GONE = 410
 
+_LOG_PREVIEW_LIMIT = 80
+
+
+def _preview(text: str, limit: int = _LOG_PREVIEW_LIMIT) -> str:
+    """단일 줄 preview — 로그에서 user/assistant content 를 짧게 보여준다."""
+    collapsed = " ".join(text.split())
+    return collapsed if len(collapsed) <= limit else collapsed[:limit] + "..."
+
 
 def _is_valid_coords(lat: float | None, lng: float | None) -> bool:
     """``lat``/``lng`` 가 유한한 숫자값인지 검증.
@@ -309,16 +317,32 @@ class MessageService:
         Raises:
             HTTPException: Session ownership violations bubble up.
         """
+        sid = str(session_id)[:8]
+        logger.info(
+            "[Chat] session=%s account=%s q=%r",
+            sid,
+            str(account_id)[:8],
+            _preview(content),
+        )
+
         await self._verify_session_ownership(session_id, account_id)
 
         recent = await self.repository.get_recent_by_session(session_id, limit=_HISTORY_LIMIT)
         history = _chat_messages_to_history(recent)
+        logger.info("[Chat] session=%s history_loaded=%dturns", sid, len(history))
         route_messages = [*history, {"role": "user", "content": content}]
 
         queue = self._get_queue()
 
         route = await route_intent_via_rq(messages=route_messages, queue=queue)
-        logger.info("[ToolCalling] route kind=%s calls=%d", route.kind, len(route.tool_calls))
+        tool_names = ",".join(tc.name for tc in route.tool_calls) if route.tool_calls else "-"
+        logger.info(
+            "[Chat] session=%s route kind=%s calls=%d tools=%s",
+            sid,
+            route.kind,
+            len(route.tool_calls),
+            tool_names,
+        )
 
         if route.kind == "text":
             return await self._persist_router_text_turn(session_id, content, route.text)
@@ -355,6 +379,12 @@ class MessageService:
         text: str,
     ) -> AskResult:
         """Router LLM 이 직접 답변한 (text) 턴을 user/assistant 메시지로 persist."""
+        logger.info(
+            "[Chat] session=%s route=text reply=%r len=%d",
+            str(session_id)[:8],
+            _preview(text),
+            len(text),
+        )
         user_msg = await self.repository.create_user_message(session_id, content)
         assistant_msg = await self.repository.create_assistant_message(session_id, text)
         return AskResult(user_message=user_msg, assistant_message=assistant_msg, pending=None)
@@ -420,6 +450,13 @@ class MessageService:
             queue=self._get_queue(),
         )
         answer = completion.get("answer", "")
+        logger.info(
+            "[Chat] session=%s finalize tools=%d reply=%r len=%d",
+            str(session_id)[:8],
+            len(tool_results),
+            _preview(answer),
+            len(answer),
+        )
 
         user_msg = await self.repository.create_user_message(session_id, content)
         assistant_msg = await self.repository.create_assistant_message(session_id, answer)
@@ -469,7 +506,15 @@ class MessageService:
 
         session_uuid = UUID(pending.session_id)
         assistant_msg = await self.repository.create_assistant_message(session_uuid, answer)
-        logger.info("[ToolCalling] resolved turn=%s status=%s", turn_id, status)
+        logger.info(
+            "[Chat] resolved turn=%s session=%s status=%s tools=%d reply=%r len=%d",
+            turn_id,
+            str(session_uuid)[:8],
+            status,
+            len(results),
+            _preview(answer),
+            len(answer),
+        )
         return AskResult(user_message=None, assistant_message=assistant_msg, pending=None)
 
     @staticmethod
