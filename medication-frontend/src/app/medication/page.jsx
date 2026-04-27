@@ -69,6 +69,20 @@ function formatDateNav(dateStr) {
 }
 
 
+// start_date와 total_intake_days로 복약 진행도 계산 (마이그레이션 불필요)
+function getProgressInfo(items) {
+  const rep = items.find(m => m.is_active && m.start_date && m.total_intake_days) || null
+  if (!rep) return null
+
+  const today = new Date()
+  const startDate = new Date(rep.start_date)
+  const daysPassed = Math.floor((today - startDate) / (1000 * 60 * 60 * 24)) + 1
+  const currentDay = Math.min(Math.max(daysPassed, 1), rep.total_intake_days)
+  const progress = Math.round((currentDay / rep.total_intake_days) * 100)
+
+  return { currentDay, totalDays: rep.total_intake_days, progress }
+}
+
 function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup, completedMedIds, onCompleteToday, isCompleting }) {
   const { deptKey, items } = group
   const startDates = items.map(m => m.start_date).filter(Boolean).sort()
@@ -76,6 +90,8 @@ function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup, comp
   const rangeStart = startDates[0]
   const rangeEnd = endDates[endDates.length - 1]
   const hasActive = items.some(m => m.is_active)
+  // 처방전 복약 진행도 (start_date 기준으로 계산)
+  const progressInfo = hasActive ? getProgressInfo(items) : null
 
   // 활성 약 중 오늘 이미 복약 완료된 항목 수 계산
   const activeMeds = items.filter(m => m.is_active)
@@ -130,6 +146,23 @@ function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup, comp
           <p className="text-xs text-gray-400 mt-1.5 ml-8">
             {formatDate(rangeStart)}{rangeEnd ? ` ~ ${formatDate(rangeEnd)}` : ''}
           </p>
+        )}
+        {/* 복용 진행도 — start_date 기준으로 N일차 / M일 계산 */}
+        {progressInfo && (
+          <div className="mt-2 ml-8">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-bold text-gray-500">
+                {progressInfo.currentDay}일차 / {progressInfo.totalDays}일
+              </span>
+              <span className="text-[11px] font-bold text-gray-400">{progressInfo.progress}%</span>
+            </div>
+            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gray-700 rounded-full transition-all duration-500"
+                style={{ width: `${progressInfo.progress}%` }}
+              />
+            </div>
+          </div>
         )}
       </div>
       <div className="divide-y divide-gray-50">
