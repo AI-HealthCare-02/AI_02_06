@@ -226,6 +226,8 @@ export default function MyPage() {
   const [family, setFamily] = useState([])
   const [ongoingCount, setOngoingCount] = useState(0)
   const [streakDays, setStreakDays] = useState(0)
+  // 오늘 복약 완료 종 수 (TAKEN 상태인 intake log 수)
+  const [todayTakenCount, setTodayTakenCount] = useState(0)
   const [modalType, setModalType] = useState(null)
   const [selectedFamilyMember, setSelectedFamilyMember] = useState(null)
 
@@ -250,16 +252,21 @@ export default function MyPage() {
       setIsRefreshing(true)
     }
     try {
-      const [profileRes, listRes, challengeRes, streakRes] = await Promise.all([
+      const [profileRes, listRes, challengeRes, streakRes, todayLogsRes] = await Promise.all([
         api.get(`/api/v1/profiles/${profileId}`),
         api.get('/api/v1/profiles'),
         api.get(`/api/v1/challenges?profile_id=${profileId}`),
         api.get(`/api/v1/intake-logs/streak?profile_id=${profileId}`),
+        // 오늘 복약 기록 조회 (target_date 미지정 시 오늘 기준으로 반환)
+        api.get(`/api/v1/intake-logs?profile_id=${profileId}`),
       ])
       setUserProfile(profileRes.data)
       setFamily(listRes.data.filter(p => p.relation_type !== 'SELF'))
-      setOngoingCount(challengeRes.data.length)
+      // IN_PROGRESS 상태인 챌린지만 카운트 (DELETED/COMPLETED 제외)
+      setOngoingCount(challengeRes.data.filter(c => c.challenge_status === 'IN_PROGRESS').length)
       setStreakDays(streakRes.data.streak_days ?? 0)
+      // 오늘 TAKEN 상태인 복약 기록 수
+      setTodayTakenCount((todayLogsRes.data || []).filter(l => l.intake_status === 'TAKEN').length)
     } catch (err) { handleApiError(err) } finally {
       setIsLoading(false)
       setIsRefreshing(false)
@@ -351,10 +358,17 @@ export default function MyPage() {
               <div className="w-24 h-24 bg-gray-900 rounded-full flex items-center justify-center shadow-lg mb-4 border-4 border-white"><User size={40} className="text-white" /></div>
               <h2 className="text-xl font-black text-gray-900 mb-1">{userProfile?.name.split('(')[0]}님</h2>
               <p className="text-gray-400 text-xs font-bold mb-6">{userProfile?.relation_type === 'SELF' ? '본인 계정' : '사용자'}</p>
-              <div className="grid grid-cols-2 gap-3 w-full">
+              <div className="grid grid-cols-3 gap-3 w-full">
                 <div className="bg-gray-50 p-4 rounded-[24px] border border-gray-100">
                   <p className="text-[10px] font-black text-gray-500 mb-1">연속 복약</p>
                   <p className="text-lg font-black text-gray-800">{streakDays}일째 🔥</p>
+                </div>
+                {/* 오늘 복약 완료 종 수 카드 */}
+                <div className={`p-4 rounded-[24px] border ${todayTakenCount > 0 ? 'bg-green-50 border-green-100' : 'bg-gray-50 border-gray-100'}`}>
+                  <p className={`text-[10px] font-black mb-1 ${todayTakenCount > 0 ? 'text-green-600' : 'text-gray-500'}`}>오늘 복약</p>
+                  <p className="text-lg font-black text-gray-800">
+                    {todayTakenCount > 0 ? `${todayTakenCount}종 완료` : '-'}
+                  </p>
                 </div>
                 <div className="bg-orange-50 p-4 rounded-[24px] border border-orange-100">
                   <p className="text-[10px] font-black text-orange-500 mb-1">진행 챌린지</p>

@@ -551,18 +551,23 @@ export default function LifestyleGuidePage() {
 
       <div className="max-w-3xl mx-auto px-4 py-4 space-y-4">
 
-        {/* ── 생성 버튼 ── */}
-        <button
-          onClick={handleGenerate}
-          disabled={isGenerating}
-          className={`w-full py-3.5 rounded-2xl text-sm font-bold transition-all ${
-            isGenerating
-              ? 'bg-gray-100 text-gray-400 cursor-wait'
-              : 'bg-gray-900 text-white hover:bg-gray-700 cursor-pointer active:scale-[0.98]'
-          }`}
-        >
-          {isGenerating ? '🤖 AI가 복약 기록을 분석 중입니다...' : '✨ 새 가이드 생성하기'}
-        </button>
+        {/* ── 생성 버튼 — 타이틀 우측 작은 버튼으로 변경 ── */}
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-gray-400">
+            {isGenerating ? '🤖 AI가 분석 중입니다...' : ''}
+          </p>
+          <button
+            onClick={handleGenerate}
+            disabled={isGenerating}
+            className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
+              isGenerating
+                ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-wait'
+                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 cursor-pointer'
+            }`}
+          >
+            {isGenerating ? '생성 중...' : '+ 새 가이드'}
+          </button>
+        </div>
 
         {/* ── 가이드 없음: EmptyState ── */}
         {guides.length === 0 && !isGenerating && (
@@ -794,17 +799,6 @@ export default function LifestyleGuidePage() {
         )}
       </div>
 
-      {/* ── 하단 고정 챌린지 배너 ── */}
-      {!isLoadingChallenges && (
-        <ChallengeBanner
-          challenge={activeBannerChallenge}
-          isViewingHistory={isViewingHistory}
-          onStart={handleChallengeStart}
-          onCheck={handleChallengeCheck}
-          isProcessing={processingChallengeId === activeBannerChallenge?.id}
-          onGoToChallenge={() => router.push('/challenge')}
-        />
-      )}
 
       <BottomNav />
 
