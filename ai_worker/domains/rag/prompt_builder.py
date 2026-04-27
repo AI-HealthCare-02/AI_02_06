@@ -1,22 +1,12 @@
-"""RAG·세션 요약·쿼리 재작성 시스템/유저 프롬프트 빌더.
+"""RAG·세션 요약 시스템/유저 프롬프트 빌더.
 
 LLM 프롬프트 문자열을 한 곳에 모아 두고 함수형 빌더로 노출한다. 도메인
 모듈은 본 파일의 문자열·함수만 참조해 프롬프트를 조립한다.
-"""
 
-REWRITE_SYSTEM_PROMPT = (
-    "당신은 한국어 의료 상담 대화의 쿼리 재작성기입니다.\n"
-    "대화 이력과 현재 질의를 받아 self-contained 한 문장 한국어 쿼리로 재작성하세요.\n"
-    "대명사(그 약, 이 약, 저것, 그것, 해당 약), 생략된 주어, 지시어(아까, 방금)는 "
-    "이력에서 실제 약품명으로 치환합니다.\n"
-    "복수 지시(그 약들, 둘 다, 두 약)는 이력에서 해당 약품들을 모두 포함해 재작성합니다.\n"
-    "\n"
-    "중요:\n"
-    "- 현재 질의가 참조를 포함하지만 이력에서 참조 대상을 특정할 수 없으면, "
-    "재작성하지 말고 정확히 다음 문자열만 출력: UNRESOLVABLE\n"
-    "- 현재 질의가 이미 self-contained 하면 그대로 출력해도 됩니다.\n"
-    "- 설명, 접두사, 인용부호 없이 한 문장만 출력하세요."
-)
+옵션 C 변경: query rewriter 가 폐기됐으므로 ``REWRITE_SYSTEM_PROMPT`` 와
+``build_rewrite_user_prompt`` 도 함께 제거. Router LLM 의 system prompt 가
+대명사·생략 주어 풀기 책임을 흡수했다.
+"""
 
 CHAT_PERSONA_FALLBACK_PROMPT = (
     "You are 'Dayak,' a professional and warm-hearted pharmacist.\n"
@@ -78,20 +68,6 @@ SUMMARY_SYSTEM_PROMPT = (
 )
 
 
-def build_rewrite_user_prompt(history: list[dict[str, str]], current_query: str) -> str:
-    r"""쿼리 재작성용 user prompt 를 조립한다.
-
-    Args:
-        history: ``{"role", "content"}`` 형식의 이전 대화 턴.
-        current_query: 사용자의 이번 턴 쿼리.
-
-    Returns:
-        ``"이력:\n...\n현재 질의:\n...\n재작성:"`` 형식의 단일 프롬프트.
-    """
-    history_block = _render_history(history)
-    return f"이력:\n{history_block}\n\n현재 질의:\n{current_query}\n\n재작성:"
-
-
 def build_summary_user_prompt(prev_summary: str | None, messages: list[dict[str, str]]) -> str:
     """세션 요약용 user prompt 를 조립한다.
 
@@ -125,14 +101,6 @@ def build_chat_system_prompt(custom_prompt: str | None) -> str:
         최종 사용할 system prompt 문자열.
     """
     return custom_prompt or CHAT_PERSONA_FALLBACK_PROMPT
-
-
-def _render_history(history: list[dict[str, str]]) -> str:
-    """이력 리스트를 한 줄씩 ``role: content`` 로 렌더링."""
-    if not history:
-        return "(없음)"
-    lines = [f"{turn.get('role', 'user')}: {turn.get('content', '')}" for turn in history]
-    return "\n".join(lines)
 
 
 def _render_messages(messages: list[dict[str, str]]) -> str:
