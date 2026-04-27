@@ -203,7 +203,7 @@ class MedicationService:
         Returns:
             Medication: Created medication.
         """
-        return await self.repository.create(
+        medication = await self.repository.create(
             profile_id=profile_id,
             medicine_name=data.medicine_name,
             dose_per_intake=data.dose_per_intake,
@@ -216,6 +216,39 @@ class MedicationService:
             dispensed_date=data.dispensed_date,
             expiration_date=data.expiration_date,
         )
+
+        # ── F3: 즉시 회수 체크 (Phase 7) ─────────────────────────────
+        # 흐름: drug_recall_repo.find_match -> 매칭되면 알림 dispatch
+        # 등록 시점에 회수가 이미 발표된 약이라면 cron 24h 대기 없이 즉시 알림.
+        await self._dispatch_recall_alert_if_any(medication)
+
+        return medication
+
+    @staticmethod
+    async def _dispatch_recall_alert_if_any(medication: Medication) -> None:
+        """For a freshly created medication, send a recall alert if it
+        matches a known recall row. Failures are logged but never
+        propagate — the medication insert must not be reverted.
+        """
+        import logging  # 지역 import 방지를 위해 모듈 상단으로 옮길 후속 PR 가능
+
+        from app.repositories.drug_recall_repository import DrugRecallRepository
+        from app.services.recall_notification_service import send_recall_alert
+
+        log = logging.getLogger(__name__)
+        try:
+            recalls = await DrugRecallRepository().find_match(medication)
+            for recall in recalls:
+                await send_recall_alert(
+                    profile_id=medication.profile_id,
+                    recall=recall,
+                    medication=medication,
+                )
+        except Exception:
+            log.exception(
+                "[F3] recall match dispatch failed for medication=%s",
+                getattr(medication, "id", "?"),
+            )
 
     async def create_medication_with_owner_check(
         self,

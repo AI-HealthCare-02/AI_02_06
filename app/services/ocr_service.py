@@ -267,7 +267,7 @@ class OCRService:
         total_days = med.total_intake_days or 1
         total_count = daily_count * total_days
         today = datetime.now(tz=config.TIMEZONE).date()
-        return await Medication.create(
+        medication = await Medication.create(
             profile_id=str(profile_id),
             medicine_name=med.medicine_name,
             department=med.department,
@@ -283,6 +283,39 @@ class OCRService:
             dispensed_date=med.dispensed_date,
             is_active=True,
         )
+
+        # ── F3: OCR 확정 직후 회수 체크 (Phase 7) ───────────────────
+        # 흐름: drug_recall_repo.find_match -> 매칭되면 알림 dispatch
+        await self._dispatch_recall_alert_if_any(medication)
+
+        return medication
+
+    @staticmethod
+    async def _dispatch_recall_alert_if_any(medication: Medication) -> None:
+        """For OCR-confirmed medication, send a recall alert if matched.
+
+        Failures are logged but never propagate — OCR confirm must
+        not roll back over a notification problem.
+        """
+        import logging
+
+        from app.repositories.drug_recall_repository import DrugRecallRepository
+        from app.services.recall_notification_service import send_recall_alert
+
+        log = logging.getLogger(__name__)
+        try:
+            recalls = await DrugRecallRepository().find_match(medication)
+            for recall in recalls:
+                await send_recall_alert(
+                    profile_id=medication.profile_id,
+                    recall=recall,
+                    medication=medication,
+                )
+        except Exception:
+            log.exception(
+                "[F3-OCR] recall match dispatch failed for medication=%s",
+                getattr(medication, "id", "?"),
+            )
 
 
 def _to_poll_response(draft: OcrDraft) -> OcrDraftPollResponse:
