@@ -296,7 +296,7 @@ function ChallengeBanner({ challenge, isViewingHistory, onStart, onCheck, isProc
 // ── 메인 페이지 ────────────────────────────────────────────────────────────────
 export default function LifestyleGuidePage() {
   const router = useRouter()
-  const { selectedProfileId: profileId } = useProfile()
+  const { selectedProfileId: profileId, isLoading: isProfileLoading } = useProfile()
 
   const [isLoading, setIsLoading] = useState(true)
   const [isGenerating, setIsGenerating] = useState(false)
@@ -321,7 +321,11 @@ export default function LifestyleGuidePage() {
   // profileId가 확정되면 최신 가이드와 전체 이력을 병렬로 요청
   // Promise.allSettled 사용: 하나가 실패해도 나머지 결과는 활용
   useEffect(() => {
-    if (!profileId) return
+    if (isProfileLoading) return
+    if (!profileId) {
+      setIsLoading(false)
+      return
+    }
     const load = async () => {
       try {
         if (isInitialLoad.current) setIsLoading(true)
@@ -348,7 +352,7 @@ export default function LifestyleGuidePage() {
       }
     }
     load()
-  }, [profileId])
+  }, [profileId, isProfileLoading])
 
   // ── 선택된 가이드의 챌린지 로딩 ──
   // 날짜 칩으로 다른 가이드 선택 시마다 해당 가이드에 연결된 챌린지 목록 재요청
@@ -384,7 +388,11 @@ export default function LifestyleGuidePage() {
   // 4) ready 도달 시 받은 payload 로 guides/selectedGuide 교체
   // 5) terminal error 시 안내 + placeholder 제거
   const handleGenerate = async () => {
-    if (!profileId || isGenerating) return
+    if (!profileId) {
+      showError('프로필을 먼저 선택해주세요.')
+      return
+    }
+    if (isGenerating) return
     setIsGenerating(true)
     const abortController = new AbortController()
 
@@ -558,9 +566,9 @@ export default function LifestyleGuidePage() {
           </p>
           <button
             onClick={handleGenerate}
-            disabled={isGenerating}
+            disabled={isGenerating || !profileId}
             className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
-              isGenerating
+              isGenerating || !profileId
                 ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-wait'
                 : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 cursor-pointer'
             }`}
