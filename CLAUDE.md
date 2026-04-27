@@ -51,6 +51,24 @@ All feature implementations and modifications MUST strictly adhere to the follow
     * **Objective**: Complete the actual feature to pass the tests.
     * **Principles**: Write the **minimum code necessary** to pass the tests. Once passed (Green), perform additional tidying if necessary. **Implementing features without test codes is strictly prohibited.**
 
+#### Ruff 의무 검사 규칙 (CRITICAL)
+
+**모든 Python 파일 작성/수정 후 반드시 아래 검사를 통과해야 커밋 가능:**
+
+```bash
+# 자동 수정 먼저 적용
+uv run ruff check --fix app/ ai_worker/
+uv run ruff format app/ ai_worker/
+
+# 검사 통과 확인 (에러 0건이어야 함)
+uv run ruff check app/ ai_worker/
+uv run ruff format --check app/ ai_worker/
+```
+
+- AI 에이전트는 코드 수정 후 반드시 Ruff 검사를 실행해야 함
+- Ruff 오류가 있으면 수정 완료 전까지 다음 단계로 진행 불가
+- 커밋 추천 시 반드시 Ruff 검사 결과(PASS/FAIL)를 포함해야 함
+
 ### 2.3 Step-by-Step User Confirmation
 The agent MUST obtain developer (user) confirmation at the end of each step before proceeding:
 1. **After Tidy**: "구조 정돈이 완료되었습니다. 테스트 작성을 진행할까요?" (Tidy phase complete. Shall we proceed to write tests?)
@@ -96,10 +114,33 @@ To prevent Messy Data, strictly adhere to the following principles:
 ### 4.2 Technical Standards & Performance Optimization
 * **Time Data Processing**: All `datetime` objects MUST use timezone-included **Aware datetime** formats to maintain data precision.
 * **Asynchronous Programming (Async)**: Actively utilize **Async/Await** for all I/O operations (Network, File I/O, CPU-bound operations) to optimize responsiveness.
+* **HTTP Client**: All external API calls MUST use `httpx.AsyncClient` (no `requests` library). The `requests` library is synchronous and MUST NOT be used anywhere in the project.
+* **File Size Limit**: When a file exceeds **300 lines**, review and split into smaller modules before proceeding.
+* **Layered Architecture Enforcement**: Router -> Service -> Repository -> Model. Skipping layers is strictly prohibited.
+* **Model Migration**: When any model is changed, `aerich migrate` + `docs/db_schema.dbml` update is mandatory.
 
 ### 4.3 Multilingual Processing & Documentation Rules
-* **English Use (LLM/Internal)**: Source code comments, `.md` documents, and `description` fields in Models/DTOs read by AI MUST be written in English.
-* **Korean Use (User/External)**: User Interfaces (UI), log output messages, human-readable DB/DTO `descriptions`, and user responses MUST be written in Korean.
+* **English Use (LLM/Internal)**: Docstrings, `.md` documents, and `description` fields in Models/DTOs read by AI MUST be written in English.
+* **Korean Use (User/External)**: User Interfaces (UI), log output messages, human-readable DB/DTO `descriptions`, in-code comments (section headers, flow descriptions, inline explanations), and user responses MUST be written in Korean.
+
+### 4.4 Section & Flow Comments (Mandatory — Korean)
+Whenever the agent generates or meaningfully modifies a function, class, pipeline task, router handler, or any major logical block, it MUST prepend a **Korean section header comment** with a **flow description**. This improves top-to-bottom scannability and makes data flow traceable without reading the full implementation.
+
+* **Scope**: Apply to all newly generated/modified top-level callables (functions, async tasks, service methods, router endpoints) and to any logically distinct code block that represents a pipeline step, orchestration stage, or cross-layer coordination.
+* **Language**: The comment body MUST be written in **Korean (한글)**. This takes precedence over the general "English for code comments" convention, because these comments target human readers (developers), not LLM parsing.
+* **Required Format**:
+    1. **Section header line**: `# ── [섹션 제목] ──…──` (use U+2500 `─` box-drawing characters to pad to ~70 columns).
+    2. **Flow line(s)**: `# 흐름: [Step 1] -> [Step 2] -> [Step 3]`. If the flow wraps, continuation lines MUST align the arrow under the first step: `#       -> [Step 4]`.
+    3. Optional additional context lines may follow (e.g., expiry, side effects, preconditions) — each on its own `#` line, concise and in Korean.
+* **Canonical Example**:
+    ```python
+    # ── OCR 전체 파이프라인 (RQ Task) ────────────────────────────────────
+    # 흐름: OpenCV 전처리 -> CLOVA OCR -> 텍스트 후처리 -> LLM 파싱
+    #       -> Redis에 결과 저장 (10분 만료)
+    async def run_ocr_pipeline(...):
+        ...
+    ```
+* **Prohibited**: Do not write these section/flow comments in English. Do not omit the flow line for non-trivial orchestration code. Do not place them inside a function body as a substitute — they belong immediately above the `def` / `class` / block opener.
 
 ---
 
@@ -207,5 +248,37 @@ To prevent Messy Data, strictly adhere to the following principles:
 
 ---
 
-## 10. Final Language Check
+## 10. Research Checklist
+
+Before starting any implementation, the agent MUST verify the following:
+- [ ] Check official documentation (2024-2025 latest version, year required)
+- [ ] Research external Best Examples (official repos, production cases, source + year required)
+- [ ] Confirm similar implementation patterns within the project (`app/services/`, `app/repositories/`)
+- [ ] Check if new environment variables are needed (based on `envs/example.local.env`)
+- [ ] Identify related models (`app/models/` related tables)
+- [ ] Check related P0/P1 issues in `QA_AUDIT_PLAN.md` (conflict check)
+
+---
+
+## 11. Plan Review (Required before GO)
+
+### Sub-agent Parallel Review
+The AI MUST review plans from these 3 perspectives simultaneously:
+- **Architect**: Layered architecture violations, dependency direction between layers
+- **Critic**: Edge cases, missing exception handling, security vulnerabilities
+- **Document Specialist**: Missing Affected Files, DBML update requirements
+
+Review MUST reference external Best Examples from the Research Checklist (source + year required).
+
+### Review Checklist
+- [ ] Is the Goal clearly defined with completion criteria?
+- [ ] Were trade-off choices presented to the user first?
+- [ ] Is the external research from Research Checklist completed?
+- [ ] Are TDD Steps correctly split by business logic unit?
+- [ ] Are Affected Files filled in completely?
+- [ ] Is the core flow visualized with a Mermaid flowchart?
+
+---
+
+## 12. Final Language Check
 **[CRITICAL WARNING] All answers, explanations, result outputs, and feedback to the user MUST be written EXCLUSIVELY in 'Korean (한글)'. Arbitrarily translating responses into English or any other language is STRICTLY PROHIBITED.**

@@ -64,30 +64,10 @@ class ChatSessionRepository:
             .all()
         )
 
-    async def get_by_medication(self, medication_id: UUID) -> list[ChatSession]:
-        """Get medication-related chat sessions.
-
-        Args:
-            medication_id: Medication UUID.
-
-        Returns:
-            list[ChatSession]: List of medication-related sessions.
-        """
-        return (
-            await ChatSession
-            .filter(
-                medication_id=medication_id,
-                deleted_at__isnull=True,
-            )
-            .order_by("-created_at")
-            .all()
-        )
-
     async def create(
         self,
         account_id: UUID,
         profile_id: UUID,
-        medication_id: UUID | None = None,
         title: str | None = None,
     ) -> ChatSession:
         """Create new chat session.
@@ -95,7 +75,6 @@ class ChatSessionRepository:
         Args:
             account_id: Account UUID.
             profile_id: Profile UUID.
-            medication_id: Optional medication UUID.
             title: Optional session title.
 
         Returns:
@@ -105,7 +84,6 @@ class ChatSessionRepository:
             id=uuid4(),
             account_id=account_id,
             profile_id=profile_id,
-            medication_id=medication_id,
             title=title,
         )
 

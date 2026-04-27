@@ -15,12 +15,14 @@ from app.core.config import Env, config
 from app.db.databases import initialize_tortoise
 from app.middlewares.rate_limit import RateLimitMiddleware
 from app.middlewares.security import SecurityMiddleware
+from app.workers.scheduler import scheduler_lifespan
 
 app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
     redirect_slashes=False,  # Nginx handles trailing slash removal
+    lifespan=scheduler_lifespan,
 )
 
 
@@ -157,3 +159,19 @@ initialize_tortoise(app)
 
 # Include API routers
 app.include_router(v1_routers)
+
+
+@app.on_event("startup")
+async def startup_preload_rag() -> None:
+    """Pre-load RAG pipeline on startup to avoid first-request latency."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+    try:
+        from app.services.rag import get_rag_pipeline
+
+        logger.info("Pre-loading RAG pipeline...")
+        await get_rag_pipeline()
+        logger.info("RAG pipeline pre-loaded successfully.")
+    except Exception as e:
+        logger.warning("RAG pipeline pre-load failed (non-fatal): %s", e)

@@ -72,6 +72,7 @@ class MessageRepository:
         session_id: UUID,
         sender_type: SenderType,
         content: str,
+        metadata: dict | None = None,
     ) -> ChatMessage:
         """Create new message.
 
@@ -79,6 +80,8 @@ class MessageRepository:
             session_id: Session UUID.
             sender_type: Type of sender (USER or ASSISTANT).
             content: Message content.
+            metadata: Optional RAG metadata (intent, medicine_names, scores,
+                token usage). None is persisted as an empty dict.
 
         Returns:
             ChatMessage: Created message.
@@ -88,31 +91,44 @@ class MessageRepository:
             session_id=session_id,
             sender_type=sender_type,
             content=content,
+            metadata=metadata if metadata is not None else {},
         )
 
-    async def create_user_message(self, session_id: UUID, content: str) -> ChatMessage:
+    async def create_user_message(
+        self,
+        session_id: UUID,
+        content: str,
+        metadata: dict | None = None,
+    ) -> ChatMessage:
         """Create user message.
 
         Args:
             session_id: Session UUID.
             content: Message content.
+            metadata: Optional RAG metadata attached to the user turn.
 
         Returns:
             ChatMessage: Created user message.
         """
-        return await self.create(session_id, SenderType.USER, content)
+        return await self.create(session_id, SenderType.USER, content, metadata=metadata)
 
-    async def create_assistant_message(self, session_id: UUID, content: str) -> ChatMessage:
+    async def create_assistant_message(
+        self,
+        session_id: UUID,
+        content: str,
+        metadata: dict | None = None,
+    ) -> ChatMessage:
         """Create assistant message.
 
         Args:
             session_id: Session UUID.
             content: Message content.
+            metadata: Optional RAG metadata attached to the assistant turn.
 
         Returns:
             ChatMessage: Created assistant message.
         """
-        return await self.create(session_id, SenderType.ASSISTANT, content)
+        return await self.create(session_id, SenderType.ASSISTANT, content, metadata=metadata)
 
     async def soft_delete(self, message: ChatMessage) -> ChatMessage:
         """Soft delete message.

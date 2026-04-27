@@ -4,18 +4,15 @@ This module provides business logic for medication management operations
 including creation, updates, and ownership verification.
 """
 
-import hashlib
 import json
 import os
-from datetime import timedelta
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from openai import AsyncOpenAI, OpenAIError
 
 from app.dtos.drug_info import DrugInfoResponse, DrugInteraction
-from app.dtos.medication import MedicationCreate, MedicationUpdate
-from app.models.llm_response_cache import LLMResponseCache
+from app.dtos.medication import MedicationBulkDeleteResponse, MedicationCreate, MedicationUpdate, PrescriptionDateItem
 from app.models.medication import Medication
 from app.repositories.medication_repository import MedicationRepository
 from app.repositories.profile_repository import ProfileRepository
@@ -24,7 +21,7 @@ from app.repositories.profile_repository import ProfileRepository
 class MedicationService:
     """Medication business logic service for prescription management."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.repository = MedicationRepository()
         self.profile_repository = ProfileRepository()
 
@@ -136,9 +133,34 @@ class MedicationService:
         return await self.repository.get_active_by_profile(profile_id)
 
     async def get_inactive_medications_with_owner_check(self, profile_id: UUID, account_id: UUID) -> list[Medication]:
-        """소유권 검증 후 프로필의 복용 완료된 약품 조회"""
+        """Get completed or expired medications for a profile with ownership verification.
+
+        Args:
+            profile_id: Profile UUID.
+            account_id: Account UUID for ownership check.
+
+        Returns:
+            list[Medication]: List of inactive medications if profile is owned by account.
+        """
         await self._verify_profile_ownership(profile_id, account_id)
         return await self.repository.get_inactive_by_profile(profile_id)
+
+    async def get_prescription_dates_with_owner_check(
+        self,
+        profile_id: UUID,
+        account_id: UUID,
+    ) -> list[PrescriptionDateItem]:
+        """Get prescription date summary for a profile with ownership verification.
+
+        Args:
+            profile_id: Profile UUID.
+            account_id: Account UUID for ownership check.
+
+        Returns:
+            list[PrescriptionDateItem]: Grouped prescription dates sorted by date descending.
+        """
+        await self._verify_profile_ownership(profile_id, account_id)
+        return await self.repository.get_prescription_dates_by_profile(profile_id)
 
     async def get_medications_by_account(self, account_id: UUID) -> list[Medication]:
         """Get medications for all profiles of an account.
@@ -193,7 +215,6 @@ class MedicationService:
             end_date=data.end_date,
             dispensed_date=data.dispensed_date,
             expiration_date=data.expiration_date,
-            prescription_image_url=data.prescription_image_url,
         )
 
     async def create_medication_with_owner_check(
@@ -253,6 +274,24 @@ class MedicationService:
         update_data = data.model_dump(exclude_unset=True)
         return await self.repository.update(medication, **update_data)
 
+    async def decrement_and_deactivate_if_exhausted(self, medication: Medication) -> Medication:
+        """Decrement remaining intake count and deactivate medication if exhausted.
+
+        복용 완료 시 잔여 횟수를 1 감소시키고, 0이 되면 is_active=False로 자동 비활성화합니다.
+        처방전 만료와는 별개로, 복용 횟수 소진 기준의 자동 종료 로직입니다.
+
+        Args:
+            medication: Medication to update.
+
+        Returns:
+            Medication: Updated medication. Deactivated if remaining count reaches zero.
+        """
+        medication = await self.repository.decrement_remaining_count(medication)
+        # 잔여 횟수 0 도달 시 해당 처방전 비활성화 (더 이상 복용 기록 생성 안 됨)
+        if medication.remaining_intake_count == 0:
+            medication = await self.repository.update(medication, is_active=False)
+        return medication
+
     async def deactivate_medication(self, medication_id: UUID) -> Medication:
         """Deactivate medication (stop taking).
 
@@ -284,28 +323,73 @@ class MedicationService:
         medication = await self.get_medication_with_owner_check(medication_id, account_id)
         await self.repository.soft_delete(medication)
 
+    # ── Bulk soft delete (계정 소유 medication 다건 동시 삭제) ────────────
+    # 흐름: 계정의 프로필 목록 조회 -> bulk_soft_delete (단일 UPDATE)
+    #       -> 응답에 deleted_count + 누락 ids 보고
+    async def bulk_delete_with_owner_check(
+        self,
+        ids: list[UUID],
+        account_id: UUID,
+    ) -> MedicationBulkDeleteResponse:
+        """다건 medication soft delete — ownership 위반 ids 는 silently skip.
+
+        Args:
+            ids: 삭제 요청된 medication ID 목록 (1~100건, DTO 에서 강제).
+            account_id: 요청자 계정 ID — 본인 프로필 소유 medications 만 처리.
+
+        Returns:
+            ``MedicationBulkDeleteResponse`` — 처리된 개수 + 건너뛴 ids.
+        """
+        profiles = await self.profile_repository.get_all_by_account(account_id)
+        profile_ids = [p.id for p in profiles]
+        deleted_count = await self.repository.bulk_soft_delete(ids, profile_ids)
+        skipped = await self._collect_skipped_ids(ids, profile_ids) if deleted_count < len(ids) else []
+        return MedicationBulkDeleteResponse(deleted_count=deleted_count, skipped_ids=skipped)
+
+    async def _collect_skipped_ids(
+        self,
+        requested_ids: list[UUID],
+        profile_ids: list[UUID],
+    ) -> list[UUID]:
+        """삭제 요청 중 본인 소유 + 미삭제 조건을 만족하지 못한 ids 를 모은다."""
+        if not profile_ids:
+            return list(requested_ids)
+        owned_alive = await Medication.filter(
+            id__in=requested_ids,
+            profile_id__in=profile_ids,
+            deleted_at__isnull=False,  # 방금 삭제된 row 들 (UPDATE 후 deleted_at 채워짐)
+        ).values_list("id", flat=True)
+        owned_set = set(owned_alive)
+        return [rid for rid in requested_ids if rid not in owned_set]
+
     async def get_drug_info_with_owner_check(self, medication_id: UUID, account_id: UUID) -> DrugInfoResponse:
-        """소유권 검증 후 LLM 기반 약품 정보(주의사항/부작용/상호작용) 반환. llm_response_cache로 비용 절감."""
+        """Get LLM-based drug information with ownership verification.
+
+        Returns warnings, side effects, and interactions from LLM. (캐싱 미적용 — 추후
+        Redis 등 외부 캐시 도입 시 별도 추가)
+
+        Args:
+            medication_id: Medication UUID.
+            account_id: Account UUID for ownership check.
+
+        Returns:
+            DrugInfoResponse: Drug information including warnings, side effects, and interactions.
+        """
         medication = await self.get_medication_with_owner_check(medication_id, account_id)
         return await self._get_drug_info(medication.medicine_name)
 
     async def _get_drug_info(self, medicine_name: str) -> DrugInfoResponse:
-        """약품명 기반 LLM 호출. 캐시 히트 시 DB에서 반환, 미스 시 LLM 호출 후 30일 캐시 저장."""
-        from datetime import datetime, timezone
+        """Fetch drug information by name from LLM (no caching).
 
-        prompt_key = f"drug_info_v1:{medicine_name}"
-        prompt_hash = hashlib.sha256(prompt_key.encode()).hexdigest()
+        Args:
+            medicine_name: Name of the medication.
 
-        # 캐시 조회
-        cached = await LLMResponseCache.filter(
-            prompt_hash=prompt_hash,
-            expires_at__gte=datetime.now(tz=timezone.utc),
-        ).first()
-        if cached:
-            await LLMResponseCache.filter(id=cached.id).update(hit_count=cached.hit_count + 1)
-            return DrugInfoResponse.model_validate(cached.response)
+        Returns:
+            DrugInfoResponse: LLM-derived drug information.
 
-        # LLM 호출
+        Raises:
+            HTTPException: If OPENAI_API_KEY is missing or LLM call fails.
+        """
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise HTTPException(status_code=500, detail="OPENAI_API_KEY가 설정되지 않았습니다.")
@@ -340,23 +424,15 @@ class MedicationService:
             )
             raw = response.choices[0].message.content or "{}"
             data = json.loads(raw)
-            drug_info = DrugInfoResponse(
+            return DrugInfoResponse(
                 medicine_name=data.get("medicine_name", medicine_name),
                 warnings=data.get("warnings", []),
                 side_effects=data.get("side_effects", []),
                 interactions=[DrugInteraction(**i) for i in data.get("interactions", [])],
-                severe_reaction_advice=data.get("severe_reaction_advice", "심한 부작용이 나타나면 즉시 복용을 중단하고 의사와 상담하세요."),
+                severe_reaction_advice=data.get(
+                    "severe_reaction_advice",
+                    "심한 부작용이 나타나면 즉시 복용을 중단하고 의사와 상담하세요.",
+                ),
             )
         except (OpenAIError, json.JSONDecodeError) as e:
             raise HTTPException(status_code=502, detail=f"약품 정보를 가져오는 데 실패했습니다: {e}") from e
-
-        # 30일 캐시 저장
-        expires_at = datetime.now(tz=timezone.utc) + timedelta(days=30)
-        await LLMResponseCache.create(
-            prompt_hash=prompt_hash,
-            prompt_text=prompt_key,
-            response=drug_info.model_dump(),
-            expires_at=expires_at,
-        )
-
-        return drug_info

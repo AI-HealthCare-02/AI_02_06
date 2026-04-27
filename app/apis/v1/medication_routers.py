@@ -11,7 +11,14 @@ from fastapi import APIRouter, Depends, status
 
 from app.dependencies.security import get_current_account
 from app.dtos.drug_info import DrugInfoResponse
-from app.dtos.medication import MedicationCreate, MedicationResponse, MedicationUpdate
+from app.dtos.medication import (
+    MedicationBulkDeleteRequest,
+    MedicationBulkDeleteResponse,
+    MedicationCreate,
+    MedicationResponse,
+    MedicationUpdate,
+    PrescriptionDateItem,
+)
 from app.models.accounts import Account
 from app.services.medication_service import MedicationService
 
@@ -76,9 +83,10 @@ async def list_medications(
         service: Medication service instance.
         profile_id: Optional profile ID to filter by.
         active_only: Whether to return only active medications.
+        inactive_only: Whether to return only inactive (completed/expired) medications.
 
     Returns:
-        List[MedicationResponse]: List of medications.
+        list[MedicationResponse]: List of medications.
     """
     if profile_id:
         # Verify profile ownership and retrieve medications
@@ -92,6 +100,29 @@ async def list_medications(
         # Retrieve medications for all profiles of the account
         medications = await service.get_medications_by_account(current_account.id)
     return [MedicationResponse.model_validate(med) for med in medications]
+
+
+@router.get(
+    "/prescription-dates",
+    response_model=list[PrescriptionDateItem],
+    summary="List prescription dates",
+)
+async def list_prescription_dates(
+    profile_id: UUID,
+    current_account: CurrentAccount,
+    service: MedicationServiceDep,
+) -> list[PrescriptionDateItem]:
+    """Get prescription date summary grouped by date and department.
+
+    Args:
+        profile_id: Profile UUID to retrieve prescription dates for.
+        current_account: Current authenticated account.
+        service: Medication service instance.
+
+    Returns:
+        list[PrescriptionDateItem]: Prescription dates sorted by date descending.
+    """
+    return await service.get_prescription_dates_with_owner_check(profile_id, current_account.id)
 
 
 @router.get(
@@ -153,7 +184,7 @@ async def get_drug_info(
     medication_id: UUID,
     current_account: CurrentAccount,
     service: MedicationServiceDep,
-):
+) -> DrugInfoResponse:
     """LLM 기반 약품 상세 정보(주의사항, 부작용, 상호작용)를 반환합니다. 결과는 30일간 캐시됩니다."""
     return await service.get_drug_info_with_owner_check(medication_id, current_account.id)
 
@@ -176,3 +207,33 @@ async def delete_medication(
         service: Medication service instance.
     """
     await service.delete_medication_with_owner_check(medication_id, current_account.id)
+
+
+# ── DELETE /medications (bulk) ──────────────────────────────────────────
+# 흐름: 본문 ids -> 계정 소유 프로필 scope -> 단일 UPDATE soft delete
+#       -> {deleted_count, skipped_ids} 반환 (200 OK)
+@router.delete(
+    "",
+    response_model=MedicationBulkDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Bulk delete medications (soft delete)",
+)
+async def bulk_delete_medications(
+    request: MedicationBulkDeleteRequest,
+    current_account: CurrentAccount,
+    service: MedicationServiceDep,
+) -> MedicationBulkDeleteResponse:
+    """다건 medication 을 한 번에 soft delete 한다.
+
+    타인 소유·존재하지 않음·이미 삭제됨인 ids 는 ``skipped_ids`` 로 보고된다.
+    부분 실패 없이 한 번의 UPDATE 로 처리되어 일관성을 유지한다.
+
+    Args:
+        request: 삭제할 medication ID 목록 (1~100건).
+        current_account: 인증된 계정.
+        service: medication 서비스 인스턴스.
+
+    Returns:
+        ``MedicationBulkDeleteResponse`` — 처리된 개수 + 건너뛴 ids.
+    """
+    return await service.bulk_delete_with_owner_check(request.ids, current_account.id)

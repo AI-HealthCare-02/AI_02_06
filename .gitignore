@@ -3,6 +3,11 @@
 Thumbs.db
 desktop.ini
 
+# Python 캐시
+__pycache__/
+*.py[cod]
+*$py.class
+
 # IDE 관련
 .idea/
 .vscode/
@@ -23,6 +28,7 @@ envs/.prod.env
 .ruff_cache/
 .pytest_cache/
 .amazonq/
+PLAN.md
 
 # 로그 및 임시 파일
 *.log
@@ -33,6 +39,9 @@ nul
 
 # 로컬 전용 문서 (개인/민감 정보)
 docs-private/
+PLAN.md
 
 # SQL문서
 *.sql
+__pycache__/
+*.pyc
