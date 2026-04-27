@@ -18,7 +18,6 @@ from app.core.config import Env, config
 from app.db.databases import initialize_tortoise
 from app.middlewares.rate_limit import RateLimitMiddleware
 from app.middlewares.security import SecurityMiddleware
-from app.services.rag import get_rag_pipeline
 from app.workers.scheduler import scheduler_lifespan
 
 logger = logging.getLogger(__name__)
@@ -163,14 +162,3 @@ initialize_tortoise(app)
 
 # Include API routers
 app.include_router(v1_routers)
-
-
-@app.on_event("startup")
-async def startup_preload_rag() -> None:
-    """Pre-load RAG pipeline on startup to avoid first-request latency."""
-    try:
-        logger.info("Pre-loading RAG pipeline...")
-        await get_rag_pipeline()
-        logger.info("RAG pipeline pre-loaded successfully.")
-    except Exception as e:
-        logger.warning("RAG pipeline pre-load failed (non-fatal): %s", e)
