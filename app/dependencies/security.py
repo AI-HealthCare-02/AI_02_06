@@ -53,6 +53,68 @@ def _extract_token(request: Request, credential: HTTPAuthorizationCredentials | 
     )
 
 
+def _decode_account_id(token_str: str) -> UUID:
+    """Decode JWT and extract the ``sub`` claim as ``UUID``.
+
+    Args:
+        token_str: Raw JWT string.
+
+    Returns:
+        Account UUID parsed from the ``sub`` claim.
+
+    Raises:
+        HTTPException: 401 on invalid signature, missing/invalid sub.
+    """
+    try:
+        token = AccessToken(token=token_str)
+    except TokenError as err:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "invalid_token", "error_description": "Invalid token."},
+        ) from err
+
+    account_id_str = token.payload.get("sub")
+    if not account_id_str:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "invalid_token", "error_description": "Token does not contain user information."},
+        )
+
+    try:
+        return UUID(account_id_str)
+    except ValueError as err:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "invalid_token", "error_description": "Invalid token format."},
+        ) from err
+
+
+async def _load_active_account(account_id: UUID) -> Account:
+    """Fetch account by id and reject missing / disabled rows.
+
+    Args:
+        account_id: Decoded JWT subject.
+
+    Returns:
+        Active ``Account`` row.
+
+    Raises:
+        HTTPException: 401 if not found, 403 if soft-disabled.
+    """
+    account = await AccountRepository().get_by_id(account_id)
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "account_not_found", "error_description": "Account not found."},
+        )
+    if not account.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": "account_disabled", "error_description": "Account is disabled."},
+        )
+    return account
+
+
 async def get_current_account(
     request: Request,
     credential: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
@@ -70,60 +132,8 @@ async def get_current_account(
         Account: Authenticated user account.
 
     Raises:
-        HTTPException: If token is invalid, account not found, or account disabled.
+        HTTPException: 401 invalid token / account missing, 403 disabled.
     """
     token_str = _extract_token(request, credential)
-
-    try:
-        token = AccessToken(token=token_str)
-    except TokenError as err:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "error": "invalid_token",
-                "error_description": "Invalid token.",
-            },
-        ) from err
-
-    # Extract account_id from sub claim
-    account_id_str = token.payload.get("sub")
-    if not account_id_str:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "error": "invalid_token",
-                "error_description": "Token does not contain user information.",
-            },
-        )
-
-    try:
-        account_id = UUID(account_id_str)
-    except ValueError as err:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "error": "invalid_token",
-                "error_description": "Invalid token format.",
-            },
-        ) from err
-
-    account = await AccountRepository().get_by_id(account_id)
-    if not account:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "error": "account_not_found",
-                "error_description": "Account not found.",
-            },
-        )
-
-    if not account.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": "account_disabled",
-                "error_description": "Account is disabled.",
-            },
-        )
-
-    return account
+    account_id = _decode_account_id(token_str)
+    return await _load_active_account(account_id)
