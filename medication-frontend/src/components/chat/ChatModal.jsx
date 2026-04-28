@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { X, Send, RefreshCw, Plus, Pencil, Trash2, Check } from 'lucide-react'
+import { X, Send, RefreshCw, Plus, Pencil, Trash2, Check, MapPin } from 'lucide-react'
 import PropTypes from 'prop-types'
 import Markdown from 'react-markdown'
 import api, { showError } from '@/lib/api'
@@ -69,6 +69,15 @@ export default function ChatModal({ onClose, profileId }) {
   const [editingTitle, setEditingTitle] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
 
+  // GPS 권한 토글 (JIT opt-in 정책)
+  // - 새 세션은 토글이 hidden (세션 변경 시 reset)
+  // - 사용자가 GPS 가 필요한 질문을 처음 던지면 토글이 등장 (gpsToggleVisible=true)
+  // - 사용자가 ON 하기 전까지 위치는 보내지 않음 (즉시 denied POST)
+  // - ON 일 때 들어온 pending turn 은 navigator.geolocation 흐름으로 진행
+  const [gpsToggleVisible, setGpsToggleVisible] = useState(false)
+  const [gpsToggleOn, setGpsToggleOn] = useState(false)
+  const [pendingGpsTurnId, setPendingGpsTurnId] = useState(null)
+
   const scrollRef = useRef(null)
   const editInputRef = useRef(null)
 
@@ -133,6 +142,14 @@ export default function ChatModal({ onClose, profileId }) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [messages, isLoading])
+
+  // 세션이 바뀌면 GPS 토글 상태를 새 세션 기준으로 reset
+  // (새 세션의 첫 GPS 검색에서 다시 등장하도록 hidden + OFF)
+  useEffect(() => {
+    setGpsToggleVisible(false)
+    setGpsToggleOn(false)
+    setPendingGpsTurnId(null)
+  }, [activeSessionId])
 
   // 편집 모드 진입 시 입력창에 포커스
   useEffect(() => {
@@ -295,6 +312,22 @@ export default function ChatModal({ onClose, profileId }) {
     setMessages(prev => [...prev, { role: 'assistant', content }])
   }, [])
 
+  // GPS 토글 클릭 — OFF→ON 전환 시 대기 중인 pending turn 이 있으면 즉시 진행
+  const handleGpsToggle = useCallback(async () => {
+    const next = !gpsToggleOn
+    setGpsToggleOn(next)
+    if (!next) return // ON→OFF 는 다음 GPS 요청에서만 효과 (이번 turn 은 자연 만료)
+    if (!pendingGpsTurnId) return
+    const turn_id = pendingGpsTurnId
+    setPendingGpsTurnId(null)
+    setIsLoading(true)
+    try {
+      await handleGeolocationCallback({ turn_id })
+    } finally {
+      setIsLoading(false)
+    }
+  }, [gpsToggleOn, pendingGpsTurnId, handleGeolocationCallback])
+
   const handleSend = async () => {
     const message = input.trim()
     if (!message || isLoading || isInitializing) return
@@ -323,9 +356,29 @@ export default function ChatModal({ onClose, profileId }) {
       })
 
       // 202 Accepted + action=request_geolocation: Router LLM 이 위치 기반
-      // 툴을 고른 상태. 브라우저 GPS 후 /tool-result 로 재요청한다.
+      // 툴을 고른 상태. JIT 토글 정책 — 사용자가 토글을 ON 한 경우만 즉시
+      // navigator.geolocation 호출, 아니면 토글을 등장시키고 사용자 결정 대기.
       if (res.status === 202 && res.data?.action === 'request_geolocation') {
-        await handleGeolocationCallback(res.data)
+        if (gpsToggleOn) {
+          // 토글 ON: 평소 흐름 그대로 GPS 받아서 tool-result POST
+          await handleGeolocationCallback(res.data)
+        } else {
+          // 토글 OFF (default): 토글 등장 + pending turn_id 보존.
+          // 사용자가 토글 ON 누르면 그때 handleGeolocationCallback 진행.
+          setPendingGpsTurnId(res.data.turn_id)
+          if (!gpsToggleVisible) {
+            setGpsToggleVisible(true)
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: '이 검색은 위치 정보가 필요해요. 아래 위치 토글을 켜주시면 검색을 진행할게요. (60초 안에 결정해 주세요)'
+            }])
+          } else {
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: '위치 토글이 꺼져있어요. 아래 토글을 켜주시면 검색을 진행할게요.'
+            }])
+          }
+        }
         return
       }
 
@@ -477,6 +530,29 @@ export default function ChatModal({ onClose, profileId }) {
                   </div>
               </div>)}
           </div>
+
+          {/* GPS 권한 토글 (JIT — 첫 위치 검색 후 등장, 이후 같은 세션 동안 유지) */}
+          {gpsToggleVisible && (
+            <div className="px-4 py-2 bg-blue-50 border-t border-blue-100 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm text-gray-700">
+                <MapPin size={14} className={gpsToggleOn ? 'text-gray-900' : 'text-gray-400'} />
+                <span>위치 정보 사용 {gpsToggleOn ? '켜짐' : '꺼짐'}</span>
+              </div>
+              <button
+                onClick={handleGpsToggle}
+                disabled={isLoading || isInitializing}
+                className={`relative w-10 h-5 rounded-full transition-colors disabled:opacity-50 cursor-pointer
+                  ${gpsToggleOn ? 'bg-gray-900' : 'bg-gray-300'}`}
+                aria-label={gpsToggleOn ? '위치 사용 끄기' : '위치 사용 켜기'}
+                aria-pressed={gpsToggleOn}
+              >
+                <span
+                  className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all
+                    ${gpsToggleOn ? 'right-0.5' : 'left-0.5'}`}
+                />
+              </button>
+            </div>
+          )}
 
           {/* 입력창 */}
           <div className="p-4 bg-white border-t border-gray-100 flex gap-2 items-center">
