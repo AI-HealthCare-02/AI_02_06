@@ -4,6 +4,7 @@ import { X, Send, RefreshCw, Plus, Pencil, Trash2, Check, MapPin } from 'lucide-
 import PropTypes from 'prop-types'
 import Markdown from 'react-markdown'
 import api, { showError } from '@/lib/api'
+import { useChatSession } from '@/contexts/ChatSessionContext'
 
 // Assistant 메시지는 LLM 이 Markdown 으로 답하므로 커스텀 컴포넌트 매핑으로
 // Tailwind 스타일을 주입한다. Tailwind Typography 플러그인 없이도 읽기 좋은
@@ -56,8 +57,16 @@ function formatDefaultSessionTitle(date = new Date()) {
  * @param {string} props.profileId - 프로필 ID (필수)
  */
 export default function ChatModal({ onClose, profileId }) {
-  const [sessions, setSessions] = useState([])
-  const [activeSessionId, setActiveSessionId] = useState(null)
+  // ChatSessionContext 가 sessions list 와 activeSessionId 를 단일 진실로 관리
+  const {
+    sessions,
+    activeSessionId,
+    setActiveSessionId,
+    createSession,
+    renameSession,
+    deleteSession,
+    refetchSessions,
+  } = useChatSession()
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -94,35 +103,19 @@ export default function ChatModal({ onClose, profileId }) {
     }
   }, [])
 
-  // 세션 초기화: 리스트 조회 → 없으면 신규 생성 → 가장 최근 세션 활성화
+  // 세션 초기화: Context 가 이미 list 보유 → 가장 최근 세션 활성화 (또는 빈 상태)
   const initSession = useCallback(async () => {
     if (!profileId) {
       setMessages([{ role: 'assistant', content: '프로필 정보를 불러올 수 없습니다.' }])
       setIsInitializing(false)
       return
     }
-
     setIsInitializing(true)
     setInitError(false)
-
     try {
-      const sessionsRes = await api.get('/api/v1/chat-sessions', {
-        params: { profile_id: profileId },
-      })
-
-      const sessionList = sessionsRes.data || []
-      setSessions(sessionList)
-
-      if (sessionList.length === 0) {
-        // Lazy: 첫 메시지 전송 시 세션이 생성된다
-        setActiveSessionId(null)
-        setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
-        return
-      }
-
-      const currentSessionId = sessionList[0].id
-      setActiveSessionId(currentSessionId)
-      await loadMessagesForSession(currentSessionId)
+      // 모달 열림 시 최신 세션 목록 ensure (다른 디바이스/탭에서 변경 가능성)
+      await refetchSessions()
+      // sessions / activeSessionId 보정은 아래 별도 effect 에서 수행
     } catch (err) {
       console.error('세션 초기화 실패:', err)
       showError('채팅 세션을 시작할 수 없습니다.')
@@ -131,11 +124,28 @@ export default function ChatModal({ onClose, profileId }) {
     } finally {
       setIsInitializing(false)
     }
-  }, [profileId, loadMessagesForSession])
+  }, [profileId, refetchSessions])
 
   useEffect(() => {
     initSession()
   }, [initSession])
+
+  // sessions 변동 시 activeSessionId 보정 + 최신 세션 메시지 로드
+  useEffect(() => {
+    if (isInitializing) return
+    if (sessions.length === 0) {
+      // Lazy: 첫 메시지 전송 시 세션이 생성된다
+      if (activeSessionId !== null) setActiveSessionId(null)
+      setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
+      return
+    }
+    if (!activeSessionId || !sessions.find(s => s.id === activeSessionId)) {
+      const firstId = sessions[0].id
+      setActiveSessionId(firstId)
+      loadMessagesForSession(firstId).catch(err => console.error(err))
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions, isInitializing])
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -172,16 +182,11 @@ export default function ChatModal({ onClose, profileId }) {
     }
   }
 
-  // 새 세션 생성
+  // 새 세션 생성 — Context 가 응답으로 sessions 자동 갱신
   const handleCreateSession = async () => {
     if (isLoading || isInitializing || !profileId) return
     try {
-      const res = await api.post('/api/v1/chat-sessions', {
-        profile_id: profileId,
-        title: formatDefaultSessionTitle(),
-      })
-      const newSession = res.data
-      setSessions(prev => [newSession, ...prev])
+      const newSession = await createSession(profileId, formatDefaultSessionTitle())
       setActiveSessionId(newSession.id)
       setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
     } catch (err) {
@@ -217,8 +222,7 @@ export default function ChatModal({ onClose, profileId }) {
       return
     }
     try {
-      const res = await api.patch(`/api/v1/chat-sessions/${sessionId}`, { title: trimmed })
-      setSessions(prev => prev.map(s => (s.id === sessionId ? res.data : s)))
+      await renameSession(sessionId, trimmed)
     } catch (err) {
       console.error('세션 이름 변경 실패:', err)
       showError('이름을 변경하지 못했습니다.')
@@ -233,16 +237,16 @@ export default function ChatModal({ onClose, profileId }) {
       setConfirmDeleteId(sessionId)
       return
     }
-    // 확정 클릭
+    // 확정 클릭 — Context 가 응답으로 sessions 자동 갱신 + activeSessionId 자동 reset
     try {
-      await api.delete(`/api/v1/chat-sessions/${sessionId}`)
-      const remaining = sessions.filter(s => s.id !== sessionId)
-      setSessions(remaining)
+      const wasActive = sessionId === activeSessionId
+      await deleteSession(sessionId)
       setConfirmDeleteId(null)
 
-      // 활성 세션을 지운 경우: 다음(이전에 대화한) 세션으로 전환.
-      // 남은 세션이 없으면 빈 상태 유지 (첫 메시지 전송 시 lazy 생성).
-      if (sessionId === activeSessionId) {
+      // 활성 세션을 지운 경우: 남은 첫 세션으로 자동 전환 (sessions 변동 effect 처리)
+      // 단, 메시지 로드는 여기서 직접 호출 (effect 가 동기화 한 turn 늦을 수 있음)
+      if (wasActive) {
+        const remaining = sessions.filter(s => s.id !== sessionId)
         if (remaining.length > 0) {
           const nextId = remaining[0].id
           setActiveSessionId(nextId)
@@ -337,16 +341,11 @@ export default function ChatModal({ onClose, profileId }) {
     setIsLoading(true)
 
     try {
-      // Lazy session creation: 아직 세션이 없으면 여기서 생성한다
+      // Lazy session creation: 아직 세션이 없으면 여기서 생성한다 — Context 가 sessions 자동 갱신
       let sid = activeSessionId
       if (!sid) {
-        const createRes = await api.post('/api/v1/chat-sessions', {
-          profile_id: profileId,
-          title: formatDefaultSessionTitle(),
-        })
-        const newSession = createRes.data
+        const newSession = await createSession(profileId, formatDefaultSessionTitle())
         sid = newSession.id
-        setSessions(prev => [newSession, ...prev])
         setActiveSessionId(sid)
       }
 

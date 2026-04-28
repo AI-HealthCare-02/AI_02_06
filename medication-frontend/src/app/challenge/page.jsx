@@ -1,11 +1,13 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/Header'
 import BottomNav from '@/components/layout/BottomNav'
 import EmptyState from '@/components/common/EmptyState'
-import api, { showError } from '@/lib/api'
+import { showError } from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
+import { useChallenge } from '@/contexts/ChallengeContext'
+import { useLifestyleGuide } from '@/contexts/LifestyleGuideContext'
 import toast from 'react-hot-toast'
 
 // SVG 아이콘 컴포넌트 (진행중/완료 카드 아이콘 폴백용)
@@ -107,19 +109,22 @@ function getDaysSince(startedDate) {
 
 export default function ChallengePage() {
   const router = useRouter()
-  const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('추천')
-  const [ongoing, setOngoing] = useState([])
-  const [completed, setCompleted] = useState([])
   const [processingIds, setProcessingIds] = useState([])
-  const [recommended, setRecommended] = useState([])
-  const [isLoadingRecommended, setIsLoadingRecommended] = useState(false)
-  const [noGuide, setNoGuide] = useState(false)
-  const [recommendedError, setRecommendedError] = useState(false)
 
   const { selectedProfileId: profileId } = useProfile()
-  const isInitialLoad = useRef(true)
-  const [isRefreshing, setIsRefreshing] = useState(false)
+  // 모든 server state 는 Context 가 단일 진실로 관리
+  const {
+    activeChallenges,
+    completedChallenges,
+    unstartedByGuide,
+    isLoading: challengesLoading,
+    startChallenge,
+    updateChallenge,
+    deleteChallenge,
+  } = useChallenge()
+  const { latestGuide, isLoading: guidesLoading } = useLifestyleGuide()
+  const isLoading = challengesLoading || guidesLoading
 
   const getIconByTitle = (title) => {
     if (title.includes('금연')) return <Icons.NoSmoking />
@@ -135,80 +140,27 @@ export default function ChallengePage() {
     return <Icons.Target />
   }
 
-  const fetchRecommended = async () => {
-    if (!profileId) return
-    setIsLoadingRecommended(true)
-    setNoGuide(false)
-    setRecommendedError(false)
-    try {
-      const latestRes = await api.get(`/api/v1/lifestyle-guides/latest?profile_id=${profileId}`)
-      const guide = latestRes.data
-      const challengeRes = await api.get(`/api/v1/lifestyle-guides/${guide.id}/challenges`)
-      const unstarted = challengeRes.data.filter(c => !c.is_active && c.challenge_status !== 'DELETED')
-      setRecommended(unstarted)
-    } catch (err) {
-      if (err.response?.status === 404) {
-        setNoGuide(true)
-      } else if (err.response?.status !== 401) {
-        setRecommendedError(true)
-      }
-    } finally {
-      setIsLoadingRecommended(false)
-    }
-  }
+  // 추천 = 최신 가이드의 미시작 챌린지 (Context 의 unstartedByGuide selector)
+  const recommended = latestGuide ? unstartedByGuide(latestGuide.id) : []
+  const noGuide = !guidesLoading && !latestGuide
 
-  useEffect(() => {
-    if (!profileId) return
-    const fetchData = async () => {
-      try {
-        if (isInitialLoad.current) {
-          setIsLoading(true)
-        } else {
-          setIsRefreshing(true)
-        }
-        const challengeRes = await api.get(`/api/v1/challenges?profile_id=${profileId}`)
-
-        const activeChallenges = challengeRes.data
-          .filter((c) => c.challenge_status === 'IN_PROGRESS' && c.is_active)
-          .map((c) => ({
-            ...c,
-            icon: getIconByTitle(c.title),
-            current: c.completed_dates?.length || 0,
-          }))
-
-        const completedChallenges = challengeRes.data
-          .filter((c) => c.challenge_status === 'COMPLETED')
-          .map((c) => ({
-            ...c,
-            icon: getIconByTitle(c.title),
-          }))
-
-        setOngoing(activeChallenges)
-        setCompleted(completedChallenges)
-      } catch (err) {
-        if (err.response?.status !== 401) {
-          showError('데이터를 불러오는데 실패했습니다.')
-        }
-      } finally {
-        setIsLoading(false)
-        setIsRefreshing(false)
-        isInitialLoad.current = false
-      }
-    }
-    fetchData()
-    fetchRecommended()
-  }, [profileId])
+  // ongoing/completed 는 derived (icon 추가만 페이지에서)
+  const ongoing = activeChallenges.map(c => ({
+    ...c,
+    icon: getIconByTitle(c.title),
+    current: c.completed_dates?.length || 0,
+  }))
+  const completed = completedChallenges.map(c => ({
+    ...c,
+    icon: getIconByTitle(c.title),
+  }))
 
   const handleStartGuideChallenge = async (challenge) => {
     if (processingIds.includes(challenge.id)) return
     setProcessingIds(prev => [...prev, challenge.id])
     try {
-      const res = await api.patch(`/api/v1/challenges/${challenge.id}`, { is_active: true })
-      setRecommended(prev => prev.filter(c => c.id !== challenge.id))
-      setOngoing(prev => [
-        { ...res.data, icon: getIconByTitle(res.data.title), current: res.data.completed_dates?.length || 0 },
-        ...prev,
-      ])
+      // Context 가 응답 받자마자 list 자동 갱신 (active 로 이동, recommended 에서 자동 제거)
+      await startChallenge(challenge.id)
       toast.success('챌린지가 시작되었습니다!')
       setActiveTab('진행중')
     } catch (err) {
@@ -232,23 +184,13 @@ export default function ChallengePage() {
     try {
       const newCompletedDates = [...(challenge.completed_dates || []), today]
       const isCompleted = newCompletedDates.length >= challenge.target_days
-
-      const response = await api.patch(`/api/v1/challenges/${challenge.id}`, {
+      const updated = await updateChallenge(challenge.id, {
         completed_dates: newCompletedDates,
         challenge_status: isCompleted ? 'COMPLETED' : 'IN_PROGRESS',
       })
-
-      if (response.data.challenge_status === 'COMPLETED') {
-        setOngoing(prev => prev.filter(c => c.id !== challenge.id))
-        setCompleted(prev => [{ ...response.data, icon: challenge.icon }, ...prev])
+      if (updated.challenge_status === 'COMPLETED') {
         toast.success('챌린지를 완료했습니다! 수고하셨어요.')
         setActiveTab('완료')
-      } else {
-        setOngoing(prev => prev.map(c =>
-          c.id === challenge.id
-            ? { ...c, completed_dates: newCompletedDates, current: newCompletedDates.length }
-            : c
-        ))
       }
     } catch (err) {
       showError(err.parsed?.message || '체크에 실패했습니다.')
@@ -260,8 +202,7 @@ export default function ChallengePage() {
   const handleAbandon = async (challenge) => {
     if (!confirm(`'${challenge.title}' 챌린지를 포기하시겠습니까?`)) return
     try {
-      await api.delete(`/api/v1/challenges/${challenge.id}`)
-      setOngoing(prev => prev.filter(c => c.id !== challenge.id))
+      await deleteChallenge(challenge.id)
       toast.success('챌린지가 삭제되었습니다.')
     } catch (err) {
       showError(err.parsed?.message || '삭제에 실패했습니다.')
@@ -286,7 +227,7 @@ export default function ChallengePage() {
   }
 
   return (
-    <main className={`min-h-screen bg-gray-50 pb-24 transition-opacity duration-200 ${isRefreshing ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
+    <main className="min-h-screen bg-gray-50 pb-24">
       <Header title="생활습관 챌린지" subtitle="건강한 습관을 만들어보세요" showBack={true} />
 
       <div className="max-w-3xl mx-auto px-6 py-6">
@@ -318,23 +259,12 @@ export default function ChallengePage() {
         {/* 추천 탭 — AI 가이드 기반 */}
         {activeTab === '추천' && (
           <div className="space-y-3">
-            {isLoadingRecommended ? (
-              <div className="space-y-3 animate-pulse">
-                {[1, 2, 3].map(i => <div key={i} className="bg-white rounded-2xl h-20 w-full" />)}
-              </div>
-            ) : noGuide ? (
+            {noGuide ? (
               <EmptyState
                 title="아직 AI 추천 챌린지가 없어요"
                 message="생활습관 가이드를 먼저 받아보세요"
                 onAction={() => router.push('/lifestyle-guide')}
                 actionLabel="가이드 받기"
-              />
-            ) : recommendedError ? (
-              <EmptyState
-                title="추천 챌린지를 불러오지 못했어요"
-                message="잠시 후 다시 시도해주세요"
-                onAction={fetchRecommended}
-                actionLabel="다시 시도"
               />
             ) : recommended.length === 0 ? (
               <EmptyState

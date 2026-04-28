@@ -1,0 +1,72 @@
+'use client'
+
+import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import api from '@/lib/api'
+import { useProfile } from '@/contexts/ProfileContext'
+
+const OcrDraftContext = createContext(null)
+
+/**
+ * OCR Draft 단일 진실.
+ *
+ * - 활성 draft 목록 (BE 가 사용자 단위로 자동 필터링) 을 한 곳에서 관리.
+ * - selectedProfileId 변경 시 자동 refetch.
+ * - removeDraftLocally: result 페이지가 sessionStorage 에 남긴 marker 를
+ *   다음 main 진입 시 즉시 반영하기 위해 — Provider 내부 useEffect 가 자동 처리.
+ */
+export function OcrDraftProvider({ children }) {
+  const { selectedProfileId } = useProfile()
+  const [activeDrafts, setActiveDrafts] = useState([])
+  const [isLoading, setIsLoading] = useState(false)
+
+  const fetchDrafts = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const res = await api.get('/api/v1/ocr/drafts/active')
+      setActiveDrafts(res.data?.drafts || [])
+    } catch {
+      setActiveDrafts([])
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!selectedProfileId) {
+      setActiveDrafts([])
+      return
+    }
+    fetchDrafts()
+  }, [selectedProfileId, fetchDrafts])
+
+  const removeDraftLocally = useCallback((draftId) => {
+    setActiveDrafts(prev => prev.filter(d => d.draft_id !== draftId))
+  }, [])
+
+  // sessionStorage marker 자동 처리 (mount 시 1회)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const consumedId = sessionStorage.getItem('ocr_consumed_draft_id')
+    if (consumedId) {
+      removeDraftLocally(consumedId)
+      sessionStorage.removeItem('ocr_consumed_draft_id')
+    }
+  }, [removeDraftLocally])
+
+  return (
+    <OcrDraftContext.Provider value={{
+      activeDrafts,
+      isLoading,
+      removeDraftLocally,
+      refetchDrafts: fetchDrafts,
+    }}>
+      {children}
+    </OcrDraftContext.Provider>
+  )
+}
+
+export function useOcrDraft() {
+  const ctx = useContext(OcrDraftContext)
+  if (!ctx) throw new Error('useOcrDraft must be used within OcrDraftProvider')
+  return ctx
+}
