@@ -423,6 +423,13 @@ export default function LifestyleGuidePage() {
         // status='pending' — 다음 update 대기 (스켈레톤 유지)
       }
     } catch (err) {
+      // BE 409 + detail.code=NO_ACTIVE_MEDICATIONS → 토스트 + 처방전 등록 페이지 자동 이동
+      const detail = err.response?.data?.detail
+      if (err.response?.status === 409 && detail?.code === 'NO_ACTIVE_MEDICATIONS') {
+        showError(detail.message || '처방전이 등록되어야 맞춤 가이드 생성이 가능합니다.')
+        router.push(detail.redirect_to || '/ocr')
+        return
+      }
       showError(err.parsed?.message || err.message || '가이드 생성에 실패했습니다. 잠시 후 다시 시도해주세요.')
     } finally {
       abortController.abort()
@@ -564,12 +571,17 @@ export default function LifestyleGuidePage() {
           {isGenerating ? '🤖 AI가 복약 기록을 분석 중입니다...' : '✨ 새 가이드 생성하기'}
         </button>
 
-        {/* ── 가이드 없음: EmptyState ── */}
+        {/* ── 가이드 없음: EmptyState + 처방전 선행 안내 ── */}
         {guides.length === 0 && !isGenerating && (
-          <EmptyState
-            title="아직 생활습관 가이드가 없어요"
-            message="위 버튼을 눌러 AI 맞춤 가이드를 받아보세요"
-          />
+          <>
+            <EmptyState
+              title="아직 생활습관 가이드가 없어요"
+              message="위 버튼을 눌러 AI 맞춤 가이드를 받아보세요"
+            />
+            <p className="text-center text-sm font-bold text-red-500 -mt-2">
+              처방전이 등록되어야 맞춤 가이드 생성이 됩니다
+            </p>
+          </>
         )}
 
         {/* ── 가이드 생성 중 스켈레톤 ── */}
