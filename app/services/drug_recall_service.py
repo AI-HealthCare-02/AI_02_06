@@ -30,7 +30,7 @@ import logging
 
 import httpx
 
-from app.core import config
+from app.core.config import config
 from app.models.data_sync_log import DataSyncLog
 from app.models.medicine_info import MedicineInfo
 from app.repositories.drug_recall_repository import DrugRecallRepository
@@ -50,7 +50,7 @@ class DrugRecallService:
         api_key: str | None = None,
         repository: DrugRecallRepository | None = None,
     ) -> None:
-        self.api_key = api_key or config.config.DATA_GO_KR_RECALL_API_KEY or config.config.DATA_GO_KR_API_KEY
+        self.api_key = api_key or config.DATA_GO_KR_RECALL_API_KEY or config.DATA_GO_KR_API_KEY
         self.repository = repository or DrugRecallRepository()
 
     # ── 메인 동기화 ───────────────────────────────────────────────────
@@ -106,7 +106,7 @@ class DrugRecallService:
     @property
     def _list_url(self) -> str:
         """Endpoint URL is composed from env-driven base + method."""
-        return f"{config.config.DATA_GO_KR_RECALL_BASE_URL}/{config.config.DATA_GO_KR_RECALL_LIST_METHOD}"
+        return f"{config.DATA_GO_KR_RECALL_BASE_URL}/{config.DATA_GO_KR_RECALL_LIST_METHOD}"
 
     async def _fetch_all_pages(self) -> list[dict]:
         """Fetch every recall row across all pages.
@@ -171,7 +171,7 @@ class DrugRecallService:
         """
         kept: list[dict] = []
         skip_no_match = bool(valid_seqs)
-        non_drug_filter_enabled = config.config.RECALL_FILTER_NON_DRUG
+        non_drug_filter_enabled = config.RECALL_FILTER_NON_DRUG
         skipped_non_drug = 0
         skipped_hospital = 0
         skipped_no_match = 0
