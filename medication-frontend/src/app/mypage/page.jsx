@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { User, Activity, Users, Home, Trash2, X, Check, Plus, FileText, LogOut } from 'lucide-react'
+import { User, Activity, Users, Home, Trash2, X, Check, Plus, FileText, LogOut, Pencil } from 'lucide-react'
 import EmptyState from '@/components/common/EmptyState'
 import BottomNav from '@/components/layout/BottomNav'
 import LogoutModal, { useLogout, DeleteAccountModal, useDeleteAccount } from '@/components/auth/LogoutModal'
@@ -225,6 +225,7 @@ export default function MyPage() {
     updateProfile,
     createProfile,
     deleteProfile,
+    setSelectedProfileId,
   } = useProfile()
   const isInitialLoad = useRef(true)
   const [isLoading, setIsLoading] = useState(true)
@@ -233,7 +234,12 @@ export default function MyPage() {
   // ProfileContext 의 데이터를 그대로 파생 사용 (single source of truth).
   // mutation 시 ProfileContext 가 in-place 갱신하므로 자동 리렌더.
   const userProfile = selectedProfile
-  const family = profiles.filter(p => p.relation_type !== 'SELF')
+  // 가족 관리 탭 = "내 모든 프로필" 뷰. SELF 도 포함해 표시하되 SELF 를 항상 맨 앞으로.
+  const family = [...profiles].sort((a, b) => {
+    if (a.relation_type === 'SELF') return -1
+    if (b.relation_type === 'SELF') return 1
+    return 0
+  })
   const [ongoingCount, setOngoingCount] = useState(0)
   const [streakDays, setStreakDays] = useState(0)
   const [modalType, setModalType] = useState(null)
@@ -249,12 +255,14 @@ export default function MyPage() {
   // 가족관리 탭은 모든 프로필 상태에서 표시되며, family 자체에 SELF 가 포함되지 않으므로
   // (filter relation_type !== 'SELF') 강제 탭 전환은 불필요해 제거.
 
-  // ProfileSwitcher 의 "프로필 추가" 버튼이 ?tab=family 로 진입하면 가족관리 탭 자동 활성화
+  // ProfileSwitcher 의 "프로필 추가" 버튼이 ?tab=family 로 진입하면 가족관리 탭 자동 활성화.
+  // 활성화 직후 URL 의 ?tab= query 는 router.replace 로 정리 (history 오염 방지).
   useEffect(() => {
     if (searchParams.get('tab') === 'family') {
       setActiveMenu('가족관리')
+      router.replace('/mypage')
     }
-  }, [searchParams])
+  }, [searchParams, router])
 
   // ProfileContext 가 이미 가진 profiles 재사용 — /profiles 와 /profiles/{id} GET 안 함.
   // 페이지 자체에서 GET 하는 건 챌린지/스트릭 같이 ProfileContext 가 모르는 데이터만.
@@ -278,12 +286,15 @@ export default function MyPage() {
     }
   }
 
+  // mutation 핸들러는 ProfileContext 가 응답으로 in-place 갱신하므로 수동 fetchData 호출 안 함.
+  // challenge/streak 데이터는 [profileId] effect 가 selectedProfileId 변경 시 자동 재조회 —
+  // 활성 프로필 삭제 시 stale profileId 로 fetchData 가 호출되어 발생하던 404 경합 제거.
+
   const handleSaveBasic = async (newData) => {
     try {
       await updateProfile(userProfile.id, { name: newData.nickname })
       toast.success('닉네임이 수정되었습니다.')
       setModalType(null)
-      fetchData()
     } catch (err) { handleApiError(err) }
   }
 
@@ -302,7 +313,6 @@ export default function MyPage() {
       await updateProfile(userProfile.id, { health_survey: healthSurvey })
       toast.success('건강 정보가 업데이트되었습니다.')
       setModalType(null)
-      fetchData()
     } catch (err) { handleApiError(err) }
   }
 
@@ -317,7 +327,6 @@ export default function MyPage() {
       }
       setModalType(null)
       setSelectedFamilyMember(null)
-      fetchData()
     } catch (err) { handleApiError(err) }
   }
 
@@ -327,7 +336,6 @@ export default function MyPage() {
     try {
       await deleteProfile(id)
       toast.success('삭제되었습니다.')
-      fetchData()
     } catch (err) { handleApiError(err) }
   }
 
@@ -438,15 +446,71 @@ export default function MyPage() {
                 </div>
                 {family.length > 0 ? (
                   <div className="grid sm:grid-cols-2 gap-4">
-                    {family.map((member) => (
-                      <div key={member.id} onClick={() => { setSelectedFamilyMember(member); setModalType('family'); }} className="bg-slate-50 rounded-[32px] p-8 hover:bg-white hover:shadow-md transition-all flex justify-between items-center group cursor-pointer">
-                        <div className="flex items-center gap-5">
-                          <div className="w-16 h-16 bg-white rounded-[24px] flex items-center justify-center text-2xl font-black text-gray-700 group-hover:bg-gray-900 group-hover:text-white transition-all">{member.name[0]}</div>
-                          <div><p className="text-lg font-black text-gray-800">{member.name}</p><p className="text-xs font-bold text-gray-400 uppercase">{relationLabels[member.relation_type]}</p></div>
+                    {family.map((member) => {
+                      const isSelf = member.relation_type === 'SELF'
+                      const isActive = member.id === profileId
+                      // 카드 본체 클릭 = 프로필 전환. 편집/삭제는 stopPropagation 으로 분리.
+                      const handleSwitchProfile = () => {
+                        if (!isActive) setSelectedProfileId(member.id)
+                      }
+                      const handleEdit = (e) => {
+                        e.stopPropagation()
+                        if (isSelf) {
+                          // 본인 정보 수정은 기본정보 탭의 BasicInfoModal 사용
+                          setActiveMenu('기본정보')
+                          return
+                        }
+                        setSelectedFamilyMember(member)
+                        setModalType('family')
+                      }
+                      return (
+                        <div
+                          key={member.id}
+                          onClick={handleSwitchProfile}
+                          className={`relative rounded-[32px] p-8 transition-all flex justify-between items-center group cursor-pointer ${
+                            isActive
+                              ? 'bg-white shadow-lg ring-2 ring-blue-500'
+                              : isSelf
+                                ? 'bg-blue-50 hover:bg-blue-100 border border-blue-200'
+                                : 'bg-slate-50 hover:bg-white hover:shadow-md'
+                          }`}
+                        >
+                          {isActive && (
+                            <span className="absolute top-3 right-3 bg-blue-500 text-white text-[10px] font-black px-2.5 py-1 rounded-full flex items-center gap-1">
+                              <Check size={11} />현재 활성
+                            </span>
+                          )}
+                          <div className="flex items-center gap-5">
+                            <div className={`w-16 h-16 rounded-[24px] flex items-center justify-center text-2xl font-black transition-all ${isSelf ? 'bg-blue-500 text-white' : 'bg-white text-gray-700 group-hover:bg-gray-900 group-hover:text-white'}`}>{member.name[0]}</div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <p className="text-lg font-black text-gray-800">{member.name}</p>
+                                {isSelf && <span className="bg-blue-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">본인</span>}
+                              </div>
+                              <p className="text-xs font-bold text-gray-400 uppercase">{relationLabels[member.relation_type]}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={handleEdit}
+                              aria-label={isSelf ? '본인 정보 수정' : '가족 정보 수정'}
+                              className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-gray-400 hover:text-gray-900 shadow-sm cursor-pointer"
+                            >
+                              <Pencil size={16} />
+                            </button>
+                            {!isSelf && (
+                              <button
+                                onClick={(e) => handleDeleteFamily(member.id, e)}
+                                aria-label="가족 삭제"
+                                className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-gray-300 hover:text-red-500 shadow-sm cursor-pointer"
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        <button onClick={(e) => handleDeleteFamily(member.id, e)} className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-gray-300 hover:text-red-500 shadow-sm cursor-pointer"><Trash2 size={18} /></button>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 ) : (
                   <div className="py-20 bg-slate-50 rounded-[40px] border border-dashed border-slate-200"><EmptyState title="등록된 가족이 없어요" message="가족의 복약도 함께 관리해보세요!" actionLabel="가족 추가하기" onAction={() => { setSelectedFamilyMember(null); setModalType('family'); }} /></div>
