@@ -347,45 +347,58 @@ class MessageService:
         logger.info("[Chat] session=%s history_loaded=%dturns", sid, len(history))
         route_messages = [*history, {"role": "user", "content": content}]
 
-        queue = self._get_queue()
+        # ★ user 메시지를 Router 호출 전 즉시 영속화 — 응답 도착 전 모달이
+        # 닫혀도 다음 진입 시 사용자 입력이 보존된다. 단 Router/2nd LLM 호출이
+        # 실패하면 사용자가 보낸 적 없는 듯 보이도록 soft delete 로 rollback 한다
+        # (세션 소유권 위반은 위 _verify_session_ownership 에서 이미 차단).
+        user_msg = await self.repository.create_user_message(session_id, content)
 
-        route = await route_intent_via_rq(messages=route_messages, queue=queue)
-        tool_names = ",".join(tc.name for tc in route.tool_calls) if route.tool_calls else "-"
-        logger.info(
-            "[Chat] session=%s route kind=%s calls=%d tools=%s",
-            sid,
-            route.kind,
-            len(route.tool_calls),
-            tool_names,
-        )
+        try:
+            queue = self._get_queue()
 
-        if route.kind == "text":
-            return await self._persist_router_text_turn(session_id, content, route.text)
-
-        eager_calls = [tc for tc in route.tool_calls if not tc.needs_geolocation]
-        geo_calls = [tc for tc in route.tool_calls if tc.needs_geolocation]
-
-        eager_results: dict[str, Any] = {}
-        if eager_calls:
-            eager_payload = [_tool_call_to_worker_dict(tc) for tc in eager_calls]
-            eager_results = await run_tool_calls_via_rq(calls=eager_payload, queue=queue)
-
-        if geo_calls:
-            return await self._park_pending_turn(
-                session_id=session_id,
-                account_id=account_id,
-                content=content,
-                route=route,
-                eager_results=eager_results,
+            route = await route_intent_via_rq(messages=route_messages, queue=queue)
+            tool_names = ",".join(tc.name for tc in route.tool_calls) if route.tool_calls else "-"
+            logger.info(
+                "[Chat] session=%s route kind=%s calls=%d tools=%s",
+                sid,
+                route.kind,
+                len(route.tool_calls),
+                tool_names,
             )
 
-        return await self._finalize_tool_turn(
-            session_id=session_id,
-            content=content,
-            history=history,
-            route=route,
-            tool_results=eager_results,
-        )
+            if route.kind == "text":
+                return await self._persist_router_text_turn(session_id, user_msg, route.text)
+
+            eager_calls = [tc for tc in route.tool_calls if not tc.needs_geolocation]
+            geo_calls = [tc for tc in route.tool_calls if tc.needs_geolocation]
+
+            eager_results: dict[str, Any] = {}
+            if eager_calls:
+                eager_payload = [_tool_call_to_worker_dict(tc) for tc in eager_calls]
+                eager_results = await run_tool_calls_via_rq(calls=eager_payload, queue=queue)
+
+            if geo_calls:
+                return await self._park_pending_turn(
+                    session_id=session_id,
+                    account_id=account_id,
+                    user_msg=user_msg,
+                    route=route,
+                    eager_results=eager_results,
+                )
+
+            return await self._finalize_tool_turn(
+                session_id=session_id,
+                user_msg=user_msg,
+                history=history,
+                route=route,
+                tool_results=eager_results,
+            )
+        except Exception:
+            # Router/2nd LLM/RQ 등 서버 처리 실패 → user 메시지 rollback (soft delete).
+            # 다음 진입 시 사용자 입력이 보이지 않아 다시 시도 가능.
+            await self.repository.soft_delete(user_msg)
+            logger.exception("[Chat] session=%s server error — rolled back user msg", sid)
+            raise
 
     async def _fetch_session_summary(self, session_id: UUID) -> str | None:
         """chat_sessions.summary 조회 — 옵션 D 의 history prepend 입력."""
@@ -417,17 +430,16 @@ class MessageService:
     async def _persist_router_text_turn(
         self,
         session_id: UUID,
-        content: str,
+        user_msg: ChatMessage,
         text: str,
     ) -> AskResult:
-        """Router LLM 이 직접 답변한 (text) 턴을 user/assistant 메시지로 persist."""
+        """Router LLM 이 직접 답변한 (text) 턴 — assistant 만 persist (user 는 ask_with_tools 가 이미 저장)."""
         logger.info(
             "[Chat] session=%s route=text reply=%r len=%d",
             str(session_id)[:8],
             _preview(text),
             len(text),
         )
-        user_msg = await self.repository.create_user_message(session_id, content)
         assistant_msg = await self.repository.create_assistant_message(session_id, text)
         total = await self.repository.count_by_session(session_id)
         self._maybe_enqueue_compact(session_id, total)
@@ -438,15 +450,13 @@ class MessageService:
         *,
         session_id: UUID,
         account_id: UUID,
-        content: str,
+        user_msg: ChatMessage,
         route: RouteResult,
         eager_results: dict[str, Any],
     ) -> AskResult:
-        """Persist the user turn and hand out an ``AskPending`` handle."""
-        user_msg = await self.repository.create_user_message(session_id, content)
-
+        """User 는 이미 저장됨 — PendingTurn 만 발급."""
         messages_snapshot = [
-            {"role": "user", "content": content},
+            {"role": "user", "content": user_msg.content},
             route.assistant_message or {"role": "assistant", "content": None, "tool_calls": []},
         ]
         pending = PendingTurn(
@@ -473,18 +483,18 @@ class MessageService:
         self,
         *,
         session_id: UUID,
-        content: str,
+        user_msg: ChatMessage,
         history: list[dict[str, str]],
         route: RouteResult,
         tool_results: dict[str, Any],
     ) -> AskResult:
-        """Run the 2nd LLM with tool results and persist both turns."""
+        """2nd LLM 호출 후 assistant 만 persist (user 는 ask_with_tools 가 이미 저장)."""
         assistant_with_calls = route.assistant_message or {"role": "assistant", "content": None, "tool_calls": []}
         tool_messages = [_tool_result_message(call_id, result) for call_id, result in tool_results.items()]
 
         second_messages = [
             *history,
-            {"role": "user", "content": content},
+            {"role": "user", "content": user_msg.content},
             assistant_with_calls,
             *tool_messages,
         ]
@@ -502,7 +512,6 @@ class MessageService:
             len(answer),
         )
 
-        user_msg = await self.repository.create_user_message(session_id, content)
         assistant_msg = await self.repository.create_assistant_message(session_id, answer)
         total = await self.repository.count_by_session(session_id)
         self._maybe_enqueue_compact(session_id, total)

@@ -7,6 +7,7 @@ import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
 import { streamSSE } from '@/lib/sseClient'
 import { useProfile } from '@/contexts/ProfileContext'
+import { useMedication } from '@/contexts/MedicationContext'
 
 const TERMINAL_ERROR_MESSAGES = {
   no_text: '이미지에서 텍스트를 찾지 못했어요.',
@@ -62,6 +63,7 @@ function OcrResultContent() {
   const searchParams = useSearchParams()
   const draftId = searchParams.get('draft_id')
   const { selectedProfileId } = useProfile()
+  const { refetchMedications } = useMedication()
 
   const [isLoading, setIsLoading] = useState(true)
   const [meds, setMeds] = useState([])
@@ -160,9 +162,13 @@ function OcrResultContent() {
         params: selectedProfileId ? { profile_id: selectedProfileId } : undefined,
       })
 
-      // confirm 직후 main 페이지의 활성 카드에서 즉시 제거되도록 마킹.
-      // (client cache 로 main useEffect 재실행 보장이 안 되므로 단방향 신호)
+      // confirm 직후 main 페이지의 활성 카드에서 즉시 제거되도록 마킹
       sessionStorage.setItem('ocr_consumed_draft_id', draftId)
+
+      // BE 가 medications INSERT 한 직후 — MedicationContext refetch 로
+      // /medication 페이지가 새로고침 없이 즉시 새 약을 보이도록 한다.
+      await refetchMedications()
+
       alert('저장 완료! 복약 목록에서 확인해보세요.')
       router.push('/medication')
 
