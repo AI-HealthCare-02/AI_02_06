@@ -130,22 +130,29 @@ export default function ChatModal({ onClose, profileId }) {
     initSession()
   }, [initSession])
 
-  // sessions 변동 시 activeSessionId 보정 + 최신 세션 메시지 로드
+  // sessions 변동 시 activeSessionId 보정 (메시지 로드는 아래 별도 effect)
   useEffect(() => {
     if (isInitializing) return
     if (sessions.length === 0) {
-      // Lazy: 첫 메시지 전송 시 세션이 생성된다
       if (activeSessionId !== null) setActiveSessionId(null)
       setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
       return
     }
     if (!activeSessionId || !sessions.find(s => s.id === activeSessionId)) {
-      const firstId = sessions[0].id
-      setActiveSessionId(firstId)
-      loadMessagesForSession(firstId).catch(err => console.error(err))
+      setActiveSessionId(sessions[0].id)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessions, isInitializing])
+
+  // activeSessionId 변경 시마다 (모달 첫 mount 포함) 메시지 자동 로드.
+  // ChatSessionContext 의 activeSessionId 는 모달 unmount 후에도 보존되므로,
+  // 모달 다시 열면 이 effect 가 즉시 발동해 기존 메시지를 표시한다.
+  useEffect(() => {
+    if (!activeSessionId) return
+    if (sessions.length > 0 && !sessions.find(s => s.id === activeSessionId)) return
+    loadMessagesForSession(activeSessionId).catch(err => console.error(err))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId])
 
   useEffect(() => {
     if (scrollRef.current) {

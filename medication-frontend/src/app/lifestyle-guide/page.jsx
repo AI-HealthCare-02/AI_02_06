@@ -303,7 +303,9 @@ export default function LifestyleGuidePage() {
 
   // 선택된 가이드가 최신(guides[0])이 아닌 경우 과거 열람 모드
   // → 과거 열람 모드에서는 챌린지 시작/체크 버튼이 모두 비활성화됨
-  const isViewingHistory = guides.length > 0 && selectedGuide?.id !== guides[0]?.id
+  // selectedGuide 가 null 인 상태 (generation 중 transient 등) 에서 배너 렌더되어
+  // null.created_at 접근하는 것을 방지하려 selectedGuide 존재 여부도 명시 가드.
+  const isViewingHistory = !!selectedGuide && guides.length > 0 && selectedGuide.id !== guides[0]?.id
 
   // 가이드 store 변동 시 selectedGuide 자동 보정 — latestGuide 가 있으면 default 선택
   useEffect(() => {
