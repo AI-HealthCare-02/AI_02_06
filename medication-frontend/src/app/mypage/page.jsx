@@ -217,13 +217,22 @@ function MyPageSkeleton() {
 
 export default function MyPage() {
   const router = useRouter()
-  const { selectedProfileId: profileId, selectedProfile } = useProfile()
+  const {
+    selectedProfileId: profileId,
+    selectedProfile,
+    profiles,
+    updateProfile,
+    createProfile,
+    deleteProfile,
+  } = useProfile()
   const isInitialLoad = useRef(true)
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [activeMenu, setActiveMenu] = useState('기본정보')
-  const [userProfile, setUserProfile] = useState(null)
-  const [family, setFamily] = useState([])
+  // ProfileContext 의 데이터를 그대로 파생 사용 (single source of truth).
+  // mutation 시 ProfileContext 가 in-place 갱신하므로 자동 리렌더.
+  const userProfile = selectedProfile
+  const family = profiles.filter(p => p.relation_type !== 'SELF')
   const [ongoingCount, setOngoingCount] = useState(0)
   const [streakDays, setStreakDays] = useState(0)
   const [modalType, setModalType] = useState(null)
@@ -243,6 +252,8 @@ export default function MyPage() {
     }
   }, [selectedProfile?.relation_type])
 
+  // ProfileContext 가 이미 가진 profiles 재사용 — /profiles 와 /profiles/{id} GET 안 함.
+  // 페이지 자체에서 GET 하는 건 챌린지/스트릭 같이 ProfileContext 가 모르는 데이터만.
   const fetchData = async () => {
     if (isInitialLoad.current) {
       setIsLoading(true)
@@ -250,14 +261,10 @@ export default function MyPage() {
       setIsRefreshing(true)
     }
     try {
-      const [profileRes, listRes, challengeRes, streakRes] = await Promise.all([
-        api.get(`/api/v1/profiles/${profileId}`),
-        api.get('/api/v1/profiles'),
+      const [challengeRes, streakRes] = await Promise.all([
         api.get(`/api/v1/challenges?profile_id=${profileId}`),
         api.get(`/api/v1/intake-logs/streak?profile_id=${profileId}`),
       ])
-      setUserProfile(profileRes.data)
-      setFamily(listRes.data.filter(p => p.relation_type !== 'SELF'))
       setOngoingCount(challengeRes.data.length)
       setStreakDays(streakRes.data.streak_days ?? 0)
     } catch (err) { handleApiError(err) } finally {
@@ -269,7 +276,7 @@ export default function MyPage() {
 
   const handleSaveBasic = async (newData) => {
     try {
-      await api.patch(`/api/v1/profiles/${userProfile.id}`, { name: newData.nickname })
+      await updateProfile(userProfile.id, { name: newData.nickname })
       toast.success('닉네임이 수정되었습니다.')
       setModalType(null)
       fetchData()
@@ -288,7 +295,7 @@ export default function MyPage() {
         conditions: newData.conditions.length > 0 ? newData.conditions : null,
         allergies: newData.allergies.length > 0 ? newData.allergies : null,
       }
-      await api.patch(`/api/v1/profiles/${userProfile.id}`, { health_survey: healthSurvey })
+      await updateProfile(userProfile.id, { health_survey: healthSurvey })
       toast.success('건강 정보가 업데이트되었습니다.')
       setModalType(null)
       fetchData()
@@ -298,10 +305,10 @@ export default function MyPage() {
   const handleSaveFamily = async (newData) => {
     try {
       if (selectedFamilyMember) {
-        await api.patch(`/api/v1/profiles/${selectedFamilyMember.id}`, newData)
+        await updateProfile(selectedFamilyMember.id, newData)
         toast.success('가족 정보가 수정되었습니다.')
       } else {
-        await api.post('/api/v1/profiles', { ...newData, account_id: userProfile.account_id, health_survey: {} })
+        await createProfile({ ...newData, account_id: userProfile.account_id, health_survey: {} })
         toast.success('가족이 추가되었습니다.')
       }
       setModalType(null)
@@ -314,7 +321,7 @@ export default function MyPage() {
     e.stopPropagation()
     if (!confirm('정말로 삭제하시겠습니까?')) return
     try {
-      await api.delete(`/api/v1/profiles/${id}`)
+      await deleteProfile(id)
       toast.success('삭제되었습니다.')
       fetchData()
     } catch (err) { handleApiError(err) }

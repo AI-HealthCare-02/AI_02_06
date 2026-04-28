@@ -2,10 +2,12 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/Header'
-import api, { showError } from '@/lib/api'
+import { showError } from '@/lib/api'
+import { useProfile } from '@/contexts/ProfileContext'
 
 export default function SurveyPage() {
   const router = useRouter()
+  const { profiles, isLoading: profilesLoading, updateProfile, createProfile } = useProfile()
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [existingProfile, setExistingProfile] = useState(null) // 기존 SELF 프로필
@@ -22,46 +24,29 @@ export default function SurveyPage() {
     allergies: [],
   })
 
-  // 초기 데이터 로드
+  // ProfileContext 가 이미 로드한 profiles 재사용 — 별도 GET /profiles 호출 안 함
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // 프로필 목록 조회
-        const profileRes = await api.get('/api/v1/profiles')
-        const profiles = profileRes.data
-
-        // SELF 프로필 찾기
-        const selfProfile = profiles.find(p => p.relation_type === 'SELF')
-
-        if (selfProfile) {
-          setExistingProfile(selfProfile)
-          setAccountNickname(selfProfile.name)
-
-          // 기존 health_survey 데이터가 있으면 폼에 채우기
-          if (selfProfile.health_survey) {
-            const survey = selfProfile.health_survey
-            setForm({
-              age: survey.age?.toString() || '',
-              gender: survey.gender || '',
-              height: survey.height?.toString() || '',
-              weight: survey.weight?.toString() || '',
-              is_smoking: survey.is_smoking ?? null,
-              is_drinking: survey.is_drinking ?? null,
-              conditions: survey.conditions || [],
-              allergies: survey.allergies || [],
-            })
-          }
-        }
-      } catch (err) {
-        console.error('프로필 로드 실패:', err)
-        // 401은 api 인터셉터에서 처리
-      } finally {
-        setIsLoading(false)
+    if (profilesLoading) return
+    const selfProfile = profiles.find(p => p.relation_type === 'SELF')
+    if (selfProfile) {
+      setExistingProfile(selfProfile)
+      setAccountNickname(selfProfile.name)
+      if (selfProfile.health_survey) {
+        const survey = selfProfile.health_survey
+        setForm({
+          age: survey.age?.toString() || '',
+          gender: survey.gender || '',
+          height: survey.height?.toString() || '',
+          weight: survey.weight?.toString() || '',
+          is_smoking: survey.is_smoking ?? null,
+          is_drinking: survey.is_drinking ?? null,
+          conditions: survey.conditions || [],
+          allergies: survey.allergies || [],
+        })
       }
     }
-
-    fetchData()
-  }, [])
+    setIsLoading(false)
+  }, [profilesLoading, profiles])
 
   const handleCancel = () => {
     if (window.confirm('작성 중인 내용이 사라집니다. 정말 나가시겠습니까?')) {
@@ -81,7 +66,7 @@ export default function SurveyPage() {
   const createEmptyProfile = async () => {
     setIsSubmitting(true)
     try {
-      await api.post('/api/v1/profiles', {
+      await createProfile({
         relation_type: 'SELF',
         name: '나',
         health_survey: null,
@@ -119,12 +104,12 @@ export default function SurveyPage() {
     try {
       if (existingProfile) {
         // 기존 프로필 수정
-        await api.patch(`/api/v1/profiles/${existingProfile.id}`, {
+        await updateProfile(existingProfile.id, {
           health_survey: healthSurvey,
         })
       } else {
         // 새 프로필 생성
-        await api.post('/api/v1/profiles', {
+        await createProfile({
           relation_type: 'SELF',
           name: accountNickname || '나',
           health_survey: healthSurvey,
