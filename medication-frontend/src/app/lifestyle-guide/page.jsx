@@ -307,9 +307,20 @@ export default function LifestyleGuidePage() {
   // null.created_at 접근하는 것을 방지하려 selectedGuide 존재 여부도 명시 가드.
   const isViewingHistory = !!selectedGuide && guides.length > 0 && selectedGuide.id !== guides[0]?.id
 
-  // 가이드 store 변동 시 selectedGuide 자동 보정 — latestGuide 가 있으면 default 선택
+  // 가이드 store 변동 시 selectedGuide 자동 보정.
+  //
+  // 단순 id 비교만으로는 부족 — Context 의 generateGuide 가 SSE ready 시점에
+  // store 의 placeholder 를 같은 id 로 in-place 교체하므로 (setGuides(prev.map))
+  // page-local selectedGuide 객체가 stale placeholder 를 가리키고 있을 수 있다.
+  // 따라서 store 의 fresh 객체로 reference 도 동기화한다.
   useEffect(() => {
-    if (selectedGuide && guides.find(g => g.id === selectedGuide.id)) return
+    if (selectedGuide) {
+      const fresh = guides.find(g => g.id === selectedGuide.id)
+      if (fresh) {
+        if (fresh !== selectedGuide) setSelectedGuide(fresh)
+        return
+      }
+    }
     if (latestGuide) {
       setSelectedGuide(latestGuide)
     } else if (guides.length > 0) {
