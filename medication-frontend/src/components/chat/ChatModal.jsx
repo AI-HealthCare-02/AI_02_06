@@ -339,9 +339,13 @@ export default function ChatModal({ onClose, profileId }) {
     }
   }, [gpsToggleOn, pendingGpsTurnId, handleGeolocationCallback])
 
+  // 마지막 메시지가 user 면 BE 응답 대기 중 — 모달 unmount 후 재진입해도 이 상태
+  // 가 자동 인식돼서 (1) 점점점 스켈레톤 표시 (2) 중복 전송 차단 모두 작동.
+  const isPendingResponse = messages.length > 0 && messages[messages.length - 1].role === 'user'
+
   const handleSend = async () => {
     const message = input.trim()
-    if (!message || isLoading || isInitializing) return
+    if (!message || isLoading || isInitializing || isPendingResponse) return
 
     setInput('')
     setMessages(prev => [...prev, { role: 'user', content: message }])
@@ -527,7 +531,7 @@ export default function ChatModal({ onClose, profileId }) {
               </div>
             ))}
 
-            {(isInitializing || isLoading) && (
+            {(isInitializing || isLoading || isPendingResponse) && (
               <div className="flex justify-start">
                   <div className="bg-white border border-gray-200 px-4 py-3 rounded-2xl rounded-bl-none shadow-sm flex gap-1.5">
                     <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
@@ -578,13 +582,19 @@ export default function ChatModal({ onClose, profileId }) {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyUp={(e) => { if (e.key === 'Enter') handleSend() }}
-                  disabled={isInitializing}
-                  placeholder={isInitializing ? '연결 중...' : '메시지를 입력하세요'}
+                  disabled={isInitializing || isPendingResponse}
+                  placeholder={
+                    isInitializing
+                      ? '연결 중...'
+                      : isPendingResponse
+                        ? '답변을 기다리는 중...'
+                        : '메시지를 입력하세요'
+                  }
                   className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-gray-400 transition-all disabled:opacity-50"
                 />
                 <button
                   onClick={handleSend}
-                  disabled={isLoading || !input.trim() || isInitializing}
+                  disabled={isLoading || !input.trim() || isInitializing || isPendingResponse}
                   className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-900 text-white hover:bg-gray-700 disabled:bg-gray-100 disabled:text-gray-300 active:scale-95 transition-all cursor-pointer"
                 >
                   <Send size={16} />
