@@ -11,7 +11,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.dependencies.security import get_current_account
@@ -21,6 +21,13 @@ from app.models.accounts import Account
 from app.services.lifestyle_guide_service import LifestyleGuideService
 
 router = APIRouter(prefix="/lifestyle-guides", tags=["Lifestyle Guides"])
+
+# 활성 약물 부재 안내 (409 응답)
+# FE 는 detail.code == NO_ACTIVE_MEDICATIONS 를 보고 redirect_to 경로로
+# 라우팅하면서 동시에 message 를 토스트로 표시한다.
+_NO_ACTIVE_MEDICATIONS_CODE = "NO_ACTIVE_MEDICATIONS"
+_NO_ACTIVE_MEDICATIONS_MESSAGE = "처방전이 등록되어야 맞춤 가이드 생성이 가능합니다. 처방전을 먼저 등록해주세요."
+_NO_ACTIVE_MEDICATIONS_REDIRECT = "/ocr"
 
 _SSE_HEADERS = {
     "Cache-Control": "no-cache",
@@ -64,8 +71,27 @@ async def enqueue_guide(
 
     Returns:
         ``LifestyleGuidePendingResponse`` — pending guide id + status.
+
+    Raises:
+        HTTPException 409: 활성 약물(복용 중인 처방약) 미등록 시. 응답
+            ``detail`` 에 ``code=NO_ACTIVE_MEDICATIONS`` /
+            ``message`` (사용자 안내) / ``redirect_to=/ocr`` 가 포함되어
+            FE 가 토스트 표시 + 처방전 등록 페이지 라우팅을 한 번에 처리한다.
     """
-    guide = await service.enqueue_guide_with_owner_check(profile_id, current_account.id)
+    try:
+        guide = await service.enqueue_guide_with_owner_check(profile_id, current_account.id)
+    except ValueError as exc:
+        # 현재 service.enqueue_guide_generation 의 유일한 ValueError 사례.
+        # 다른 ValueError 가 추가되면 여기서 메시지 검사로 분기 필요.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": _NO_ACTIVE_MEDICATIONS_CODE,
+                "message": _NO_ACTIVE_MEDICATIONS_MESSAGE,
+                "redirect_to": _NO_ACTIVE_MEDICATIONS_REDIRECT,
+                "service_message": str(exc),
+            },
+        ) from exc
     return LifestyleGuidePendingResponse(id=guide.id)
 
 
