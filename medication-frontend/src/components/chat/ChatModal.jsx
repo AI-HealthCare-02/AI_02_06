@@ -176,9 +176,10 @@ export default function ChatModal({ onClose, profileId }) {
     }
   }, [editingSessionId])
 
-  // 세션 전환
+  // 세션 전환 — isLoading (현재 세션 답변 대기) 와 무관하게 항상 가능.
+  // 새 세션의 isPendingResponse 는 그 세션 메시지 기준으로 재계산되어 자동 분리됨.
   const switchSession = async (sessionId) => {
-    if (sessionId === activeSessionId || isLoading) return
+    if (sessionId === activeSessionId) return
     setActiveSessionId(sessionId)
     setConfirmDeleteId(null)
     try {
@@ -189,9 +190,9 @@ export default function ChatModal({ onClose, profileId }) {
     }
   }
 
-  // 새 세션 생성 — Context 가 응답으로 sessions 자동 갱신
+  // 새 세션 생성 — 다른 세션 답변 대기 중에도 항상 허용 (각 세션은 독립).
   const handleCreateSession = async () => {
-    if (isLoading || isInitializing || !profileId) return
+    if (isInitializing || !profileId) return
     try {
       const newSession = await createSession(profileId, formatDefaultSessionTitle())
       setActiveSessionId(newSession.id)
@@ -417,7 +418,7 @@ export default function ChatModal({ onClose, profileId }) {
           <div className="p-3 border-b border-gray-100">
             <button
               onClick={handleCreateSession}
-              disabled={isInitializing || isLoading}
+              disabled={isInitializing}
               className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-gray-700 disabled:bg-gray-400 active:scale-95 transition-all cursor-pointer"
             >
               <Plus size={16} />
