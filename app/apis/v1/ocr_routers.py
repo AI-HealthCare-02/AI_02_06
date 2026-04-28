@@ -47,10 +47,38 @@ def get_ocr_service() -> OCRService:
     return OCRService()
 
 
-async def get_self_profile(
+async def get_owned_profile_or_self(
     current_account: Annotated[Account, Depends(get_current_account)],
+    profile_id: str | None = None,
 ) -> Profile:
-    """현재 사용자의 SELF 프로필을 반환한다 (없으면 404)."""
+    """선택된 프로필 (profile_id query) 의 ownership 검증 후 반환.
+
+    profile_id 가 주어지면 해당 프로필을 조회하고 current_account 가 소유 중인지
+    확인. 미전달 시 SELF 프로필로 fallback (backward compatibility).
+
+    Args:
+        current_account: 인증된 계정.
+        profile_id: 동작 대상 프로필 UUID (query param). 없으면 SELF 사용.
+
+    Returns:
+        ownership 검증을 통과한 Profile.
+
+    Raises:
+        HTTPException: profile_id 가 존재하지 않거나 타인 소유면 404.
+    """
+    if profile_id:
+        profile = await Profile.filter(
+            id=profile_id,
+            account_id=current_account.id,
+            deleted_at__isnull=True,
+        ).first()
+        if profile is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Profile not found or not owned by current account.",
+            )
+        return profile
+    # fallback: SELF
     profile = await Profile.filter(
         account_id=current_account.id,
         relation_type=RelationType.SELF,
@@ -73,7 +101,7 @@ async def get_self_profile(
 async def extract_medication_from_image(
     file: Annotated[UploadFile, File(description="Prescription/medicine bag image to recognize")],
     ocr_service: Annotated[OCRService, Depends(get_ocr_service)],
-    profile: Annotated[Profile, Depends(get_self_profile)],
+    profile: Annotated[Profile, Depends(get_owned_profile_or_self)],
 ) -> OcrExtractResponse:
     """이미지를 ai-worker 로 enqueue 하고 draft_id 를 즉시 반환한다.
 
@@ -117,7 +145,7 @@ def _validate_upload(file: UploadFile) -> None:
 )
 async def list_active_drafts(
     ocr_service: Annotated[OCRService, Depends(get_ocr_service)],
-    profile: Annotated[Profile, Depends(get_self_profile)],
+    profile: Annotated[Profile, Depends(get_owned_profile_or_self)],
 ) -> OcrActiveDraftsResponse:
     """24h 안 + 미consume 인 draft 들을 최신순으로 반환한다.
 
@@ -135,7 +163,7 @@ async def list_active_drafts(
 async def get_draft_medication(
     draft_id: str,
     ocr_service: Annotated[OCRService, Depends(get_ocr_service)],
-    profile: Annotated[Profile, Depends(get_self_profile)],
+    profile: Annotated[Profile, Depends(get_owned_profile_or_self)],
 ) -> OcrDraftPollResponse:
     """폴링 — DB 에서 draft 의 status / medicines 를 조회한다.
 
@@ -167,7 +195,7 @@ async def get_draft_medication(
 async def stream_draft_medication(
     draft_id: str,
     ocr_service: Annotated[OCRService, Depends(get_ocr_service)],
-    profile: Annotated[Profile, Depends(get_self_profile)],
+    profile: Annotated[Profile, Depends(get_owned_profile_or_self)],
 ) -> StreamingResponse:
     """SSE 로 status 변화를 push 한다.
 
@@ -193,7 +221,7 @@ async def stream_draft_medication(
 async def discard_draft(
     draft_id: str,
     ocr_service: Annotated[OCRService, Depends(get_ocr_service)],
-    profile: Annotated[Profile, Depends(get_self_profile)],
+    profile: Annotated[Profile, Depends(get_owned_profile_or_self)],
 ) -> None:
     """Soft delete — consumed_at 을 설정해 active 목록·dedup 에서 제외한다.
 
@@ -211,7 +239,7 @@ async def discard_draft(
 async def confirm_and_save_medication(
     request: ConfirmMedicationRequest,
     ocr_service: Annotated[OCRService, Depends(get_ocr_service)],
-    profile: Annotated[Profile, Depends(get_self_profile)],
+    profile: Annotated[Profile, Depends(get_owned_profile_or_self)],
 ) -> dict:
     """사용자가 검수·수정한 최종 약품 리스트를 DB 에 저장한다."""
     try:

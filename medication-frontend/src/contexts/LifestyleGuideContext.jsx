@@ -126,6 +126,11 @@ export function LifestyleGuideProvider({ children }) {
     throw new Error('가이드 생성이 완료되지 않았어요. 잠시 후 다시 시도해주세요.')
   }, [])
 
+  const refetchGuides = useCallback(
+    () => fetchGuides(selectedProfileId),
+    [fetchGuides, selectedProfileId],
+  )
+
   return (
     <LifestyleGuideContext.Provider value={{
       guides,
@@ -133,7 +138,7 @@ export function LifestyleGuideProvider({ children }) {
       isLoading,
       generateGuide,
       deleteGuide,
-      refetchGuides: () => fetchGuides(selectedProfileId),
+      refetchGuides,
     }}>
       {children}
     </LifestyleGuideContext.Provider>

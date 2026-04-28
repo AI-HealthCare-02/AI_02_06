@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { CheckCircle, X } from 'lucide-react'
 import api from '@/lib/api'
 import { streamSSE } from '@/lib/sseClient'
+import { useProfile } from '@/contexts/ProfileContext'
 
 const STEPS = [
   '처방전 이미지를 읽고 있어요...',
@@ -25,10 +26,13 @@ const TERMINAL_ERROR_MESSAGES = {
  *
  * @yields {{status: string, medicines?: any[]}}  draft poll payload
  */
-async function* watchDraftStatus(draftId, signal) {
+async function* watchDraftStatus(draftId, profileId, signal) {
+  const path = profileId
+    ? `/api/v1/ocr/draft/${draftId}/stream?profile_id=${profileId}`
+    : `/api/v1/ocr/draft/${draftId}/stream`
   while (true) {
     let timedOut = false
-    for await (const ev of streamSSE(`/api/v1/ocr/draft/${draftId}/stream`, { signal })) {
+    for await (const ev of streamSSE(path, { signal })) {
       if (ev.event === 'update') yield ev.data
       else if (ev.event === 'timeout') { timedOut = true; break }
       else if (ev.event === 'error') throw new Error(ev.data?.detail || 'sse error')
@@ -128,6 +132,7 @@ function PrescriptionSkeleton({ step }) {
 
 export default function OcrLoadingPage() {
   const router = useRouter()
+  const { selectedProfileId } = useProfile()
   const [step, setStep] = useState(0)
   const [done, setDone] = useState(false)
 
@@ -143,7 +148,7 @@ export default function OcrLoadingPage() {
     // ready -> SuccessOverlay -> result push, terminal -> 안내 + /ocr 복귀.
     const consumeStream = async (draftId) => {
       try {
-        for await (const payload of watchDraftStatus(draftId, abortController.signal)) {
+        for await (const payload of watchDraftStatus(draftId, selectedProfileId, abortController.signal)) {
           const status = payload.status
           if (status === 'ready') {
             clearInterval(stepTicker)
@@ -180,9 +185,11 @@ export default function OcrLoadingPage() {
         const formData = new FormData()
         formData.append('file', file)
 
+        // 현재 선택된 프로필로 처방전 등록 — selectedProfileId 가 없으면 BE 가 SELF default
         const response = await api.post('/api/v1/ocr/extract', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
           timeout: 60000,
+          params: selectedProfileId ? { profile_id: selectedProfileId } : undefined,
         })
 
         sessionStorage.removeItem('ocrFileData')
@@ -203,7 +210,7 @@ export default function OcrLoadingPage() {
       abortController.abort()
       clearInterval(stepTicker)
     }
-  }, [router])
+  }, [router, selectedProfileId])
 
   // 우측상단 닫기 X — 사용자가 main 으로 빠져나갈 수 있도록.
   // 처리 자체는 ai-worker 가 백그라운드로 계속 수행 -> main 의 활성 draft 카드로 회수 가능.

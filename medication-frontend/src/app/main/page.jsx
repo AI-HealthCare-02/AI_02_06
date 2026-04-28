@@ -169,12 +169,14 @@ function MainPageContent() {
   // 실패 시에도 사용자 흐름을 차단하지 않고 silently skip (24h 후 자동 정리됨).
   const handleDeleteDraft = useCallback(async (draftId) => {
     try {
-      await api.delete(`/api/v1/ocr/draft/${draftId}`)
+      await api.delete(`/api/v1/ocr/draft/${draftId}`, {
+        params: selectedProfileId ? { profile_id: selectedProfileId } : undefined,
+      })
     } catch {
       // ignore
     }
     removeDraftLocally(draftId)
-  }, [removeDraftLocally])
+  }, [removeDraftLocally, selectedProfileId])
 
   if (isLoading) return <MainSkeleton />
 

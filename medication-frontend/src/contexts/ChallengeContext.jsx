@@ -74,6 +74,11 @@ export function ChallengeProvider({ children }) {
   )
   const challengesByGuide = (guideId) => challenges.filter(c => c.guide_id === guideId)
 
+  const refetchChallenges = useCallback(
+    () => fetchChallenges(selectedProfileId),
+    [fetchChallenges, selectedProfileId],
+  )
+
   return (
     <ChallengeContext.Provider value={{
       challenges,
@@ -85,7 +90,7 @@ export function ChallengeProvider({ children }) {
       startChallenge,
       updateChallenge,
       deleteChallenge,
-      refetchChallenges: () => fetchChallenges(selectedProfileId),
+      refetchChallenges,
     }}>
       {children}
     </ChallengeContext.Provider>

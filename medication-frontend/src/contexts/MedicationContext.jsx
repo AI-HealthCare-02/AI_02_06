@@ -95,6 +95,12 @@ export function MedicationProvider({ children }) {
   const activeMedications = medications.filter(m => m.is_active)
   const completedMedications = medications.filter(m => !m.is_active)
 
+  // refetchMedications stable ref
+  const refetchMedications = useCallback(
+    () => fetchMedications(selectedProfileId),
+    [fetchMedications, selectedProfileId],
+  )
+
   return (
     <MedicationContext.Provider value={{
       // 읽기
@@ -110,7 +116,7 @@ export function MedicationProvider({ children }) {
       // drug-info
       getDrugInfo,
       // 비상
-      refetchMedications: () => fetchMedications(selectedProfileId),
+      refetchMedications,
     }}>
       {children}
     </MedicationContext.Provider>

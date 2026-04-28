@@ -19,10 +19,16 @@ export function OcrDraftProvider({ children }) {
   const [activeDrafts, setActiveDrafts] = useState([])
   const [isLoading, setIsLoading] = useState(false)
 
-  const fetchDrafts = useCallback(async () => {
+  const fetchDrafts = useCallback(async (profileId) => {
+    if (!profileId) {
+      setActiveDrafts([])
+      return
+    }
     setIsLoading(true)
     try {
-      const res = await api.get('/api/v1/ocr/drafts/active')
+      const res = await api.get('/api/v1/ocr/drafts/active', {
+        params: { profile_id: profileId },
+      })
       setActiveDrafts(res.data?.drafts || [])
     } catch {
       setActiveDrafts([])
@@ -36,8 +42,13 @@ export function OcrDraftProvider({ children }) {
       setActiveDrafts([])
       return
     }
-    fetchDrafts()
+    fetchDrafts(selectedProfileId)
   }, [selectedProfileId, fetchDrafts])
+
+  const refetchDrafts = useCallback(
+    () => fetchDrafts(selectedProfileId),
+    [fetchDrafts, selectedProfileId],
+  )
 
   const removeDraftLocally = useCallback((draftId) => {
     setActiveDrafts(prev => prev.filter(d => d.draft_id !== draftId))
@@ -58,7 +69,7 @@ export function OcrDraftProvider({ children }) {
       activeDrafts,
       isLoading,
       removeDraftLocally,
-      refetchDrafts: fetchDrafts,
+      refetchDrafts,
     }}>
       {children}
     </OcrDraftContext.Provider>

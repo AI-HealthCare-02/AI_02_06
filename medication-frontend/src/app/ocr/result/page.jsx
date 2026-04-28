@@ -6,6 +6,7 @@ import { Trash2 } from 'lucide-react'
 import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
 import { streamSSE } from '@/lib/sseClient'
+import { useProfile } from '@/contexts/ProfileContext'
 
 const TERMINAL_ERROR_MESSAGES = {
   no_text: '이미지에서 텍스트를 찾지 못했어요.',
@@ -17,10 +18,13 @@ const TERMINAL_ERROR_MESSAGES = {
  * SSE 연결을 ready/terminal 까지 자동 재연결하며 await for-of 로 소비.
  * timeout event 시 새 연결 — 무한 재시도 (cancel 또는 ready 까지).
  */
-async function* watchDraftStatus(draftId, signal) {
+async function* watchDraftStatus(draftId, profileId, signal) {
+  const path = profileId
+    ? `/api/v1/ocr/draft/${draftId}/stream?profile_id=${profileId}`
+    : `/api/v1/ocr/draft/${draftId}/stream`
   while (true) {
     let timedOut = false
-    for await (const ev of streamSSE(`/api/v1/ocr/draft/${draftId}/stream`, { signal })) {
+    for await (const ev of streamSSE(path, { signal })) {
       if (ev.event === 'update') yield ev.data
       else if (ev.event === 'timeout') { timedOut = true; break }
       else if (ev.event === 'error') throw new Error(ev.data?.detail || 'sse error')
@@ -57,6 +61,7 @@ function OcrResultContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const draftId = searchParams.get('draft_id')
+  const { selectedProfileId } = useProfile()
 
   const [isLoading, setIsLoading] = useState(true)
   const [meds, setMeds] = useState([])
@@ -77,7 +82,7 @@ function OcrResultContent() {
 
     const consumeStream = async () => {
       try {
-        for await (const payload of watchDraftStatus(draftId, abortController.signal)) {
+        for await (const payload of watchDraftStatus(draftId, selectedProfileId, abortController.signal)) {
           const { status, medicines } = payload
           if (status === 'ready') {
             setMeds(medicines || [])
@@ -101,7 +106,7 @@ function OcrResultContent() {
 
     consumeStream()
     return () => abortController.abort()
-  }, [draftId, router])
+  }, [draftId, router, selectedProfileId])
 
   // 사용자가 텍스트를 수정할 때 상태 업데이트하는 함수
   const handleInputChange = (index, field, value) => {
@@ -121,7 +126,9 @@ function OcrResultContent() {
   const handleRetake = async () => {
     if (draftId) {
       try {
-        await api.delete(`/api/v1/ocr/draft/${draftId}`)
+        await api.delete(`/api/v1/ocr/draft/${draftId}`, {
+          params: selectedProfileId ? { profile_id: selectedProfileId } : undefined,
+        })
       } catch {
         // ignore — 사용자 흐름 차단하지 않음
       }
@@ -144,10 +151,14 @@ function OcrResultContent() {
         ...med,
         dispensed_date: prescriptionDate || null,
       }))
+      // 선택된 프로필로 medications INSERT — selectedProfileId 미전달 시 BE 가 SELF default
       await api.post('/api/v1/ocr/confirm', {
         draft_id: draftId,
         confirmed_medicines: confirmedMedicines,
-      }, { timeout: 60000 })
+      }, {
+        timeout: 60000,
+        params: selectedProfileId ? { profile_id: selectedProfileId } : undefined,
+      })
 
       // confirm 직후 main 페이지의 활성 카드에서 즉시 제거되도록 마킹.
       // (client cache 로 main useEffect 재실행 보장이 안 되므로 단방향 신호)

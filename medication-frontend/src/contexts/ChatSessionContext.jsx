@@ -71,6 +71,13 @@ export function ChatSessionProvider({ children }) {
     setActiveSessionId(prev => (prev === id ? null : prev))
   }, [])
 
+  // refetchSessions 를 stable ref 로 — 인라인 arrow 면 매 render 마다 새 함수가 되어
+  // 이를 deps 로 사용하는 hook 이 무한 루프에 빠질 수 있음 (ChatModal initSession 케이스)
+  const refetchSessions = useCallback(
+    () => fetchSessions(selectedProfileId),
+    [fetchSessions, selectedProfileId],
+  )
+
   return (
     <ChatSessionContext.Provider value={{
       sessions,
@@ -80,7 +87,7 @@ export function ChatSessionProvider({ children }) {
       createSession,
       renameSession,
       deleteSession,
-      refetchSessions: () => fetchSessions(selectedProfileId),
+      refetchSessions,
     }}>
       {children}
     </ChatSessionContext.Provider>
