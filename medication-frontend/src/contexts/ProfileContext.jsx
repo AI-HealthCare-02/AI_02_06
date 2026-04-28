@@ -99,10 +99,16 @@ export function ProfileProvider({ children }) {
   }, [])
 
   const deleteProfile = useCallback(async (id) => {
+    // SELF 프로필은 계정 자체와 묶여 있어 삭제 금지 (가족 관리 카드에서 잘못
+    // 호출되어도 사전 차단). 계정 탈퇴는 별도 mypage flow 사용.
+    const target = profiles.find(p => p.id === id)
+    if (target?.relation_type === 'SELF') {
+      throw new Error('본인 프로필은 삭제할 수 없습니다. 계정 탈퇴 메뉴를 이용해주세요.')
+    }
     await api.delete(`/api/v1/profiles/${id}`)
     setProfiles(prev => prev.filter(p => p.id !== id))
     // selectedId 정합성은 위 useEffect 가 자동 처리
-  }, [])
+  }, [profiles])
 
   // ── 경로 2: FE 동작 기반 ─────────────────────────────────────
 

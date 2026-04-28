@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { User, Activity, Users, Home, Trash2, X, Check, Plus, FileText, LogOut } from 'lucide-react'
 import EmptyState from '@/components/common/EmptyState'
 import BottomNav from '@/components/layout/BottomNav'
@@ -217,6 +217,7 @@ function MyPageSkeleton() {
 
 export default function MyPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const {
     selectedProfileId: profileId,
     selectedProfile,
@@ -245,12 +246,15 @@ export default function MyPage() {
     fetchData()
   }, [profileId])
 
-  // 프로필이 OTHER로 바뀌었는데 가족관리 탭이 활성화되어 있으면 기본정보로 초기화
+  // 가족관리 탭은 모든 프로필 상태에서 표시되며, family 자체에 SELF 가 포함되지 않으므로
+  // (filter relation_type !== 'SELF') 강제 탭 전환은 불필요해 제거.
+
+  // ProfileSwitcher 의 "프로필 추가" 버튼이 ?tab=family 로 진입하면 가족관리 탭 자동 활성화
   useEffect(() => {
-    if (selectedProfile?.relation_type === 'OTHER' && activeMenu === '가족관리') {
-      setActiveMenu('기본정보')
+    if (searchParams.get('tab') === 'family') {
+      setActiveMenu('가족관리')
     }
-  }, [selectedProfile?.relation_type])
+  }, [searchParams])
 
   // ProfileContext 가 이미 가진 profiles 재사용 — /profiles 와 /profiles/{id} GET 안 함.
   // 페이지 자체에서 GET 하는 건 챌린지/스트릭 같이 ProfileContext 가 모르는 데이터만.
@@ -335,7 +339,7 @@ export default function MyPage() {
   const menuItems = [
     { id: '기본정보', label: '기본 정보', icon: <User size={18} /> },
     { id: '건강정보', label: '건강 정보', icon: <Activity size={18} /> },
-    ...(selectedProfile?.relation_type !== 'OTHER' ? [{ id: '가족관리', label: '가족 관리', icon: <Users size={18} /> }] : []),
+    { id: '가족관리', label: '가족 관리', icon: <Users size={18} /> },
   ]
 
   return (

@@ -167,9 +167,19 @@ class ProfileService:
     async def delete_profile_with_owner_check(self, profile_id: UUID, account_id: UUID) -> None:
         """Delete profile with ownership verification (soft delete).
 
+        SELF 프로필은 계정 자체와 묶여 있어 삭제 금지 — 계정 탈퇴 흐름으로만 제거.
+
         Args:
             profile_id: Profile UUID to delete.
             account_id: Account UUID for ownership check.
+
+        Raises:
+            HTTPException: 403 if profile is SELF.
         """
         profile = await self.get_profile_with_owner_check(profile_id, account_id)
+        if profile.relation_type == RelationType.SELF:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot delete SELF profile. Use account withdrawal instead.",
+            )
         await self.repository.soft_delete(profile)
