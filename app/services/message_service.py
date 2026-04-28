@@ -40,6 +40,13 @@ _HTTP_410_GONE = 410
 
 _LOG_PREVIEW_LIMIT = 80
 
+# ── 옵션 D: 세션 요약 자동화 ───────────────────────────────────────
+# 매 N turn 마다 background 로 SessionCompactService 호출.
+# turn = (user, assistant) 페어 1쌍 ≈ assistant 메시지 1건 기준.
+_COMPACT_TRIGGER_EVERY = 6
+_COMPACT_TRIGGER_MIN = 6
+_COMPACT_JOB_REF = "ai_worker.domains.session_compact.jobs.compact_and_save_session_job"
+
 
 def _preview(text: str, limit: int = _LOG_PREVIEW_LIMIT) -> str:
     """단일 줄 preview — 로그에서 user/assistant content 를 짧게 보여준다."""
@@ -329,6 +336,14 @@ class MessageService:
 
         recent = await self.repository.get_recent_by_session(session_id, limit=_HISTORY_LIMIT)
         history = _chat_messages_to_history(recent)
+
+        # 옵션 D — 이전 세션 요약을 system role 로 prepend (있을 때만).
+        # Router LLM 의 history 첫 줄로 들어가 컨텍스트 압축 효과.
+        session_summary = await self._fetch_session_summary(session_id)
+        if session_summary:
+            history = [{"role": "system", "content": f"[세션 요약]\n{session_summary}"}, *history]
+            logger.info("[Chat] session=%s summary_prepended=%dchars", sid, len(session_summary))
+
         logger.info("[Chat] session=%s history_loaded=%dturns", sid, len(history))
         route_messages = [*history, {"role": "user", "content": content}]
 
@@ -372,6 +387,33 @@ class MessageService:
             tool_results=eager_results,
         )
 
+    async def _fetch_session_summary(self, session_id: UUID) -> str | None:
+        """chat_sessions.summary 조회 — 옵션 D 의 history prepend 입력."""
+        session = await self.session_repository.get_by_id(session_id)
+        return session.summary if session is not None else None
+
+    def _maybe_enqueue_compact(self, session_id: UUID, total_messages_after: int) -> None:
+        """N turn 마다 compact RQ job 을 fire-and-forget enqueue.
+
+        - assistant 메시지 1건 = 1 turn 기준이라 보고, total_messages_after 가
+          (user+assistant) 짝수일 때만 trigger 검토.
+        - 최소 _COMPACT_TRIGGER_MIN 이상 + _COMPACT_TRIGGER_EVERY 의 배수일 때 실행.
+        """
+        if total_messages_after < _COMPACT_TRIGGER_MIN:
+            return
+        if total_messages_after % _COMPACT_TRIGGER_EVERY != 0:
+            return
+        try:
+            self._get_queue().enqueue(_COMPACT_JOB_REF, str(session_id))
+            logger.info(
+                "[Chat] session=%s compact enqueued (msgs=%d)",
+                str(session_id)[:8],
+                total_messages_after,
+            )
+        except Exception:
+            # fire-and-forget — enqueue 실패는 사용자 응답을 막지 않는다.
+            logger.exception("[Chat] session=%s compact enqueue failed", str(session_id)[:8])
+
     async def _persist_router_text_turn(
         self,
         session_id: UUID,
@@ -387,6 +429,8 @@ class MessageService:
         )
         user_msg = await self.repository.create_user_message(session_id, content)
         assistant_msg = await self.repository.create_assistant_message(session_id, text)
+        total = await self.repository.count_by_session(session_id)
+        self._maybe_enqueue_compact(session_id, total)
         return AskResult(user_message=user_msg, assistant_message=assistant_msg, pending=None)
 
     async def _park_pending_turn(
@@ -460,6 +504,8 @@ class MessageService:
 
         user_msg = await self.repository.create_user_message(session_id, content)
         assistant_msg = await self.repository.create_assistant_message(session_id, answer)
+        total = await self.repository.count_by_session(session_id)
+        self._maybe_enqueue_compact(session_id, total)
         return AskResult(user_message=user_msg, assistant_message=assistant_msg, pending=None)
 
     # ── pending GPS 턴 마무리 (오케스트레이션) ───────────────────────────
@@ -506,6 +552,8 @@ class MessageService:
 
         session_uuid = UUID(pending.session_id)
         assistant_msg = await self.repository.create_assistant_message(session_uuid, answer)
+        total = await self.repository.count_by_session(session_uuid)
+        self._maybe_enqueue_compact(session_uuid, total)
         logger.info(
             "[Chat] resolved turn=%s session=%s status=%s tools=%d reply=%r len=%d",
             turn_id,

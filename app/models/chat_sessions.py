@@ -24,6 +24,10 @@ class ChatSession(models.Model):
     account = fields.ForeignKeyField("models.Account", related_name="chat_sessions")
     profile = fields.ForeignKeyField("models.Profile", related_name="chat_sessions")
     title = fields.CharField(max_length=64, null=True)
+    # 옵션 D — N turn 마다 SessionCompactService 가 비동기 갱신.
+    # 다음 turn 의 Router LLM history 앞에 system message 로 prepend 되어 컨텍스트 압축 효과.
+    summary = fields.TextField(null=True, description="Compact medical-context summary (옵션 D)")
+    summary_updated_at = fields.DatetimeField(null=True, description="Last successful compact run timestamp")
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)
     deleted_at = fields.DatetimeField(null=True)

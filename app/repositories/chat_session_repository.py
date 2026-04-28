@@ -100,6 +100,23 @@ class ChatSessionRepository:
         await session.update_from_dict(kwargs).save()
         return session
 
+    async def update_summary(self, session_id: UUID, summary: str) -> int:
+        """세션 요약 + 갱신 timestamp UPDATE — compact RQ job 종료 시 호출.
+
+        Args:
+            session_id: 갱신 대상 세션 UUID.
+            summary: SessionCompactService 가 만든 마크다운 요약 본문.
+
+        Returns:
+            UPDATE 된 row 수 (정상이면 1, 세션 없으면 0).
+        """
+        from datetime import UTC, datetime
+
+        return await ChatSession.filter(id=session_id, deleted_at__isnull=True).update(
+            summary=summary,
+            summary_updated_at=datetime.now(UTC),
+        )
+
     async def soft_delete(self, session: ChatSession) -> ChatSession:
         """Soft delete chat session.
 
