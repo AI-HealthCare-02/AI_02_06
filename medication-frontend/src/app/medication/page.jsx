@@ -1,10 +1,10 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Pill, ChevronRight, Plus, Building2, Pencil, Trash2 } from 'lucide-react'
 import BottomNav from '@/components/layout/BottomNav'
-import api from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
+import { useMedication } from '@/contexts/MedicationContext'
 
 function MedicationListSkeleton() {
   return (
@@ -162,51 +162,21 @@ function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup }) {
 }
 
 const TABS = [
-  { label: '복용중', param: 'active_only=true' },
-  { label: '완료', param: 'inactive_only=true' },
+  { label: '복용중' },
+  { label: '완료' },
 ]
 
 export default function MedicationListPage() {
   const router = useRouter()
-  const [isLoading, setIsLoading] = useState(true)
-  const [medications, setMedications] = useState([])
   const [activeTab, setActiveTab] = useState('복용중')
   const [selectedDate, setSelectedDate] = useState(null)
   const [deleteTargetItems, setDeleteTargetItems] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
-  // ProfileContext에서 현재 선택된 프로필 ID를 가져옴 (feat/profile-switcher 머지 이후)
   const { selectedProfileId: profileId } = useProfile()
-  const isInitialLoad = useRef(true)
-  // isRefreshing: 탭/날짜 전환 시 전체 스켈레톤 대신 투명도 처리로 UX 개선
-  const [isRefreshing, setIsRefreshing] = useState(false)
-
-  const fetchMedications = async (isInitial = false) => {
-    if (isInitial || isInitialLoad.current) {
-      setIsLoading(true)
-    } else {
-      setIsRefreshing(true)
-    }
-    try {
-      const tab = TABS.find(t => t.label === activeTab)
-      const res = await api.get(`/api/v1/medications?profile_id=${profileId}&${tab.param}`)
-      setMedications(res.data || [])
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setIsLoading(false)
-      setIsRefreshing(false)
-      isInitialLoad.current = false
-    }
-  }
-
-  useEffect(() => {
-    if (!profileId) return
-    isInitialLoad.current = true
-    fetchMedications(true)
-    setSelectedDate(null)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, profileId])
+  // MedicationContext 가 단일 진실 — 자체 fetch 제거, 탭 전환 시 client-side filter
+  const { activeMedications, completedMedications, isLoading, deleteMedications } = useMedication()
+  const medications = activeTab === '복용중' ? activeMedications : completedMedications
 
   const handleDeleteGroup = (items) => {
     setDeleteTargetItems(items)
@@ -216,11 +186,9 @@ export default function MedicationListPage() {
     if (!deleteTargetItems || isDeleting) return
     setIsDeleting(true)
     try {
-      // 그룹 내 모든 약품을 병렬 삭제 (순차 삭제 대비 응답 속도 개선)
-      await Promise.all(deleteTargetItems.map(med => api.delete(`/api/v1/medications/${med.id}`)))
+      // Context 의 deleteMedications 가 응답 받자마자 setMedications 자동 갱신
+      await deleteMedications(deleteTargetItems.map(m => m.id))
       setDeleteTargetItems(null)
-      // 삭제 완료 후 목록 새로고침으로 서버 상태와 동기화
-      await fetchMedications()
     } catch (err) {
       console.error(err)
       alert('삭제 중 오류가 발생했습니다. 다시 시도해주세요.')
@@ -229,7 +197,7 @@ export default function MedicationListPage() {
     }
   }
 
-  if (isLoading) return <MedicationListSkeleton />
+  if (isLoading || !profileId) return <MedicationListSkeleton />
 
   const allGroups = groupByPrescription(medications)
   const sidebarDates = extractUniqueDates(allGroups)
@@ -244,7 +212,7 @@ export default function MedicationListPage() {
     : { title: '완료된 처방 내역이 없어요', sub: '복용이 끝난 처방전은 여기에 표시됩니다' }
 
   return (
-    <main className={`min-h-screen bg-gray-50 pb-24 transition-opacity duration-200 ${isRefreshing ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
+    <main className="min-h-screen bg-gray-50 pb-24">
       <div className="max-w-5xl mx-auto">
 
         {/* 헤더 */}
@@ -270,7 +238,7 @@ export default function MedicationListPage() {
               {TABS.map(({ label }) => (
                 <button
                   key={label}
-                  onClick={() => setActiveTab(label)}
+                  onClick={() => { setActiveTab(label); setSelectedDate(null) }}
                   className={`flex-1 py-2.5 text-xs font-bold transition-colors ${
                     activeTab === label
                       ? 'text-gray-900 border-b-2 border-gray-900 -mb-px'

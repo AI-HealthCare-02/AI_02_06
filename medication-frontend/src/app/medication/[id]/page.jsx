@@ -4,6 +4,7 @@ import { useRouter, useParams } from 'next/navigation'
 import { Clock, Utensils, Pill, Calendar, AlertTriangle, AlertCircle, Ban, Trash2 } from 'lucide-react'
 import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
+import { useMedication } from '@/contexts/MedicationContext'
 
 function DetailSkeleton() {
   return (
@@ -69,16 +70,30 @@ export default function MedicationDetailPage() {
   const [isDrugInfoLoading, setIsDrugInfoLoading] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
-  const [med, setMed] = useState(null)
+  const { medications, deleteMedication, deactivateMedication, getDrugInfo } = useMedication()
+  const [fallbackMed, setFallbackMed] = useState(null)
   const [drugInfo, setDrugInfo] = useState(null)
   const [activeTab, setActiveTab] = useState('용법')
 
+  // MedicationContext 의 store 에 있으면 그대로 사용 (즉시 반영) — list 다녀온 후 detail 진입 시
+  // 직접 URL 진입 등으로 store 가 비어있으면 fallback fetch
+  const med = medications.find(m => m.id === id) || fallbackMed
+
   useEffect(() => {
     if (!id) return
+    if (medications.find(m => m.id === id)) {
+      setIsLoading(false)
+      return
+    }
+    if (medications.length === 0) {
+      // store 가 아직 안 채워졌을 수도 있어 한 tick 기다림 (Context 의 첫 fetch 진행 중)
+      return
+    }
+    // store 에 채워져있는데 해당 id 가 없음 → 직접 fetch
     const fetchMedication = async () => {
       try {
         const res = await api.get(`/api/v1/medications/${id}`)
-        setMed(res.data)
+        setFallbackMed(res.data)
       } catch (err) {
         alert('약품 정보를 불러올 수 없습니다.')
         router.push('/medication')
@@ -87,34 +102,29 @@ export default function MedicationDetailPage() {
       }
     }
     fetchMedication()
-  }, [id, router])
+  }, [id, router, medications])
 
-  // 주의사항/부작용/상호작용 탭 선택 시 drug-info API 호출 (lazy loading)
-  // - '용법' 탭에서는 호출하지 않음 (LLM 비용 절감)
-  // - drugInfo가 이미 있으면 재호출 생략 (컴포넌트 생명주기 내 1회 캐싱)
-  // - 백엔드에서도 30일 DB 캐시(LLMResponseCache)로 중복 LLM 호출 방지
+  useEffect(() => {
+    if (med) setIsLoading(false)
+  }, [med])
+
+  // 주의사항/부작용/상호작용 탭 선택 시 drug-info — Context 의 lazy cache 사용
+  // ('용법' 탭에서는 호출 안 함, 한 번 받은 결과는 같은 세션 동안 cache 재활용)
   useEffect(() => {
     if (!med || activeTab === '용법') return
     if (drugInfo) return
-
-    const fetchDrugInfo = async () => {
-      setIsDrugInfoLoading(true)
-      try {
-        const res = await api.get(`/api/v1/medications/${id}/drug-info`)
-        setDrugInfo(res.data)
-      } catch (err) {
-        console.error(err)
-      } finally {
-        setIsDrugInfoLoading(false)
-      }
-    }
-    fetchDrugInfo()
-  }, [activeTab, med, drugInfo, id])
+    setIsDrugInfoLoading(true)
+    getDrugInfo(id)
+      .then(setDrugInfo)
+      .catch(err => console.error(err))
+      .finally(() => setIsDrugInfoLoading(false))
+  }, [activeTab, med, drugInfo, id, getDrugInfo])
 
   const handleDelete = async () => {
     setIsDeleting(true)
     try {
-      await api.delete(`/api/v1/medications/${id}`)
+      // Context 의 deleteMedication 이 응답 받자마자 store 갱신 → list 자동 반영
+      await deleteMedication(id)
       router.push('/medication')
     } catch (err) {
       console.error(err)
@@ -128,9 +138,8 @@ export default function MedicationDetailPage() {
   // 완료된 약품은 '완료' 탭에서 계속 조회 가능
   const handleDeactivate = async () => {
     try {
-      await api.patch(`/api/v1/medications/${id}`, { is_active: false })
-      // API 재호출 없이 로컬 상태만 업데이트하여 즉각적인 UI 반영
-      setMed(prev => ({ ...prev, is_active: false }))
+      // Context 의 deactivateMedication 이 응답으로 store in-place 갱신
+      await deactivateMedication(id)
     } catch (err) {
       console.error(err)
       alert('처리에 실패했습니다. 다시 시도해주세요.')

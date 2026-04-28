@@ -5,6 +5,7 @@ import Navigation from '@/components/layout/Navigation'
 import BottomNav from '@/components/layout/BottomNav'
 import GlobalAuthGuard from '@/components/auth/AuthGuard'
 import { ProfileProvider } from '@/contexts/ProfileContext'
+import { MedicationProvider } from '@/contexts/MedicationContext'
 
 // 폰트 최적화: preload와 display swap 적용
 const geistSans = Geist({
@@ -44,9 +45,11 @@ export default function RootLayout({ children }) {
       <body className="min-h-full flex flex-col">
         <GlobalAuthGuard>
           <ProfileProvider>
-            <Navigation />
-            {children}
-            <BottomNav />
+            <MedicationProvider>
+              <Navigation />
+              {children}
+              <BottomNav />
+            </MedicationProvider>
           </ProfileProvider>
         </GlobalAuthGuard>
         <Toaster

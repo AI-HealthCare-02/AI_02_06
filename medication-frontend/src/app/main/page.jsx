@@ -6,6 +6,7 @@ import { Pill, Flame, Plus, MessageCircle, FileText, Loader2, X, Trash2 } from '
 import ChatModal from '@/components/chat/ChatModal'
 import SurveyModal from '@/components/common/SurveyModal'
 import { useProfile } from '@/contexts/ProfileContext'
+import { useMedication } from '@/contexts/MedicationContext'
 
 // 활성 OCR draft 카드 — main 우측하단 floating (챗봇 아이콘 위)
 // 사용자가 X 로 카드 전체를 숨길 수 있고 (새로고침 시 다시 표시),
@@ -100,12 +101,13 @@ function MainPageContent() {
   const [isLoading, setIsLoading] = useState(true)
   const [showSurvey, setShowSurvey] = useState(false)
   const [showChat, setShowChat] = useState(false)
-  const [medications, setMedications] = useState([])
   const [activeChallenge, setActiveChallenge] = useState(null)
   const [activeDrafts, setActiveDrafts] = useState([])
   const [greeting, setGreeting] = useState({ msg: '반가워요', sub: '오늘 하루도 건강하게 시작해봐요' })
 
   const { selectedProfileId, selectedProfile } = useProfile()
+  // MedicationContext 가 active 약 목록을 단일 진실로 관리 — 자체 fetch 안 함.
+  const { activeMedications: medications } = useMedication()
   const userName = selectedProfile?.name?.split('(')[0] || '사용자'
   const isInitialLoad = useRef(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -127,12 +129,10 @@ function MainPageContent() {
         } else {
           setIsRefreshing(true)
         }
-        const [medRes, challengeRes, draftsRes] = await Promise.all([
-          api.get(`/api/v1/medications?profile_id=${selectedProfileId}&active_only=true`),
+        const [challengeRes, draftsRes] = await Promise.all([
           api.get(`/api/v1/challenges?profile_id=${selectedProfileId}`).catch(() => ({ data: [] })),
           api.get('/api/v1/ocr/drafts/active').catch(() => ({ data: { drafts: [] } })),
         ])
-        setMedications(medRes.data || [])
         setActiveDrafts(draftsRes.data?.drafts || [])
         const inProgress = (challengeRes.data || []).filter(c => c.challenge_status === 'IN_PROGRESS')
         if (inProgress.length > 0) {
