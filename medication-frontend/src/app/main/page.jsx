@@ -276,8 +276,11 @@ function MainPageContent() {
         </div>
       </main>
 
-      {/* 처리 중·확인 대기 OCR draft 카드 (우측하단 floating) */}
+      {/* 처리 중·확인 대기 OCR draft 카드 (우측하단 floating).
+          key={selectedProfileId} 로 프로필 전환 시 unmount/remount → 내부 dismissed
+          state 가 자동 reset 되어 새 프로필에서 카드를 다시 볼 수 있다. */}
       <ActiveDraftsCard
+        key={selectedProfileId}
         drafts={activeDrafts}
         onSelect={(draftId) => router.push(`/ocr/result?draft_id=${draftId}`)}
         onDelete={handleDeleteDraft}

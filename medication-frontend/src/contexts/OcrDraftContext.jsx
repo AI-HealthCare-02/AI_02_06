@@ -37,11 +37,13 @@ export function OcrDraftProvider({ children }) {
     }
   }, [])
 
+  // 프로필 전환 시 이전 프로필 drafts 가 잠시도 보이지 않도록 fetch 전에 즉시 비움.
+  // (다른 Context 들은 array 단위로 페이지가 ProfileContext 의 selectedProfileId 변경을
+  //  watch 해 자체 reset 하지만, ActiveDraftsCard 는 main 페이지에 floating 되어 있어
+  //  Context 가 swap 시점을 직접 책임진다.)
   useEffect(() => {
-    if (!selectedProfileId) {
-      setActiveDrafts([])
-      return
-    }
+    setActiveDrafts([])
+    if (!selectedProfileId) return
     fetchDrafts(selectedProfileId)
   }, [selectedProfileId, fetchDrafts])
 
