@@ -65,7 +65,7 @@ class TestApplyFilters:
     async def test_non_drug_blocked_by_default(self, service: Any) -> None:
         """RECALL_FILTER_NON_DRUG=True 면 치약 회수가 걸러진다."""
         valid_seqs = {item["ITEM_SEQ"] for item in SEED_RECALL_30}
-        with patch("app.services.drug_recall_service.config.config") as cfg:
+        with patch("app.core.config.config") as cfg:
             cfg.RECALL_FILTER_NON_DRUG = True
             kept = await service._apply_filters(SEED_RECALL_30, valid_seqs)
 
@@ -76,7 +76,7 @@ class TestApplyFilters:
     async def test_non_drug_kept_when_toggle_off(self, service: Any) -> None:
         """RECALL_FILTER_NON_DRUG=False 면 치약도 통과 (의약외품 영역 확장 시나리오)."""
         valid_seqs = {item["ITEM_SEQ"] for item in SEED_RECALL_30}
-        with patch("app.services.drug_recall_service.config.config") as cfg:
+        with patch("app.core.config.config") as cfg:
             cfg.RECALL_FILTER_NON_DRUG = False
             kept = await service._apply_filters(SEED_RECALL_30, valid_seqs)
 
@@ -87,7 +87,7 @@ class TestApplyFilters:
     async def test_hospital_only_blocked(self, service: Any) -> None:
         """주사제는 항상 차단."""
         valid_seqs = {item["ITEM_SEQ"] for item in SEED_RECALL_30}
-        with patch("app.services.drug_recall_service.config.config") as cfg:
+        with patch("app.core.config.config") as cfg:
             cfg.RECALL_FILTER_NON_DRUG = True
             kept = await service._apply_filters(SEED_RECALL_30, valid_seqs)
 
@@ -99,7 +99,7 @@ class TestApplyFilters:
         """medicine_info 가 비어있지 않으면 그 안에 있는 item_seq 만 통과."""
         # 마데카솔만 medicine_info 에 등록되어 있는 상황
         valid_seqs = {"200903973"}
-        with patch("app.services.drug_recall_service.config.config") as cfg:
+        with patch("app.core.config.config") as cfg:
             cfg.RECALL_FILTER_NON_DRUG = True
             kept = await service._apply_filters(SEED_RECALL_30, valid_seqs)
 
@@ -109,7 +109,7 @@ class TestApplyFilters:
     @pytest.mark.asyncio
     async def test_no_match_filter_disabled_when_seqs_empty(self, service: Any) -> None:
         """medicine_info 가 텅 비어 있으면 1차 필터를 비활성 (모든 row 보존)."""
-        with patch("app.services.drug_recall_service.config.config") as cfg:
+        with patch("app.core.config.config") as cfg:
             cfg.RECALL_FILTER_NON_DRUG = False
             kept = await service._apply_filters(SEED_RECALL_30, set())
 
@@ -124,7 +124,7 @@ class TestApplyFilters:
         본 테스트는 RECALL_FILTER_NON_DRUG=False (치약도 통과) 가정.
         """
         valid_seqs = {item["ITEM_SEQ"] for item in SEED_RECALL_30}
-        with patch("app.services.drug_recall_service.config.config") as cfg:
+        with patch("app.core.config.config") as cfg:
             cfg.RECALL_FILTER_NON_DRUG = False
             kept = await service._apply_filters(SEED_RECALL_30, valid_seqs)
 
@@ -141,7 +141,7 @@ class TestEndpointFromEnv:
         """env 의 RECALL_LIST_METHOD 가 URL 마지막 path-segment 로 사용됨."""
         from app.services.drug_recall_service import DrugRecallService
 
-        with patch("app.services.drug_recall_service.config.config") as cfg:
+        with patch("app.core.config.config") as cfg:
             cfg.DATA_GO_KR_RECALL_BASE_URL = "http://example/path"
             cfg.DATA_GO_KR_RECALL_LIST_METHOD = "getMdcinRtrvlSleStpgeList99"
             cfg.DATA_GO_KR_RECALL_API_KEY = "k"
@@ -168,7 +168,7 @@ class TestSyncFlow:
             patch.object(svc, "_fetch_all_pages", new=AsyncMock(return_value=SEED_RECALL_30)),
             patch.object(svc, "_load_valid_item_seqs", new=AsyncMock(return_value={"200903973"})),
             patch("app.services.drug_recall_service.DataSyncLog.create", new=AsyncMock()) as create,
-            patch("app.services.drug_recall_service.config.config") as cfg,
+            patch("app.core.config.config") as cfg,
         ):
             cfg.RECALL_FILTER_NON_DRUG = True
             stats = await svc.sync()
