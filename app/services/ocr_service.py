@@ -66,28 +66,21 @@ class OCRService:
         self._repository = repository or OcrDraftRepository()
 
     async def enqueue_ocr_task(self, file: UploadFile, profile_id: UUID | str) -> OcrExtractResponse:
-        """업로드 bytes 를 ai-worker 로 enqueue 한다 (dedup 적용).
-
-        같은 사용자 + 같은 image_hash + 미consume 인 draft 가 이미 있으면
-        새 enqueue 없이 기존 draft_id 를 반환한다.
-
-        Args:
-            file: 사용자가 업로드한 처방전 이미지.
-            profile_id: 업로드한 프로필 ID.
-
-        Returns:
-            ``OcrExtractResponse`` — draft_id 와 빈 medicines 리스트.
-        """
+        """업로드 bytes 를 ai-worker 로 enqueue 한다 (중복 체크 비활성화 버전)."""
         image_bytes = await file.read()
         image_hash = hashlib.sha256(image_bytes).hexdigest()
         filename = file.filename or "prescription.jpg"
 
-        existing = await self._repository.find_active_by_hash(profile_id, image_hash)
-        if existing is not None:
-            return OcrExtractResponse(draft_id=str(existing.id), medicines=[])
+        # [아키텍트 조언] 중복 체크 로직을 주석 처리하여 무조건 새로 분석하게 만듭니다.
+        # existing = await self._repository.find_active_by_hash(profile_id, image_hash)
+        # if existing is not None:
+        #     return OcrExtractResponse(draft_id=str(existing.id), medicines=[])
 
+        # 이 부분은 반드시 살아있어야 워커에게 일을 시킵니다!
         draft = await self._repository.create_pending(profile_id, image_hash, filename)
         self._queue.enqueue(_OCR_JOB_REF, image_bytes, filename, str(draft.id))
+
+        logger.info(f"Successfully enqueued OCR task: {draft.id}")
         return OcrExtractResponse(draft_id=str(draft.id), medicines=[])
 
     async def get_draft_data(
