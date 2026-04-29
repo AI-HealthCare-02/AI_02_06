@@ -1,4 +1,4 @@
-"""LifestyleGuide 라우터 — 활성 약물 부재 시 409 응답 단위 테스트.
+"""LifestyleGuide — 활성 약물 부재 시 409 응답 단위 테스트.
 
 배포 환경 회귀 가드:
     `POST /api/v1/lifestyle-guides/generate` 가 medications 0건일 때
@@ -6,8 +6,11 @@
     구조화된 detail (code / message / redirect_to) 로 교체했다.
     FE 가 이 응답을 보고 토스트 + 라우팅을 한 번에 처리한다.
 
-본 테스트는 라우터 핸들러를 service 만 mock 으로 바꿔 직접 호출한다.
-실제 FastAPI app/middleware/DB 는 띄우지 않는다 (CI 비용 0).
+설계 결정 (PR #86 + #88 통합):
+    Service 가 직접 ``HTTPException(409, detail={...})`` 을 raise 하고,
+    router 는 그대로 propagate 한다 (single source of truth). 따라서
+    실제 동작 검증은 service 단에서 수행하고, router 는 happy-path 만
+    얇게 검증한다.
 """
 
 from __future__ import annotations
@@ -20,58 +23,47 @@ from fastapi import HTTPException, status
 import pytest
 
 from app.apis.v1.lifestyle_guide_routers import enqueue_guide
+from app.services.lifestyle_guide_service import LifestyleGuideService
 
 
-class TestEnqueueGuideNoActiveMedications:
-    """활성 약물 부재 → 409 + 구조화된 detail."""
+class TestServiceNoActiveMedications:
+    """Service 단 — 활성 약물 부재 → 409 + 구조화된 detail."""
+
+    def _service_with_empty_medications(self) -> LifestyleGuideService:
+        # __init__ 우회 — RQ Queue 등 외부 의존성 instantiate 안 함.
+        # active 0건 분기는 medication_repo 만 검사하므로 다른 attr 불필요.
+        service = LifestyleGuideService.__new__(LifestyleGuideService)
+        service.medication_repo = MagicMock()
+        service.medication_repo.get_active_by_profile = AsyncMock(return_value=[])
+        return service
 
     @pytest.mark.asyncio
-    async def test_value_error_translated_to_409(self) -> None:
-        """service 가 ValueError 던지면 라우터가 409 로 변환해야 한다."""
-        service = MagicMock()
-        service.enqueue_guide_with_owner_check = AsyncMock(
-            side_effect=ValueError("활성 약물 목록이 비어 있습니다."),
-        )
-        account = MagicMock(id=uuid4())
+    async def test_raises_409_when_no_active_medications(self) -> None:
+        """active medications 0건 → HTTPException(409)."""
+        service = self._service_with_empty_medications()
 
         with pytest.raises(HTTPException) as exc_info:
-            await enqueue_guide(profile_id=uuid4(), current_account=account, service=service)
+            await service.enqueue_guide_generation(profile_id=uuid4())
 
         assert exc_info.value.status_code == status.HTTP_409_CONFLICT
 
     @pytest.mark.asyncio
     async def test_response_detail_has_required_keys(self) -> None:
         """detail 에 code / message / redirect_to 가 포함되어야 한다 (FE 계약)."""
-        service = MagicMock()
-        service.enqueue_guide_with_owner_check = AsyncMock(side_effect=ValueError("dummy"))
-        account = MagicMock(id=uuid4())
+        service = self._service_with_empty_medications()
 
         with pytest.raises(HTTPException) as exc_info:
-            await enqueue_guide(profile_id=uuid4(), current_account=account, service=service)
+            await service.enqueue_guide_generation(profile_id=uuid4())
 
         detail = exc_info.value.detail
         assert isinstance(detail, dict), f"detail must be dict, got {type(detail)}"
         assert detail["code"] == "NO_ACTIVE_MEDICATIONS"
         assert "처방전" in detail["message"]
         assert detail["redirect_to"] == "/ocr"
-        assert detail["service_message"] == "dummy"
-
-    @pytest.mark.asyncio
-    async def test_chains_exception_for_logging(self) -> None:
-        """원본 ValueError 가 ``__cause__`` 에 보존되어야 (서버 로그 디버깅)."""
-        original = ValueError("활성 약물 목록이 비어 있습니다.")
-        service = MagicMock()
-        service.enqueue_guide_with_owner_check = AsyncMock(side_effect=original)
-        account = MagicMock(id=uuid4())
-
-        with pytest.raises(HTTPException) as exc_info:
-            await enqueue_guide(profile_id=uuid4(), current_account=account, service=service)
-
-        assert exc_info.value.__cause__ is original
 
 
 class TestEnqueueGuideHappyPath:
-    """정상 경로 — service 가 guide 반환 시 라우터가 그대로 반환."""
+    """Router 단 happy path — service 가 guide 반환 시 그대로 반환."""
 
     @pytest.mark.asyncio
     async def test_returns_pending_response_on_success(self) -> None:
@@ -84,3 +76,21 @@ class TestEnqueueGuideHappyPath:
         result: Any = await enqueue_guide(profile_id=uuid4(), current_account=account, service=service)
 
         assert result.id == guide_id
+
+    @pytest.mark.asyncio
+    async def test_propagates_service_http_exception(self) -> None:
+        """Service 가 던진 HTTPException 은 router 가 그대로 propagate."""
+        service = MagicMock()
+        service.enqueue_guide_with_owner_check = AsyncMock(
+            side_effect=HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "NO_ACTIVE_MEDICATIONS", "message": "...", "redirect_to": "/ocr"},
+            ),
+        )
+        account = MagicMock(id=uuid4())
+
+        with pytest.raises(HTTPException) as exc_info:
+            await enqueue_guide(profile_id=uuid4(), current_account=account, service=service)
+
+        assert exc_info.value.status_code == status.HTTP_409_CONFLICT
+        assert exc_info.value.detail["code"] == "NO_ACTIVE_MEDICATIONS"
