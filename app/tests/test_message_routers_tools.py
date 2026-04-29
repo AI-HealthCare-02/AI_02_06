@@ -126,9 +126,20 @@ def stub_repo(monkeypatch: pytest.MonkeyPatch, session_id: UUID) -> dict[str, An
         captured["assistant"].append((sid, content, metadata))
         return msg
 
+    # 옵션 D — _fetch_session_summary / count_by_session DB 호출 stub
+    async def fake_count(_self, _sid) -> int:
+        return 0
+
+    async def fake_session_get(_self, _sid) -> None:
+        return None
+
+    from app.repositories.chat_session_repository import ChatSessionRepository
+
     monkeypatch.setattr(MessageRepository, "get_recent_by_session", fake_get_recent)
     monkeypatch.setattr(MessageRepository, "create_user_message", fake_user)
     monkeypatch.setattr(MessageRepository, "create_assistant_message", fake_assistant)
+    monkeypatch.setattr(MessageRepository, "count_by_session", fake_count)
+    monkeypatch.setattr(ChatSessionRepository, "get_by_id", fake_session_get)
     return captured
 
 

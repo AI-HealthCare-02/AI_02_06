@@ -72,9 +72,14 @@ class TestHospitalKeywordToolSchema:
 
 
 class TestToolSchemasList:
-    def test_contains_both_tools(self) -> None:
+    def test_contains_all_tools(self) -> None:
+        """옵션 C 기준 — 병원 검색 2종 + RAG 약품 지식 검색 1종 = 총 3종."""
         names = {t["function"]["name"] for t in TOOL_SCHEMAS}
-        assert names == {"search_hospitals_by_location", "search_hospitals_by_keyword"}
+        assert names == {
+            "search_hospitals_by_location",
+            "search_hospitals_by_keyword",
+            "search_medicine_knowledge_base",
+        }
 
 
 # ── needs_geolocation_for ──────────────────────────────────────

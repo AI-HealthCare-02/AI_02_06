@@ -66,11 +66,21 @@ def stub_message_repo(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         captured["assistant"].append((sid, content, metadata))
         return msg
 
+    # 옵션 D — _fetch_session_summary / count_by_session DB 호출 stub
+    async def fake_count(_self, _sid) -> int:
+        return 0
+
+    async def fake_session_get(_self, _sid) -> None:
+        return None  # session.summary 가 None 이라 _fetch_session_summary 도 None 반환
+
+    from app.repositories.chat_session_repository import ChatSessionRepository
     from app.repositories.message_repository import MessageRepository
 
     monkeypatch.setattr(MessageRepository, "get_recent_by_session", fake_get_recent)
     monkeypatch.setattr(MessageRepository, "create_user_message", fake_user)
     monkeypatch.setattr(MessageRepository, "create_assistant_message", fake_assistant)
+    monkeypatch.setattr(MessageRepository, "count_by_session", fake_count)
+    monkeypatch.setattr(ChatSessionRepository, "get_by_id", fake_session_get)
 
     return captured
 
