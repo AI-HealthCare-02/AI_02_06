@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
 
@@ -82,4 +83,22 @@ export function useOcrDraft() {
   const ctx = useContext(OcrDraftContext)
   if (!ctx) throw new Error('useOcrDraft must be used within OcrDraftProvider')
   return ctx
+}
+
+/**
+ * "처방전 등록" 진입의 단일 정책 — UI 어디서 호출하든 동일 동작.
+ *
+ * 활성 draft (확인 대기 중인 ready, 처리 중인 pending) 가 있으면 result 화면으로
+ * 보내 사용자가 진행을 마치도록 유도하고, 없을 때만 새 업로드(/ocr) 로 보낸다.
+ *
+ * 이 정책은 main 페이지의 큰 버튼 / medication 페이지의 + 버튼 / Navigation 의
+ * 메뉴 등 모든 진입점에서 동일해야 하므로 hook 으로 한 곳에 둔다.
+ */
+export function useOcrEntryNavigator() {
+  const router = useRouter()
+  const { activeDrafts } = useOcrDraft()
+  return useCallback(() => {
+    const draft = activeDrafts[0]
+    router.push(draft ? `/ocr/result?draft_id=${draft.draft_id}` : '/ocr')
+  }, [activeDrafts, router])
 }

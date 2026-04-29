@@ -8,7 +8,7 @@ import SurveyModal from '@/components/common/SurveyModal'
 import { useProfile } from '@/contexts/ProfileContext'
 import { useMedication } from '@/contexts/MedicationContext'
 import { useChallenge } from '@/contexts/ChallengeContext'
-import { useOcrDraft } from '@/contexts/OcrDraftContext'
+import { useOcrDraft, useOcrEntryNavigator } from '@/contexts/OcrDraftContext'
 
 // 활성 OCR draft 카드 — main 우측하단 floating (챗봇 아이콘 위)
 // 사용자가 X 로 카드 전체를 숨길 수 있고 (새로고침 시 다시 표시),
@@ -111,6 +111,7 @@ function MainPageContent() {
   const { activeMedications: medications } = useMedication()
   const { activeChallenges } = useChallenge()
   const { activeDrafts, removeDraftLocally, refetchDrafts } = useOcrDraft()
+  const goToOcrFlow = useOcrEntryNavigator()
   const userName = selectedProfile?.name?.split('(')[0] || '사용자'
   const isInitialLoad = useRef(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -148,22 +149,22 @@ function MainPageContent() {
   }, [activeChallenges])
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  // main 페이지 진입 시 / 프로필 전환 시 OCR drafts 동기화.
+  // - result 페이지에서 SSE 로 ready 도달한 draft 가 Context activeDrafts 에는
+  //   반영되지 않은 상태로 main 으로 돌아오면, refetch 가 없으면 새로고침해야
+  //   카드가 보였다 → mount/프로필 전환 시 명시적 refetch 로 해결.
+  // - refetchDrafts 자체가 selectedProfileId 의존이라 변경 시 의존성 재생성되어
+  //   effect 가 재호출됨 (안전망: Context effect 가 missed 한 경우도 cover).
+  useEffect(() => {
+    if (selectedProfileId) refetchDrafts()
+  }, [selectedProfileId, refetchDrafts])
+
   // window focus 시 drafts 재동기화 (백그라운드에서 다른 탭에서 등록·완료한 draft 반영)
   useEffect(() => {
     if (!selectedProfileId) return
     window.addEventListener('focus', refetchDrafts)
     return () => window.removeEventListener('focus', refetchDrafts)
   }, [selectedProfileId, refetchDrafts])
-
-  // 처리 중이거나 확인 대기 중인 draft 가 있으면 그쪽으로 이동, 없으면 업로드 페이지로.
-  // 업로드 버튼 + 빈 약 카드의 등록 버튼 모두 동일 분기를 공유한다.
-  const goToOcrFlow = useCallback(() => {
-    if (activeDrafts.length > 0) {
-      router.push(`/ocr/result?draft_id=${activeDrafts[0].draft_id}`)
-    } else {
-      router.push('/ocr')
-    }
-  }, [activeDrafts, router])
 
   // 카드에서 개별 draft 폐기 — 백엔드 DELETE 후 즉시 목록에서 제외.
   // 실패 시에도 사용자 흐름을 차단하지 않고 silently skip (24h 후 자동 정리됨).

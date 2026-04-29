@@ -5,6 +5,7 @@ import { Pill, ChevronRight, Plus, Building2, Pencil, Trash2 } from 'lucide-reac
 import BottomNav from '@/components/layout/BottomNav'
 import { useProfile } from '@/contexts/ProfileContext'
 import { useMedication } from '@/contexts/MedicationContext'
+import { useOcrEntryNavigator } from '@/contexts/OcrDraftContext'
 
 function MedicationListSkeleton() {
   return (
@@ -168,6 +169,7 @@ const TABS = [
 
 export default function MedicationListPage() {
   const router = useRouter()
+  const goToOcrEntry = useOcrEntryNavigator()
   const [activeTab, setActiveTab] = useState('복용중')
   const [selectedDate, setSelectedDate] = useState(null)
   const [deleteTargetItems, setDeleteTargetItems] = useState(null)
@@ -219,7 +221,7 @@ export default function MedicationListPage() {
         <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
           <h1 className="font-bold text-gray-900 text-lg">내 처방 내역</h1>
           <button
-            onClick={() => router.push('/ocr')}
+            onClick={goToOcrEntry}
             className="flex items-center gap-1 text-sm font-bold text-gray-900 cursor-pointer hover:opacity-70 transition-opacity"
           >
             <Plus size={16} />
@@ -381,7 +383,7 @@ export default function MedicationListPage() {
                 </p>
                 {activeTab === '복용중' && !selectedDate && (
                   <button
-                    onClick={() => router.push('/ocr')}
+                    onClick={goToOcrEntry}
                     className="px-6 py-3 bg-gray-900 text-white text-sm font-bold rounded-full cursor-pointer hover:bg-gray-800 transition-colors"
                   >
                     처방전 등록하기
