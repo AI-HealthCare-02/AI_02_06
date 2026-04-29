@@ -130,11 +130,11 @@ class MedicineInfo(models.Model):
     )
     side_effects = fields.JSONField(
         null=True,
-        description="이상반응 PARAGRAPH list (NB_DOC_DATA '4. 이상반응' 카테고리)",
+        description="이상반응 PARAGRAPH list (NB_DOC_DATA 4번 이상반응 카테고리)",
     )
     precautions = fields.JSONField(
         null=True,
-        description="식약처 9 카테고리(이상반응 제외) dict — {'경고': [...], '금기': [...], ...}",
+        description="식약처 9 카테고리(이상반응 제외) dict",
     )
     dosage = fields.TextField(
         null=True,
