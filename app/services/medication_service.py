@@ -5,6 +5,7 @@ including creation, updates, and ownership verification.
 """
 
 import json
+import logging
 import os
 from uuid import UUID
 
@@ -16,6 +17,9 @@ from app.dtos.medication import MedicationBulkDeleteResponse, MedicationCreate, 
 from app.models.medication import Medication
 from app.repositories.medication_repository import MedicationRepository
 from app.repositories.profile_repository import ProfileRepository
+from app.services.recall_notification_service import check_and_alert_on_medication_save
+
+logger = logging.getLogger(__name__)
 
 
 class MedicationService:
@@ -203,7 +207,7 @@ class MedicationService:
         Returns:
             Medication: Created medication.
         """
-        return await self.repository.create(
+        medication = await self.repository.create(
             profile_id=profile_id,
             medicine_name=data.medicine_name,
             dose_per_intake=data.dose_per_intake,
@@ -216,6 +220,16 @@ class MedicationService:
             dispensed_date=data.dispensed_date,
             expiration_date=data.expiration_date,
         )
+
+        # ── F3: 즉시 회수 체크 (Phase 7, PLAN §16.3.2 헬퍼 위임) ────────
+        # 등록 시점에 이미 회수 발표된 약이면 cron 24h 대기 없이 즉시 알림.
+        # 알림 dispatch 실패는 medication 등록을 망치지 않도록 격리.
+        try:
+            await check_and_alert_on_medication_save(medication)
+        except Exception:
+            logger.exception("[F3] recall hook failed for medication=%s", getattr(medication, "id", "?"))
+
+        return medication
 
     async def create_medication_with_owner_check(
         self,
@@ -417,7 +431,7 @@ class MedicationService:
 
         try:
             response = await client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 response_format={"type": "json_object"},
