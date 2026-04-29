@@ -6,7 +6,8 @@ import BottomNav from '@/components/layout/BottomNav'
 import EmptyState from '@/components/common/EmptyState'
 import { showError } from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
-import { useChallenge } from '@/contexts/ChallengeContext'
+import { useChallenge, useChallengeStart } from '@/contexts/ChallengeContext'
+import StartChallengeModal from '@/components/common/StartChallengeModal'
 import { useLifestyleGuide } from '@/contexts/LifestyleGuideContext'
 import toast from 'react-hot-toast'
 
@@ -119,10 +120,11 @@ export default function ChallengePage() {
     completedChallenges,
     unstartedByGuide,
     isLoading: challengesLoading,
-    startChallenge,
     updateChallenge,
     deleteChallenge,
   } = useChallenge()
+  // 챌린지 시작은 어디서 호출하든 StartChallengeModal 확인 후 실행 (단일 정책)
+  const { startTarget, isStarting, requestStart, cancelStart, confirmStart } = useChallengeStart()
   const { latestGuide, isLoading: guidesLoading } = useLifestyleGuide()
   const isLoading = challengesLoading || guidesLoading
 
@@ -155,18 +157,17 @@ export default function ChallengePage() {
     icon: getIconByTitle(c.title),
   }))
 
-  const handleStartGuideChallenge = async (challenge) => {
-    if (processingIds.includes(challenge.id)) return
-    setProcessingIds(prev => [...prev, challenge.id])
+  // 모달 onConfirm — useChallengeStart 의 confirmStart 가 PATCH /start 호출.
+  // 성공 시 Context 가 응답으로 list 자동 갱신 (active 로 이동, recommended 에서 자동 제거).
+  const handleConfirmStart = async (difficulty, targetDays) => {
     try {
-      // Context 가 응답 받자마자 list 자동 갱신 (active 로 이동, recommended 에서 자동 제거)
-      await startChallenge(challenge.id)
-      toast.success('챌린지가 시작되었습니다!')
-      setActiveTab('진행중')
+      const updated = await confirmStart(difficulty, targetDays)
+      if (updated) {
+        toast.success('챌린지가 시작되었습니다!')
+        setActiveTab('진행중')
+      }
     } catch (err) {
       showError(err.parsed?.message || '챌린지 시작에 실패했습니다.')
-    } finally {
-      setProcessingIds(prev => prev.filter(id => id !== challenge.id))
     }
   }
 
@@ -275,7 +276,6 @@ export default function ChallengePage() {
               />
             ) : (
               recommended.map((item) => {
-                const isProcessing = processingIds.includes(item.id)
                 const categoryMeta = item.category ? CATEGORY_META[item.category] : null
                 return (
                   <div key={item.id} className="bg-white rounded-2xl shadow-sm p-5 border border-gray-50 hover:border-blue-100 transition-all">
@@ -298,14 +298,14 @@ export default function ChallengePage() {
                         </div>
                       </div>
                       <button
-                        onClick={() => handleStartGuideChallenge(item)}
-                        disabled={isProcessing}
+                        onClick={() => requestStart(item)}
+                        disabled={isStarting}
                         className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors shrink-0
-                          ${isProcessing
+                          ${isStarting
                             ? 'bg-blue-300 text-white cursor-wait'
                             : 'bg-blue-500 text-white hover:bg-blue-600 cursor-pointer'}`}
                       >
-                        {isProcessing ? '처리중...' : '시작하기'}
+                        {isStarting && startTarget?.id === item.id ? '처리중...' : '시작하기'}
                       </button>
                     </div>
                   </div>
@@ -437,6 +437,16 @@ export default function ChallengePage() {
         )}
       </div>
       <BottomNav />
+
+      {/* 챌린지 시작 확인 모달 — useChallengeStart 흐름 (모든 진입점 공통) */}
+      {startTarget && (
+        <StartChallengeModal
+          challenge={startTarget}
+          onConfirm={handleConfirmStart}
+          onClose={cancelStart}
+          isLoading={isStarting}
+        />
+      )}
     </main>
   )
 }

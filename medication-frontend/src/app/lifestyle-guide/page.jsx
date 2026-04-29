@@ -12,7 +12,7 @@ import EmptyState from '@/components/common/EmptyState'
 import api, { showError } from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
 import { useLifestyleGuide } from '@/contexts/LifestyleGuideContext'
-import { useChallenge } from '@/contexts/ChallengeContext'
+import { useChallenge, useChallengeStart, useChallengeCheck } from '@/contexts/ChallengeContext'
 import StartChallengeModal from '@/components/common/StartChallengeModal'
 import toast from 'react-hot-toast'
 
@@ -191,8 +191,17 @@ function SymptomLogForm({ profileId, onSaved }) {
 //   1) COMPLETED → 초록 "완료" 뱃지 (버튼 없음)
 //   2) is_active=false → "시작하기" 버튼 (과거 가이드 열람 시 비활성화)
 //   3) is_active=true → 오늘 체크 여부에 따라 "오늘 완료 체크" 버튼 or "오늘 완료!" 텍스트
-function ChallengeBanner({ challenge, isViewingHistory, onStart, onCheck, isProcessing, onGoToChallenge }) {
+function ChallengeBanner({ challenge, isViewingHistory }) {
+  const router = useRouter()
+  // 시작/체크 정책은 hook 으로 ─ 어디서 호출하든 동일 동작.
+  const { isStarting, startTarget, requestStart } = useChallengeStart()
+  const { checkingId, checkToday } = useChallengeCheck()
+
   if (!challenge) return null
+
+  const isStartingThis = isStarting && startTarget?.id === challenge.id
+  const isChecking = checkingId === challenge.id
+  const isProcessing = isStartingThis || isChecking
 
   const today = new Date().toISOString().split('T')[0]
   // completed_dates 배열에 오늘 날짜가 있는지 확인 (string/Date 양쪽 타입 대응)
@@ -234,7 +243,7 @@ function ChallengeBanner({ challenge, isViewingHistory, onStart, onCheck, isProc
         ) : !challenge.is_active ? (
           // 상태 2: 미시작 → 시작하기 버튼 (PATCH {is_active: true})
           <button
-            onClick={() => onStart(challenge)}
+            onClick={() => requestStart(challenge)}
             disabled={isProcessing}
             className={`ml-3 px-4 py-2 rounded-xl text-xs font-bold shrink-0 transition-colors cursor-pointer ${
               isProcessing ? 'bg-gray-100 text-gray-400 cursor-wait' : 'bg-gray-900 text-white hover:bg-gray-700'
@@ -249,7 +258,7 @@ function ChallengeBanner({ challenge, isViewingHistory, onStart, onCheck, isProc
               오늘 완료!
             </span>
             <button
-              onClick={onGoToChallenge}
+              onClick={() => router.push('/challenge')}
               className="text-xs font-bold text-gray-400 hover:text-gray-700 px-2 py-2 rounded-xl hover:bg-gray-100 transition-colors cursor-pointer"
               title="챌린지 페이지에서 보기"
             >
@@ -259,7 +268,7 @@ function ChallengeBanner({ challenge, isViewingHistory, onStart, onCheck, isProc
         ) : (
           // 상태 3-a: 진행중, 오늘 미체크 → 완료 체크 버튼 (PATCH {completed_dates, challenge_status})
           <button
-            onClick={() => onCheck(challenge)}
+            onClick={() => checkToday(challenge)}
             disabled={isProcessing}
             className={`ml-3 px-3 py-2 rounded-xl text-xs font-bold shrink-0 transition-colors cursor-pointer ${
               isProcessing ? 'bg-gray-100 text-gray-400 cursor-wait' : 'bg-blue-500 text-white hover:bg-blue-600'
@@ -284,15 +293,15 @@ export default function LifestyleGuidePage() {
     generateGuide,
     deleteGuide,
   } = useLifestyleGuide()
-  const { challengesByGuide, startChallenge: startChallengeWithMeta, updateChallenge } = useChallenge()
+  const { challengesByGuide } = useChallenge()
+  // 챌린지 시작/체크 모두 hook 으로 단일 정책. 페이지는 derived 만 책임.
+  const { startTarget, isStarting, requestStart, cancelStart, confirmStart } = useChallengeStart()
+  const { checkingId, checkToday } = useChallengeCheck()
 
   const [isGenerating, setIsGenerating] = useState(false)
   const [selectedGuide, setSelectedGuide] = useState(null)   // 현재 날짜 칩으로 선택된 가이드
   const [activeTab, setActiveTab] = useState('interaction')  // 현재 선택된 탭 키
 
-  const [processingChallengeId, setProcessingChallengeId] = useState(null) // 현재 처리 중인 챌린지 ID
-  const [startTarget, setStartTarget] = useState(null)   // 모달에 전달할 챌린지 객체
-  const [isStarting, setIsStarting] = useState(false)    // 모달 확인 버튼 처리 중 여부
 
   const chipScrollRef = useRef(null)
   const isLoading = guidesLoading
@@ -368,23 +377,13 @@ export default function LifestyleGuidePage() {
     }
   }
 
-  // ── 챌린지 시작 ──
-  // 시작하기 버튼 클릭 → 모달 표시 (즉시 API 호출 X)
-  const handleChallengeStart = (challenge) => {
-    setStartTarget(challenge)
-  }
-
-  // ── 챌린지 시작 확인 (모달 onConfirm) ──
-  // PATCH /api/v1/challenges/{id}/start { difficulty, target_days }
-  // /start 엔드포인트: is_active=True + started_at 타임스탬프 기록 + 커스텀값 저장
+  // ── 챌린지 시작 (모달 onConfirm) ──
+  // useChallengeStart 의 confirmStart 가 PATCH /api/v1/challenges/{id}/start 호출.
+  // ChallengeContext 가 응답으로 store in-place 갱신 → guideChallenges derived 자동 반영.
   const handleConfirmStart = async (difficulty, targetDays) => {
-    if (!startTarget || isStarting) return
-    setIsStarting(true)
-    setProcessingChallengeId(startTarget.id)
     try {
-      // ChallengeContext 가 응답 받자마자 store in-place 갱신 → guideChallenges derived 자동 반영
-      await startChallengeWithMeta(startTarget.id, { difficulty, target_days: targetDays })
-      setStartTarget(null)
+      const updated = await confirmStart(difficulty, targetDays)
+      if (!updated) return
       toast(
         (t) => (
           <div className="flex items-center gap-3">
@@ -401,41 +400,10 @@ export default function LifestyleGuidePage() {
       )
     } catch {
       showError('챌린지 시작에 실패했습니다.')
-    } finally {
-      setIsStarting(false)
-      setProcessingChallengeId(null)
     }
   }
 
-  // ── 챌린지 오늘 완료 체크 ──
-  // PATCH /api/v1/challenges/{id} { completed_dates, challenge_status }
-  // 목표 달성 일수(target_days) 도달 시 자동으로 COMPLETED 상태로 전환
-  const handleChallengeCheck = async (challenge) => {
-    if (processingChallengeId) return
-    const today = new Date().toISOString().split('T')[0]
-    const alreadyChecked = challenge.completed_dates?.some(
-      (d) => (typeof d === 'string' ? d : d.toISOString?.().split('T')[0]) === today
-    )
-    if (alreadyChecked) {
-      showError('오늘은 이미 체크했습니다!')
-      return
-    }
-
-    setProcessingChallengeId(challenge.id)
-    try {
-      const newDates = [...(challenge.completed_dates || []), today]
-      const isCompleted = newDates.length >= challenge.target_days
-      const updated = await updateChallenge(challenge.id, {
-        completed_dates: newDates,
-        challenge_status: isCompleted ? 'COMPLETED' : 'IN_PROGRESS',
-      })
-      if (updated.challenge_status === 'COMPLETED') toast.success('챌린지를 완료했습니다! 수고하셨어요.')
-    } catch {
-      showError('체크에 실패했습니다.')
-    } finally {
-      setProcessingChallengeId(null)
-    }
-  }
+  // 체크 정책은 useChallengeCheck hook 으로 이전 — handleChallengeCheck 제거됨.
 
   // ── 로딩 스켈레톤 ──
   if (isLoading) {
@@ -638,7 +606,8 @@ export default function LifestyleGuidePage() {
                       const checkedToday = c.completed_dates?.some(
                         (d) => (typeof d === 'string' ? d : d.toISOString?.().split('T')[0]) === today
                       )
-                      const isProcessing = processingChallengeId === c.id
+                      const isProcessing =
+                        (isStarting && startTarget?.id === c.id) || checkingId === c.id
 
                       return (
                         <div
@@ -664,7 +633,7 @@ export default function LifestyleGuidePage() {
                               <span className="bg-green-50 text-green-500 text-[10px] font-bold px-2 py-1 rounded-full">완료</span>
                             ) : !c.is_active ? (
                               <button
-                                onClick={() => handleChallengeStart(c)}
+                                onClick={() => requestStart(c)}
                                 disabled={isViewingHistory || isProcessing}
                                 className={`text-[10px] font-bold px-3 py-1.5 rounded-full transition-colors ${
                                   isViewingHistory
@@ -680,7 +649,7 @@ export default function LifestyleGuidePage() {
                               <span className="bg-green-50 text-green-500 text-[10px] font-bold px-2 py-1 rounded-full">오늘 완료</span>
                             ) : (
                               <button
-                                onClick={() => handleChallengeCheck(c)}
+                                onClick={() => checkToday(c)}
                                 disabled={isViewingHistory || isProcessing}
                                 className={`text-[10px] font-bold px-3 py-1.5 rounded-full transition-colors ${
                                   isViewingHistory
@@ -705,15 +674,11 @@ export default function LifestyleGuidePage() {
         )}
       </div>
 
-      {/* ── 하단 고정 챌린지 배너 ── */}
+      {/* ── 하단 고정 챌린지 배너 ── (시작/체크/이동 정책은 Banner 안 hook 이 책임) */}
       {!isLoadingChallenges && (
         <ChallengeBanner
           challenge={activeBannerChallenge}
           isViewingHistory={isViewingHistory}
-          onStart={handleChallengeStart}
-          onCheck={handleChallengeCheck}
-          isProcessing={processingChallengeId === activeBannerChallenge?.id}
-          onGoToChallenge={() => router.push('/challenge')}
         />
       )}
 
@@ -724,7 +689,7 @@ export default function LifestyleGuidePage() {
         <StartChallengeModal
           challenge={startTarget}
           onConfirm={handleConfirmStart}
-          onClose={() => setStartTarget(null)}
+          onClose={cancelStart}
           isLoading={isStarting}
         />
       )}
