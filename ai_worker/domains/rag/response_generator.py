@@ -15,7 +15,7 @@ from app.dtos.rag import ChatCompletion, TokenUsage
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gpt-4o-mini"
+_MODEL = "gpt-4o"
 _TEMPERATURE = 0.7
 _MAX_TOKENS = 800
 _FALLBACK_ANSWER = "현재 AI 응답을 생성할 수 있는 설정이 준비되지 않았어요."

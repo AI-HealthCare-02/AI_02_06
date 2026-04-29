@@ -33,7 +33,7 @@ flowchart TD
     User[사용자] -->|1. 질문| FastAPI[FastAPI<br/>HTTP 라우터 + DB 검색]
     FastAPI -->|2. 쿼리 재작성 요청| Redis[(Redis Queue<br/>ai)]
     Redis --> Worker[AI-Worker<br/>임베딩 + LLM 호출]
-    Worker -->|3a. OpenAI 호출| OpenAI[OpenAI<br/>gpt-4o-mini]
+    Worker -->|3a. OpenAI 호출| OpenAI[OpenAI<br/>gpt-4o]
     OpenAI --> Worker
     Worker -->|3b. 재작성 결과| Redis
     Redis -->|4. 결과 받아옴| FastAPI
@@ -322,14 +322,14 @@ flowchart TD
     Q[이번 턴 질의<br/>'그 약 부작용은?']
     Hist[이전 메시지 10턴<br/>DB 에서 로드]
 
-    Q --> Rewrite[쿼리 재작성 LLM<br/>gpt-4o-mini]
+    Q --> Rewrite[쿼리 재작성 LLM<br/>gpt-4o]
     Hist --> Rewrite
     Rewrite --> R[self-contained 쿼리<br/>'활명수 부작용을 알려주세요']
 
     R --> Embed[임베딩 + pgvector 검색]
     Embed --> Ctx[검색된 청크 컨텍스트]
 
-    Ctx --> Gen[답변 생성 LLM<br/>gpt-4o-mini]
+    Ctx --> Gen[답변 생성 LLM<br/>gpt-4o]
     Hist --> Gen
     Q --> Gen
     Gen --> A[최종 답변]

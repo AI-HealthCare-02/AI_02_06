@@ -27,7 +27,7 @@ from app.dtos.rag import RewriteResult, RewriteStatus, TokenUsage
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gpt-4o-mini"
+_MODEL = "gpt-4o"
 _TEMPERATURE = 0.0
 _MAX_TOKENS = 200
 _UNRESOLVABLE_PATTERN = re.compile(r"^\W*unresolvable\W*$", re.IGNORECASE)

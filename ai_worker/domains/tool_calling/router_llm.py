@@ -19,7 +19,7 @@ from app.services.tools.schemas import TOOL_SCHEMAS
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gpt-4o-mini"
+_MODEL = "gpt-4o"
 
 
 async def route_with_tools(messages: list[dict[str, Any]]) -> dict[str, Any]:

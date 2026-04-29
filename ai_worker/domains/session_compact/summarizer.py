@@ -26,7 +26,7 @@ from app.dtos.rag import SummaryResult, SummaryStatus, TokenUsage
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gpt-4o-mini"
+_MODEL = "gpt-4o"
 _TEMPERATURE = 0.2
 _MAX_TOKENS = 400
 _MIN_MESSAGES = 2
