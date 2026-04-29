@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 
-from app.dtos.drug_info import DrugInfoResponse
+from app.dtos.drug_info import DrugInfoResponse, PrecautionSection
 from app.dtos.medication import MedicationBulkDeleteResponse, MedicationCreate, MedicationUpdate, PrescriptionDateItem
 from app.models.medication import Medication
 from app.repositories.medication_repository import MedicationRepository
@@ -396,23 +396,22 @@ class MedicationService:
             info = candidates[0] if candidates else None
 
         if info is None:
-            return DrugInfoResponse(
-                medicine_name=medicine_name,
-                warnings=[],
-                side_effects=[],
-                interactions=[],
-            )
+            return DrugInfoResponse(medicine_name=medicine_name)
 
         return DrugInfoResponse(
             medicine_name=info.medicine_name,
-            warnings=_split_lines(info.precautions),
-            side_effects=_split_lines(info.side_effects),
+            warnings=_to_precaution_sections(info.precautions),
+            side_effects=info.side_effects or [],
+            dosage=info.dosage or "",
             interactions=[],
         )
 
 
-def _split_lines(text: str | None) -> list[str]:
-    """TEXT 컬럼을 줄 단위 list 로 분할 — 빈 줄/공백만 있는 줄은 제외."""
-    if not text:
+def _to_precaution_sections(precautions: dict | None) -> list[PrecautionSection]:
+    """JSONB precautions dict → list[PrecautionSection] (카테고리 순서 보존).
+
+    None / 빈 dict / 비-dict 입력 → 빈 list.
+    """
+    if not precautions or not isinstance(precautions, dict):
         return []
-    return [line.strip() for line in text.splitlines() if line.strip()]
+    return [PrecautionSection(category=cat, items=list(items or [])) for cat, items in precautions.items() if items]
