@@ -35,14 +35,22 @@ _SYSTEM_TEMPLATE = """\
   "interaction": "<약물 상호작용 주의사항>",
   "recommended_challenges": [
     {{
-      "category": "<카테고리>",
+      "category": "<diet|sleep|exercise|symptom|interaction 중 하나>",
       "title": "<챌린지 제목>",
       "description": "<챌린지 설명>",
-      "target_days": <목표 일수>,
+      "target_days": <목표 일수 정수>,
       "difficulty": "<쉬움|보통|어려움>"
     }}
   ]
 }}
+
+## 챌린지 생성 규칙
+- 정확히 5개의 챌린지를 생성하세요.
+- 5개의 카테고리(diet, sleep, exercise, symptom, interaction)에서 골고루 선정하세요.
+- 난이도는 쉬움 2개, 보통 2개, 어려움 1개를 권장합니다.
+- 목표 일수는 쉬움 7일, 보통 14일, 어려움 21일을 기준으로 하세요.
+- 챌린지 제목은 구체적이고 실천 가능한 행동으로 작성하세요. (최대 30자)
+
 """
 
 

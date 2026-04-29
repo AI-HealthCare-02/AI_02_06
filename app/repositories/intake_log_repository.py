@@ -4,10 +4,12 @@ This module provides data access layer for the intake_logs table,
 handling medication intake tracking operations.
 """
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID, uuid4
 
 from app.models.intake_log import IntakeLog
+
+_KST = timezone(timedelta(hours=9))
 
 
 class IntakeLogRepository:
@@ -92,6 +94,9 @@ class IntakeLogRepository:
             intake_status="SCHEDULED",
         ).all()
 
+    # ── 복약 로그 생성 ────────────────────────────────────────────────────
+    # 흐름: naive time → KST aware 변환 → IntakeLog INSERT (TIMETZ 컬럼 호환)
+    # asyncpg 0.31.0+: TIMETZ 컬럼에 naive time 삽입 시 에러 발생
     async def create(
         self,
         medication_id: UUID,
@@ -105,11 +110,14 @@ class IntakeLogRepository:
             medication_id: Medication UUID.
             profile_id: Profile UUID.
             scheduled_date: Scheduled intake date.
-            scheduled_time: Scheduled intake time.
+            scheduled_time: Scheduled intake time (naive or aware; converted to KST if naive).
 
         Returns:
             IntakeLog: Created intake log.
         """
+        if scheduled_time.tzinfo is None:
+            scheduled_time = scheduled_time.replace(tzinfo=_KST)
+
         return await IntakeLog.create(
             id=uuid4(),
             medication_id=medication_id,

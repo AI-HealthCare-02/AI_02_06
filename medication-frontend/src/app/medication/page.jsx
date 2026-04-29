@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Pill, ChevronRight, Plus, Building2, Pencil, Trash2 } from 'lucide-react'
+import { Pill, ChevronRight, Plus, Building2, Pencil, Trash2, CheckCircle2 } from 'lucide-react'
 import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
@@ -11,13 +11,13 @@ function MedicationListSkeleton() {
     <div className="min-h-screen bg-gray-50 pb-24 animate-pulse">
       <div className="h-14 bg-white border-b border-gray-100" />
       <div className="h-10 bg-white border-b border-gray-100" />
-      <div className="max-w-5xl mx-auto flex">
-        <div className="hidden md:block w-44 shrink-0 border-r border-gray-100 bg-white p-3 space-y-1.5">
+      <div className="max-w-4xl mx-auto flex">
+        <div className="hidden md:block w-36 shrink-0 border-r border-gray-100 bg-white p-3 space-y-1.5">
           {[1, 2, 3, 4].map((i) => (
             <div key={i} className="h-7 bg-gray-100 rounded-lg" />
           ))}
         </div>
-        <div className="flex-1 px-6 py-5 space-y-4">
+        <div className="flex-1 px-8 py-5 space-y-4">
           {[1, 2].map((i) => (
             <div key={i}>
               <div className="h-3 w-24 bg-gray-200 rounded mb-2" />
@@ -30,34 +30,20 @@ function MedicationListSkeleton() {
   )
 }
 
-/**
- * 약품 목록을 처방전 단위로 그룹핑
- * - 기준 키: dispensed_date(조제일) 우선, 없으면 start_date(복용 시작일) 사용
- * - 같은 날짜 + 같은 진료과(department)를 하나의 처방전 그룹으로 묶음
- * - 최신 처방 순(내림차순)으로 정렬하여 반환
- */
 function groupByPrescription(medications) {
   const groups = {}
   for (const med of medications) {
-    // 조제일 없을 경우 복용 시작일로 fallback, 둘 다 없으면 '날짜 미상'
     const dateKey = med.dispensed_date || med.start_date || '날짜 미상'
     const deptKey = med.department || '기타'
-    // dateKey + deptKey 조합으로 고유 처방전 식별 (같은 날 같은 과 = 동일 처방)
     const key = `${dateKey}__${deptKey}`
     if (!groups[key]) {
       groups[key] = { dateKey, deptKey, items: [] }
     }
     groups[key].items.push(med)
   }
-  // 최신 처방이 위로 오도록 내림차순 정렬
   return Object.values(groups).sort((a, b) => (a.dateKey < b.dateKey ? 1 : -1))
 }
 
-/**
- * 전체 그룹 목록에서 중복 없는 처방 날짜 목록 추출
- * - Set으로 중복 제거 후 allGroups 순서(내림차순) 유지
- * - 좌측 사이드바 날짜 네비게이션 및 모바일 날짜 필터 칩에 사용됨
- */
 function extractUniqueDates(allGroups) {
   const seen = new Set()
   const result = []
@@ -82,22 +68,38 @@ function formatDateNav(dateStr) {
   return `${parseInt(month)}월 ${parseInt(day)}일`
 }
 
-function formatYear(dateStr) {
-  if (!dateStr || dateStr === '날짜 미상') return ''
-  return dateStr.split('-')[0] + '년'
+
+// start_date와 total_intake_days로 복약 진행도 계산 (마이그레이션 불필요)
+function getProgressInfo(items) {
+  const rep = items.find(m => m.is_active && m.start_date && m.total_intake_days) || null
+  if (!rep) return null
+
+  const today = new Date()
+  const startDate = new Date(rep.start_date)
+  const daysPassed = Math.floor((today - startDate) / (1000 * 60 * 60 * 24)) + 1
+  const currentDay = Math.min(Math.max(daysPassed, 1), rep.total_intake_days)
+  const progress = Math.round((currentDay / rep.total_intake_days) * 100)
+
+  return { currentDay, totalDays: rep.total_intake_days, progress }
 }
 
-function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup }) {
+function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup, onDeleteMed, completedMedIds, onCompleteToday, isCompleting }) {
   const { deptKey, items } = group
   const startDates = items.map(m => m.start_date).filter(Boolean).sort()
   const endDates = items.map(m => m.end_date).filter(Boolean).sort()
   const rangeStart = startDates[0]
   const rangeEnd = endDates[endDates.length - 1]
   const hasActive = items.some(m => m.is_active)
+  // 처방전 복약 진행도 (start_date 기준으로 계산)
+  const progressInfo = hasActive ? getProgressInfo(items) : null
+
+  // 활성 약 중 오늘 이미 복약 완료된 항목 수 계산
+  const activeMeds = items.filter(m => m.is_active)
+  const isCompletedToday = activeMeds.length > 0 && activeMeds.every(m => completedMedIds.has(m.id))
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden hover:border-gray-200 hover:shadow-sm transition-all">
-      <div className="px-5 pt-4 pb-3.5 border-b border-gray-50">
+      <div className="px-6 pt-4 pb-3.5 border-b border-gray-50">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 bg-gray-100 rounded-lg flex items-center justify-center shrink-0">
@@ -107,6 +109,20 @@ function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup }) {
             <span className="text-xs text-gray-400">{items.length}종</span>
           </div>
           <div className="flex items-center gap-1.5">
+            {/* 복용중 처방전에만 오늘 복약 완료 버튼 표시 */}
+            {hasActive && (
+              <button
+                onClick={() => onCompleteToday(items)}
+                disabled={isCompletedToday || isCompleting}
+                className={`flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer
+                  ${isCompletedToday
+                    ? 'bg-green-50 text-green-600 cursor-default'
+                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed'}`}
+              >
+                <CheckCircle2 size={11} />
+                {isCompletedToday ? '오늘 완료!' : isCompleting ? '처리 중...' : '오늘 복약 완료'}
+              </button>
+            )}
             <button
               onClick={() => onEditGroup(items)}
               className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
@@ -121,7 +137,7 @@ function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup }) {
               <Trash2 size={10} />
               삭제
             </button>
-            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${hasActive ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-700">
               {hasActive ? '복용중' : '완료'}
             </span>
           </div>
@@ -131,30 +147,58 @@ function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup }) {
             {formatDate(rangeStart)}{rangeEnd ? ` ~ ${formatDate(rangeEnd)}` : ''}
           </p>
         )}
+        {/* 복용 진행도 — start_date 기준으로 N일차 / M일 계산 */}
+        {progressInfo && (
+          <div className="mt-2 ml-8">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-bold text-gray-500">
+                {progressInfo.currentDay}일차 / {progressInfo.totalDays}일
+              </span>
+              <span className="text-[11px] font-bold text-gray-400">{progressInfo.progress}%</span>
+            </div>
+            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gray-700 rounded-full transition-all duration-500"
+                style={{ width: `${progressInfo.progress}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
       <div className="divide-y divide-gray-50">
         {items.map((med) => (
-          <button
-            key={med.id}
-            onClick={() => onMedClick(med.id)}
-            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-gray-50 transition-colors cursor-pointer text-left"
-          >
-            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${med.is_active ? 'bg-green-400' : 'bg-gray-300'}`} />
-            <div className="flex-1 min-w-0">
-              <span className={`text-sm font-bold truncate block ${med.is_active ? 'text-gray-900' : 'text-gray-400'}`}>
-                {med.medicine_name}
-              </span>
-              {med.dose_per_intake && (
-                <span className="text-xs text-gray-400">{med.dose_per_intake}</span>
+          <div key={med.id} className="w-full flex items-center px-5 py-3 hover:bg-gray-50 transition-colors group">
+            <div
+              className="flex-1 flex items-center gap-3 cursor-pointer min-w-0"
+              onClick={() => onMedClick(med.id)}
+            >
+              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${med.is_active ? 'bg-green-400' : 'bg-gray-300'}`} />
+              <div className="flex-1 min-w-0">
+                <span className={`text-sm font-bold truncate block ${med.is_active ? 'text-gray-900' : 'text-gray-400'}`}>
+                  {med.medicine_name}
+                </span>
+                {med.dose_per_intake && (
+                  <span className="text-xs text-gray-400">{med.dose_per_intake}</span>
+                )}
+              </div>
+              {med.category && (
+                <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
+                  {med.category}
+                </span>
               )}
             </div>
-            {med.category && (
-              <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
-                {med.category}
-              </span>
-            )}
-            <ChevronRight size={13} className="text-gray-300 shrink-0" />
-          </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteMed([med]);
+              }}
+              className="ml-3 p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
+              aria-label="삭제"
+            >
+              <Trash2 size={16} />
+            </button>
+            <ChevronRight size={13} className="text-gray-300 shrink-0 ml-1" />
+          </div>
         ))}
       </div>
     </div>
@@ -174,12 +218,25 @@ export default function MedicationListPage() {
   const [selectedDate, setSelectedDate] = useState(null)
   const [deleteTargetItems, setDeleteTargetItems] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  // 오늘 복약 기록 상태 (medication_id → TAKEN 여부 확인용)
+  const [todayLogs, setTodayLogs] = useState([])
+  const [isCompleting, setIsCompleting] = useState(false)
 
-  // ProfileContext에서 현재 선택된 프로필 ID를 가져옴 (feat/profile-switcher 머지 이후)
   const { selectedProfileId: profileId } = useProfile()
   const isInitialLoad = useRef(true)
-  // isRefreshing: 탭/날짜 전환 시 전체 스켈레톤 대신 투명도 처리로 UX 개선
   const [isRefreshing, setIsRefreshing] = useState(false)
+
+  // 오늘 날짜 복약 기록 조회 (처방전별 완료 여부 확인용)
+  const fetchTodayLogs = async () => {
+    if (!profileId) return
+    try {
+      const today = new Date().toISOString().split('T')[0]
+      const res = await api.get(`/api/v1/intake-logs?profile_id=${profileId}&target_date=${today}`)
+      setTodayLogs(res.data || [])
+    } catch (err) {
+      console.error(err)
+    }
+  }
 
   const fetchMedications = async (isInitial = false) => {
     if (isInitial || isInitialLoad.current) {
@@ -203,10 +260,49 @@ export default function MedicationListPage() {
   useEffect(() => {
     if (!profileId) return
     isInitialLoad.current = true
+    // 약 목록과 오늘 복약 기록을 함께 조회
     fetchMedications(true)
+    fetchTodayLogs()
     setSelectedDate(null)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, profileId])
+
+  // 처방전 그룹 전체 오늘 복약 완료 처리
+  const handleCompleteToday = async (items) => {
+    if (isCompleting) return
+    setIsCompleting(true)
+    try {
+      const today = new Date().toISOString().split('T')[0]
+      const nowTime = new Date().toTimeString().split(' ')[0] // HH:MM:SS 형식
+
+      // 오늘 이미 TAKEN 상태인 medication_id 집합
+      const takenMedIds = new Set(
+        todayLogs.filter(l => l.intake_status === 'TAKEN').map(l => l.medication_id)
+      )
+
+      // 활성 약 중 아직 완료되지 않은 것만 처리
+      const pending = items.filter(m => m.is_active && !takenMedIds.has(m.id))
+
+      for (const med of pending) {
+        // 복약 기록 생성 후 즉시 완료 처리
+        const logRes = await api.post('/api/v1/intake-logs', {
+          medication_id: med.id,
+          profile_id: profileId,
+          scheduled_date: today,
+          scheduled_time: nowTime,
+        })
+        await api.post(`/api/v1/intake-logs/${logRes.data.id}/take`)
+      }
+
+      // 오늘 복약 기록 갱신
+      await fetchTodayLogs()
+    } catch (err) {
+      console.error(err)
+      alert('복약 완료 처리 중 오류가 발생했습니다.')
+    } finally {
+      setIsCompleting(false)
+    }
+  }
 
   const handleDeleteGroup = (items) => {
     setDeleteTargetItems(items)
@@ -216,10 +312,8 @@ export default function MedicationListPage() {
     if (!deleteTargetItems || isDeleting) return
     setIsDeleting(true)
     try {
-      // 그룹 내 모든 약품을 병렬 삭제 (순차 삭제 대비 응답 속도 개선)
       await Promise.all(deleteTargetItems.map(med => api.delete(`/api/v1/medications/${med.id}`)))
       setDeleteTargetItems(null)
-      // 삭제 완료 후 목록 새로고침으로 서버 상태와 동기화
       await fetchMedications()
     } catch (err) {
       console.error(err)
@@ -231,10 +325,13 @@ export default function MedicationListPage() {
 
   if (isLoading) return <MedicationListSkeleton />
 
+  // 오늘 TAKEN 상태인 medication_id 집합 (PrescriptionGroup 완료 여부 판단용)
+  const completedMedIds = new Set(
+    todayLogs.filter(l => l.intake_status === 'TAKEN').map(l => l.medication_id)
+  )
+
   const allGroups = groupByPrescription(medications)
   const sidebarDates = extractUniqueDates(allGroups)
-  // selectedDate: 특정 날짜 선택 시 해당 그룹만 표시 (API 재호출 없이 클라이언트 필터)
-  // null이면 전체 그룹 표시
   const groups = selectedDate
     ? allGroups.filter(g => g.dateKey === selectedDate)
     : allGroups
@@ -245,11 +342,18 @@ export default function MedicationListPage() {
 
   return (
     <main className={`min-h-screen bg-gray-50 pb-24 transition-opacity duration-200 ${isRefreshing ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
-      <div className="max-w-5xl mx-auto">
 
-        {/* 헤더 */}
-        <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-          <h1 className="font-bold text-gray-900 text-lg">내 처방 내역</h1>
+      {/* 헤더 — 전체 너비 */}
+      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+        <h1 className="font-bold text-gray-900 text-lg">복약 가이드</h1>
+        <div className="flex items-center gap-2">
+          {/* 생활습관 가이드 작은 버튼 (챌린지 시작하기 스타일) */}
+          <button
+            onClick={() => router.push('/lifestyle-guide')}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-gray-50 text-gray-600 hover:bg-gray-100 cursor-pointer transition-colors"
+          >
+            생활습관 가이드 →
+          </button>
           <button
             onClick={() => router.push('/ocr')}
             className="flex items-center gap-1 text-sm font-bold text-gray-900 cursor-pointer hover:opacity-70 transition-opacity"
@@ -258,193 +362,110 @@ export default function MedicationListPage() {
             추가
           </button>
         </div>
+      </div>
 
-      <div className={`flex ${sidebarDates.length > 0 ? '' : 'block'}`}>
+      <div className="max-w-5xl mx-auto">
 
-        {/* 좌측 사이드바 (데스크톱) */}
+        {/* 탭 — 전체 너비 */}
+        <div className="bg-white border-b border-gray-100 px-6 flex gap-6">
+          {TABS.map(({ label }) => (
+            <button
+              key={label}
+              onClick={() => setActiveTab(label)}
+              className={`py-3 text-sm font-bold cursor-pointer transition-colors border-b-2 ${
+                activeTab === label ? 'text-gray-900 border-gray-900' : 'text-gray-400 border-transparent'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* 날짜 필터 — 사이드바 대신 상단 가로 스크롤 */}
         {sidebarDates.length > 0 && (
-          <aside className="hidden md:flex flex-col w-44 shrink-0 bg-white border-r border-gray-100 sticky top-0 self-start max-h-screen overflow-y-auto">
-
-            {/* 탭 (사이드바 상단) */}
-            <div className="flex border-b border-gray-100">
-              {TABS.map(({ label }) => (
-                <button
-                  key={label}
-                  onClick={() => setActiveTab(label)}
-                  className={`flex-1 py-2.5 text-xs font-bold transition-colors ${
-                    activeTab === label
-                      ? 'text-gray-900 border-b-2 border-gray-900 -mb-px'
-                      : 'text-gray-400 hover:text-gray-600'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {/* 날짜 네비게이션 */}
-            <nav className="flex-1 py-2 overflow-y-auto">
-              {/* 전체 보기 */}
+          <div className="bg-white border-b border-gray-100 px-4 py-2 overflow-x-auto flex gap-1.5">
+            <button
+              onClick={() => setSelectedDate(null)}
+              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${
+                selectedDate === null
+                  ? 'bg-gray-900 text-white'
+                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+              }`}
+            >
+              전체
+            </button>
+            {sidebarDates.map((dateKey) => (
               <button
-                onClick={() => setSelectedDate(null)}
-                className={`w-full flex items-center justify-between pl-4 pr-3 py-2 text-left transition-colors ${
-                  selectedDate === null
+                key={dateKey}
+                onClick={() => setSelectedDate(dateKey)}
+                className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${
+                  selectedDate === dateKey
                     ? 'bg-gray-900 text-white'
-                    : 'text-gray-500 hover:bg-gray-50'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                 }`}
               >
-                <span className="text-xs font-bold">전체 보기</span>
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                  selectedDate === null ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-400'
-                }`}>
-                  {allGroups.length}
-                </span>
-              </button>
-
-              {/* 연도별 구분선 + 날짜 목록 렌더링
-                  - IIFE(() => {...})() 패턴: map 내부에서 이전 연도(lastYear)를 추적하기 위해 사용
-                  - React 조건부 렌더링에서는 외부 상태를 직접 변경할 수 없어 IIFE로 클로저 생성 */}
-              {(() => {
-                let lastYear = null
-                return sidebarDates.map((dateKey) => {
-                  const year = formatYear(dateKey)
-                  // 연도가 바뀔 때만 구분선 표시 (e.g. "2024년" → "2025년")
-                  const showYearDivider = year !== lastYear
-                  lastYear = year
-                  const groupCount = allGroups.filter(g => g.dateKey === dateKey).length
-                  const isSelected = selectedDate === dateKey
-
-                  return (
-                    <div key={dateKey}>
-                      {showYearDivider && (
-                        <p className="px-4 pt-3 pb-1 text-[10px] font-bold text-gray-300 uppercase tracking-wider">
-                          {year}
-                        </p>
-                      )}
-                      <button
-                        onClick={() => setSelectedDate(dateKey)}
-                        className={`w-full flex items-center justify-between pl-5 pr-3 py-2 text-left transition-colors border-l-2 ${
-                          isSelected
-                            ? 'border-gray-900 bg-gray-50 text-gray-900'
-                            : 'border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700'
-                        }`}
-                      >
-                        <span className={`text-xs ${isSelected ? 'font-bold' : 'font-medium'}`}>
-                          {formatDateNav(dateKey)}
-                        </span>
-                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
-                          isSelected ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-400'
-                        }`}>
-                          {groupCount}
-                        </span>
-                      </button>
-                    </div>
-                  )
-                })
-              })()}
-            </nav>
-          </aside>
-        )}
-
-        <div className="flex-1 min-w-0">
-
-          {/* 탭 (모바일 — 사이드바 없을 때 or 모바일 뷰) */}
-          <div className={`bg-white border-b border-gray-100 px-6 flex gap-6 ${sidebarDates.length > 0 ? 'md:hidden' : ''}`}>
-            {TABS.map(({ label }) => (
-              <button
-                key={label}
-                onClick={() => setActiveTab(label)}
-                className={`py-3 text-sm font-bold cursor-pointer transition-colors border-b-2 ${
-                  activeTab === label ? 'text-gray-900 border-gray-900' : 'text-gray-400 border-transparent'
-                }`}
-              >
-                {label}
+                {formatDateNav(dateKey)}
               </button>
             ))}
           </div>
+        )}
 
-          {/* 모바일 날짜 필터 (가로 스크롤) */}
-          {sidebarDates.length > 0 && (
-            <div className="md:hidden bg-white border-b border-gray-100 px-4 py-2 overflow-x-auto flex gap-1.5">
-              <button
-                onClick={() => setSelectedDate(null)}
-                className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${
-                  selectedDate === null
-                    ? 'bg-gray-900 text-white'
-                    : 'bg-gray-100 text-gray-500'
-                }`}
-              >
-                전체
-              </button>
-              {sidebarDates.map((dateKey) => (
-                <button
-                  key={dateKey}
-                  onClick={() => setSelectedDate(dateKey)}
-                  className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${
-                    selectedDate === dateKey
-                      ? 'bg-gray-900 text-white'
-                      : 'bg-gray-100 text-gray-500'
-                  }`}
-                >
-                  {formatDateNav(dateKey)}
-                </button>
-              ))}
-            </div>
-          )}
+        {/* 메인 콘텐츠 — 전체 너비 */}
+        <div className="px-8 py-5">
 
-          {/* 처방 그룹 목록 */}
-          <div className="px-6 py-5">
-            {selectedDate && (
-              <p className="text-xs font-bold text-gray-400 mb-4">
-                {formatDate(selectedDate)} 처방
-              </p>
-            )}
-
-            {groups.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-center">
-                <div className="w-14 h-14 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
-                  <Pill size={24} className="text-gray-300" />
-                </div>
-                <p className="text-gray-400 font-bold mb-1">
-                  {selectedDate ? `해당 날짜의 처방 내역이 없어요` : emptyMessage.title}
+          {selectedDate && (
+                <p className="text-xs font-bold text-gray-400 mb-4">
+                  {formatDate(selectedDate)} 처방
                 </p>
-                <p className="text-gray-300 text-sm mb-6">
-                  {selectedDate ? '다른 날짜를 선택해보세요' : emptyMessage.sub}
-                </p>
-                {activeTab === '복용중' && !selectedDate && (
-                  <button
-                    onClick={() => router.push('/ocr')}
-                    className="px-6 py-3 bg-gray-900 text-white text-sm font-bold rounded-full cursor-pointer hover:bg-gray-800 transition-colors"
-                  >
-                    처방전 등록하기
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-5">
-                {groups.map((group) => (
-                  <div key={`${group.dateKey}__${group.deptKey}`}>
-                    {!selectedDate && (
-                      <p className="text-xs font-bold text-gray-400 mb-2 px-0.5">
-                        {formatDate(group.dateKey)} 처방
-                      </p>
-                    )}
-                    <PrescriptionGroup
-                      group={group}
-                      onMedClick={(id) => router.push(`/medication/${id}`)}
-                      onEditGroup={(items) => router.push(`/medication/edit?ids=${items.map(m => m.id).join(',')}`)}
-                      onDeleteGroup={handleDeleteGroup}
-                    />
+              )}
+
+              {groups.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <div className="w-14 h-14 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
+                    <Pill size={24} className="text-gray-300" />
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
+                  <p className="text-gray-400 font-bold mb-1">
+                    {selectedDate ? `해당 날짜의 처방 내역이 없어요` : emptyMessage.title}
+                  </p>
+                  <p className="text-gray-300 text-sm mb-6">
+                    {selectedDate ? '다른 날짜를 선택해보세요' : emptyMessage.sub}
+                  </p>
+                  {activeTab === '복용중' && !selectedDate && (
+                    <button
+                      onClick={() => router.push('/ocr')}
+                      className="px-6 py-3 bg-gray-900 text-white text-sm font-bold rounded-full cursor-pointer hover:bg-gray-800 transition-colors"
+                    >
+                      처방전 등록하기
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {groups.map((group) => (
+                    <div key={`${group.dateKey}__${group.deptKey}`}>
+                      {!selectedDate && (
+                        <p className="text-xs font-bold text-gray-400 mb-2 px-0.5">
+                          {formatDate(group.dateKey)} 처방
+                        </p>
+                      )}
+                      <PrescriptionGroup
+                        group={group}
+                        onMedClick={(id) => router.push(`/medication/${id}`)}
+                        onEditGroup={(items) => router.push(`/medication/edit?ids=${items.map(m => m.id).join(',')}`)}
+                        onDeleteGroup={handleDeleteGroup}
+                        onDeleteMed={handleDeleteGroup}
+                        completedMedIds={completedMedIds}
+                        onCompleteToday={handleCompleteToday}
+                        isCompleting={isCompleting}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
         </div>
       </div>
-      </div>
 
-      {/* 처방전 그룹 삭제 확인 모달 */}
+      {/* 삭제 확인 모달 */}
       {deleteTargetItems && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 px-4 pb-6">
           <div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4">
@@ -452,7 +473,9 @@ export default function MedicationListPage() {
               <div className="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-3">
                 <Trash2 size={20} className="text-red-500" />
               </div>
-              <p className="font-bold text-gray-900">처방전을 삭제할까요?</p>
+              <p className="font-bold text-gray-900">
+                {deleteTargetItems.length === 1 ? '약품을 삭제할까요?' : '처방전을 삭제할까요?'}
+              </p>
               <p className="text-sm text-gray-400 leading-relaxed">
                 아래 {deleteTargetItems.length}개 약품의 복용 기록이<br />영구적으로 삭제됩니다.
               </p>
