@@ -84,7 +84,6 @@ function getProgressInfo(items) {
 }
 
 function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup, onDeleteMed, completedMedIds, onCompleteToday, isCompleting }) {
-  
   const { deptKey, items } = group
   const startDates = items.map(m => m.start_date).filter(Boolean).sort()
   const endDates = items.map(m => m.end_date).filter(Boolean).sort()
@@ -168,7 +167,6 @@ function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup, onDe
       </div>
       <div className="divide-y divide-gray-50">
         {items.map((med) => (
-
           <div key={med.id} className="w-full flex items-center px-5 py-3 hover:bg-gray-50 transition-colors group">
             <div
               className="flex-1 flex items-center gap-3 cursor-pointer min-w-0"
@@ -187,7 +185,6 @@ function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup, onDe
                 <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
                   {med.category}
                 </span>
-
               )}
             </div>
             <button
@@ -420,33 +417,12 @@ export default function MedicationListPage() {
                 <p className="text-xs font-bold text-gray-400 mb-4">
                   {formatDate(selectedDate)} 처방
                 </p>
+              )}
 
-                {activeTab === '복용중' && !selectedDate && (
-                  <button
-                    onClick={() => router.push('/ocr')}
-                    className="px-6 py-3 bg-gray-900 text-white text-sm font-bold rounded-full cursor-pointer hover:bg-gray-800 transition-colors"
-                  >
-                    처방전 등록하기
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-5">
-                {groups.map((group) => (
-                  <div key={`${group.dateKey}__${group.deptKey}`}>
-                    {!selectedDate && (
-                      <p className="text-xs font-bold text-gray-400 mb-2 px-0.5">
-                        {formatDate(group.dateKey)} 처방
-                      </p>
-                    )}
-                    <PrescriptionGroup
-                      group={group}
-                      onMedClick={(id) => router.push(`/medication/${id}`)}
-                      onEditGroup={(items) => router.push(`/medication/edit?ids=${items.map(m => m.id).join(',')}`)}
-                      onDeleteGroup={handleDeleteGroup}
-                      onDeleteMed={handleDeleteGroup}
-                    />
-
+              {groups.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <div className="w-14 h-14 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
+                    <Pill size={24} className="text-gray-300" />
                   </div>
                   <p className="text-gray-400 font-bold mb-1">
                     {selectedDate ? `해당 날짜의 처방 내역이 없어요` : emptyMessage.title}
@@ -454,17 +430,13 @@ export default function MedicationListPage() {
                   <p className="text-gray-300 text-sm mb-6">
                     {selectedDate ? '다른 날짜를 선택해보세요' : emptyMessage.sub}
                   </p>
-                  {/* ✅ 수정 1: Fragment로 감싸서 JSX 루트 요소 오류 해결 */}
                   {activeTab === '복용중' && !selectedDate && (
-                    <>
-                      {/* 수정: 버튼 ghost 스타일로 변경 */}
-                      <button
-                        onClick={() => router.push('/ocr')}
-                        className="px-6 py-3 border border-gray-300 text-gray-700 text-sm font-bold rounded-full cursor-pointer hover:bg-gray-50 transition-colors"
-                      >
-                        처방전 등록하기
-                      </button>
-                    </>
+                    <button
+                      onClick={() => router.push('/ocr')}
+                      className="px-6 py-3 bg-gray-900 text-white text-sm font-bold rounded-full cursor-pointer hover:bg-gray-800 transition-colors"
+                    >
+                      처방전 등록하기
+                    </button>
                   )}
                 </div>
               ) : (
@@ -481,6 +453,7 @@ export default function MedicationListPage() {
                         onMedClick={(id) => router.push(`/medication/${id}`)}
                         onEditGroup={(items) => router.push(`/medication/edit?ids=${items.map(m => m.id).join(',')}`)}
                         onDeleteGroup={handleDeleteGroup}
+                        onDeleteMed={handleDeleteGroup}
                         completedMedIds={completedMedIds}
                         onCompleteToday={handleCompleteToday}
                         isCompleting={isCompleting}
@@ -488,7 +461,6 @@ export default function MedicationListPage() {
                     </div>
                   ))}
                 </div>
-              /* ✅ 수정 2: 삼항연산자 닫는 괄호 ) → )} 로 수정 */
               )}
         </div>
       </div>
