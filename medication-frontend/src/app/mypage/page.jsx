@@ -8,9 +8,10 @@ import LogoutModal, { useLogout, DeleteAccountModal, useDeleteAccount } from '@/
 import api, { handleApiError } from '@/lib/api'
 import toast from 'react-hot-toast'
 import { useProfile } from '@/contexts/ProfileContext'
+import { RELATION_MAP, RELATION_OPTIONS, getSpecificRelation, getBackendRelation } from '@/constants/familyRelations'
 
 // --- 모달 컴포넌트들 ---
-function Modal({ title, children, onClose, onSave }) {
+function Modal({ title, children, onClose, onSave, saveDisabled }) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
       <div className="bg-white rounded-[40px] w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
@@ -23,7 +24,7 @@ function Modal({ title, children, onClose, onSave }) {
         <div className="p-8 max-h-[70vh] overflow-y-auto">{children}</div>
         <div className="p-8 pt-4 flex gap-3">
           <button onClick={onClose} className="flex-1 py-4 rounded-2xl bg-gray-50 text-gray-500 font-bold hover:bg-gray-100 transition-all cursor-pointer">취소</button>
-          <button onClick={onSave} className="flex-1 py-4 rounded-2xl bg-gray-900 text-white font-black hover:bg-gray-800 transition-all shadow-lg cursor-pointer">저장하기</button>
+          <button onClick={onSave} disabled={saveDisabled} className="flex-1 py-4 rounded-2xl bg-gray-900 text-white font-black hover:bg-gray-800 transition-all shadow-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">저장하기</button>
         </div>
       </div>
     </div>
@@ -57,13 +58,43 @@ function HealthInfoModal({ info, onClose, onSave }) {
     allergies: info?.allergies || [],
   })
 
+  const [errors, setErrors] = useState({
+    age: '',
+    height: '',
+    weight: '',
+  })
+
+  const validateField = (field, value) => {
+    let errorMsg = '';
+    if (field === 'age' && value) {
+      const num = parseInt(value);
+      if (num < 0 || num > 150) errorMsg = '나이는 0~150 사이로 입력해주세요.';
+    }
+    if (field === 'height' && value) {
+      const num = parseInt(value);
+      if (num < 50 || num > 250) errorMsg = '키는 50~250cm 사이로 입력해주세요.';
+    }
+    if (field === 'weight' && value) {
+      const num = parseFloat(value);
+      if (num < 1 || num > 300) errorMsg = '몸무게는 1~300kg 사이로 입력해주세요.';
+    }
+    setErrors(prev => ({ ...prev, [field]: errorMsg }));
+  }
+
+  const handleChange = (field, val) => {
+    setFormData(prev => ({ ...prev, [field]: val }));
+    validateField(field, val);
+  }
+
+  const isSaveDisabled = Object.values(errors).some(err => err !== '');
+
   const btnSelected = 'bg-gray-900 text-white border-gray-900'
   const btnUnselected = 'bg-white text-gray-400 border-gray-100 hover:border-gray-300'
   const chipSelected = 'bg-gray-900 text-white border-gray-900'
   const chipUnselected = 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
 
   return (
-    <Modal title="건강 프로필 수정" onClose={onClose} onSave={() => onSave(formData)}>
+    <Modal title="건강 프로필 수정" onClose={onClose} onSave={() => onSave(formData)} saveDisabled={isSaveDisabled}>
       <div className="space-y-6">
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -71,15 +102,16 @@ function HealthInfoModal({ info, onClose, onSave }) {
             <input type="text" inputMode="numeric" value={formData.age} placeholder="예: 30"
               onChange={(e) => {
                 const val = e.target.value.replace(/[^0-9]/g, '');
-                setFormData({...formData, age: val})
+                handleChange('age', val);
               }}
-              className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
+              className={`w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 border transition-colors ${errors.age ? 'border-red-500' : 'border-transparent focus:border-gray-200'}`} />
+            {errors.age && <span className="text-red-500 text-xs ml-2 mt-1 block">{errors.age}</span>}
           </div>
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">성별</label>
             <div className="flex gap-2">
               {['MALE', 'FEMALE'].map(g => (
-                <button key={g} type="button" onClick={() => setFormData({...formData, gender: g})}
+                <button key={g} type="button" onClick={() => handleChange('gender', g)}
                   className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${formData.gender === g ? btnSelected : btnUnselected}`}>
                   {g === 'MALE' ? '남성' : '여성'}
                 </button>
@@ -93,9 +125,10 @@ function HealthInfoModal({ info, onClose, onSave }) {
             <input type="text" inputMode="decimal" value={formData.height} placeholder="예: 170"
               onChange={(e) => {
                 const val = e.target.value.replace(/[^0-9]/g, '');
-                setFormData({...formData, height: val})
+                handleChange('height', val);
               }}
-              className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
+              className={`w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 border transition-colors ${errors.height ? 'border-red-500' : 'border-transparent focus:border-gray-200'}`} />
+            {errors.height && <span className="text-red-500 text-xs ml-2 mt-1 block">{errors.height}</span>}
           </div>
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">몸무게 (kg)</label>
@@ -104,9 +137,10 @@ function HealthInfoModal({ info, onClose, onSave }) {
                 let val = e.target.value.replace(/[^0-9.]/g, '');
                 const parts = val.split('.');
                 if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
-                setFormData({...formData, weight: val})
+                handleChange('weight', val);
               }}
-              className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
+              className={`w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 border transition-colors ${errors.weight ? 'border-red-500' : 'border-transparent focus:border-gray-200'}`} />
+            {errors.weight && <span className="text-red-500 text-xs ml-2 mt-1 block">{errors.weight}</span>}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -181,11 +215,14 @@ function HealthInfoModal({ info, onClose, onSave }) {
 }
 
 function FamilyModal({ member, onClose, onSave }) {
-  const [formData, setFormData] = useState(
-    member
-      ? { name: member.name, relation_type: member.relation_type, gender: member.gender || 'MALE' }
-      : { name: '', relation_type: 'PARENT', gender: 'MALE' }
-  )
+  const [formData, setFormData] = useState(() => {
+    if (member) {
+      const memGen = member.health_survey?.gender || member.gender || 'MALE';
+      const specificRel = getSpecificRelation(member.relation_type, memGen);
+      return { name: member.name, relation_type: specificRel, gender: memGen };
+    }
+    return { name: '', relation_type: 'FATHER', gender: 'MALE' };
+  })
 
   return (
     <Modal title={member ? "가족 정보 수정" : "가족 추가하기"} onClose={onClose} onSave={() => onSave(formData)}>
@@ -198,28 +235,19 @@ function FamilyModal({ member, onClose, onSave }) {
         <div>
           <label className="text-xs font-black text-gray-400 mb-2 block ml-1">관계</label>
           <select
-            value={`${formData.relation_type}-${formData.gender}`}
+            value={formData.relation_type}
             onChange={(e) => {
               const val = e.target.value;
-              let relation = 'OTHER';
-              let gender = 'MALE';
-              if (val === 'PARENT-MALE') { relation = 'PARENT'; gender = 'MALE'; }
-              else if (val === 'PARENT-FEMALE') { relation = 'PARENT'; gender = 'FEMALE'; }
-              else if (val === 'CHILD-MALE') { relation = 'CHILD'; gender = 'MALE'; }
-              else if (val === 'CHILD-FEMALE') { relation = 'CHILD'; gender = 'FEMALE'; }
-              else if (val === 'SPOUSE-MALE') { relation = 'SPOUSE'; gender = 'MALE'; }
-              else if (val === 'SPOUSE-FEMALE') { relation = 'SPOUSE'; gender = 'FEMALE'; }
-              setFormData({ ...formData, relation_type: relation, gender: gender });
+              const { gender } = getBackendRelation(val);
+              setFormData({ ...formData, relation_type: val, gender });
             }}
-            className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 appearance-none"
+            disabled={formData.relation_type === 'SELF'}
+            className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <option value="PARENT-MALE">아버지</option>
-            <option value="PARENT-FEMALE">어머니</option>
-            <option value="CHILD-MALE">아들</option>
-            <option value="CHILD-FEMALE">딸</option>
-            <option value="SPOUSE-MALE">남편</option>
-            <option value="SPOUSE-FEMALE">아내</option>
-            <option value="OTHER-MALE">기타</option>
+            {formData.relation_type === 'SELF' && <option value="SELF">본인</option>}
+            {RELATION_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
           </select>
         </div>
       </div>
@@ -327,18 +355,12 @@ export default function MyPage() {
   }
 
   const handleSaveHealth = async (newData) => {
-    // [추가] 저장 전 최종 범위 검증 로직
-    const h = parseInt(newData.height);
-    const w = parseFloat(newData.weight);
-    if (newData.height && (h < 50 || h > 250)) { toast.error("키는 50~250cm 사이로 입력해주세요."); return; }
-    if (newData.weight && (w < 1 || w > 300)) { toast.error("몸무게는 1~300kg 사이로 입력해주세요."); return; }
-
     try {
       const healthSurvey = {
         age: parseInt(newData.age) || null,
         gender: newData.gender || null,
-        height: h || null,
-        weight: w || null,
+        height: parseInt(newData.height) || null,
+        weight: parseFloat(newData.weight) || null,
         is_smoking: newData.is_smoking,
         is_drinking: newData.is_drinking,
         conditions: newData.conditions.length > 0 ? newData.conditions : null,
@@ -352,25 +374,32 @@ export default function MyPage() {
 
   const handleSaveFamily = async (newData) => {
     try {
-      // [수정] 성별 데이터를 명시적으로 포함하여 전송 (관계 매칭 오류 해결)
+      // 1. 화면에서 선택한 FATHER, MOTHER 등을 백엔드가 아는 PARENT, CHILD로 다시 매핑
+      const { relation_type: mappedRelation } = getBackendRelation(newData.relation_type);
+
+      // 2. 백엔드 ProfileCreate 규격에 정확히 맞춘 Payload 구성
       const payload = {
         name: newData.name,
-        relation_type: newData.relation_type,
-        gender: newData.gender,
-        account_id: userProfile.account_id,
-        health_survey: { gender: newData.gender }
+        relation_type: mappedRelation,
+        health_survey: { gender: newData.gender } // 성별 데이터를 안전하게 보존
       };
+
       if (selectedFamilyMember) {
-        await updateProfile(selectedFamilyMember.id, newData)
-        toast.success('가족 정보가 수정되었습니다.')
+        // 3. [API 분기 캡슐화] 본인 수정 vs 가족 수정의 로직을 한 곳에 통합 처리
+        const isSelf = newData.relation_type === 'SELF';
+        
+        // 현재는 본인/가족 모두 동일한 updateProfile(PUT /api/v1/profiles/{id}) API를 공유함
+        await updateProfile(selectedFamilyMember.id, payload);
+        toast.success(isSelf ? '본인 정보가 수정되었습니다.' : '가족 정보가 수정되었습니다.');
       } else {
-        await createProfile({ ...newData, account_id: userProfile.account_id, health_survey: {} })
-        toast.success('가족이 추가되었습니다.')
+        await createProfile({ ...payload, account_id: userProfile.account_id });
+        toast.success('가족이 추가되었습니다.');
       }
-      if (refetchProfiles) await refetchProfiles()
-      setModalType(null)
-      setSelectedFamilyMember(null)
-    } catch (err) { handleApiError(err) }
+
+      if (refetchProfiles) await refetchProfiles();
+      setModalType(null);
+      setSelectedFamilyMember(null);
+    } catch (err) { handleApiError(err); }
   }
 
   const handleDeleteFamily = async (id, e) => {
@@ -395,13 +424,18 @@ export default function MyPage() {
 
   // [추가] 상세 관계 텍스트 변환 함수
   const getDetailRelation = (profile) => {
-    const rel = profile?.relation_type;
-    const gen = profile?.health_survey?.gender || profile?.gender;
-    if (rel === 'SELF') return '본인 계정';
-    if (rel === 'PARENT') return gen === 'MALE' ? '부모님(아버지)' : '부모님(어머니)';
-    if (rel === 'CHILD') return gen === 'MALE' ? '자녀(아들)' : '자녀(딸)';
-    if (rel === 'SPOUSE') return gen === 'MALE' ? '배우자(남편)' : '배우자(아내)';
-    return '가족';
+    if (!profile) return '가족';
+    if (profile.relation_type === 'SELF') return '본인 계정';
+    
+    const gen = profile.health_survey?.gender || profile.gender;
+    const specificRel = getSpecificRelation(profile.relation_type, gen);
+    const label = RELATION_MAP[specificRel] || '가족';
+    
+    if (profile.relation_type === 'PARENT') return `부모님(${label})`;
+    if (profile.relation_type === 'CHILD') return `자녀(${label})`;
+    if (profile.relation_type === 'SPOUSE') return `배우자(${label})`;
+    
+    return label;
   };
 
   return (
@@ -517,20 +551,13 @@ export default function MyPage() {
                       }
                       const handleEdit = (e) => {
                         e.stopPropagation()
-                        if (isSelf) {
-                          // 본인 정보 수정은 기본정보 탭의 BasicInfoModal 사용
-                          setActiveMenu('기본정보')
-                          return
-                        }
                         setSelectedFamilyMember(member)
                         setModalType('family')
                       }
                       // 상세 호칭 (성별까지) — main PR 흡수
-                      const detailLabel =
-                        member.relation_type === 'PARENT' ? (member.gender === 'MALE' ? '아버지' : '어머니') :
-                        member.relation_type === 'CHILD' ? (member.gender === 'MALE' ? '아들' : '딸') :
-                        member.relation_type === 'SPOUSE' ? (member.gender === 'MALE' ? '남편' : '아내') :
-                        relationLabels[member.relation_type]
+                      const memGen = member.health_survey?.gender || member.gender;
+                      const specificRel = getSpecificRelation(member.relation_type, memGen);
+                      const detailLabel = RELATION_MAP[specificRel] || relationLabels[member.relation_type] || '가족';
                       return (
                         <div
                           key={member.id}

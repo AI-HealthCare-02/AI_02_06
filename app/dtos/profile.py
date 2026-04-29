@@ -50,8 +50,8 @@ class ProfileUpdate(BaseModel):
 class ProfileSummaryResponse(BaseModel):
     """Profile summary response model for list endpoints.
 
-    Lightweight response without health survey data.
-    Used for profile listing and switching UI where full health data is not needed.
+    Lightweight response with minimal health survey data for UI matching.
+    Used for profile listing and switching UI.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -60,6 +60,7 @@ class ProfileSummaryResponse(BaseModel):
     account_id: UUID = Field(..., description="Connected account ID")
     name: str = Field(..., description="Profile name")
     relation_type: RelationType = Field(..., description="Relationship type")
+    health_survey: dict[str, Any] | None = Field(None, description="Health survey results for gender matching")
 
 
 class ProfileResponse(BaseProfile):
