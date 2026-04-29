@@ -16,6 +16,7 @@ bad input returns an empty result instead of raising.
 
 from dataclasses import dataclass
 import logging
+import re
 
 import defusedxml.ElementTree as ET  # noqa: N817 — stdlib ET 와 동일한 alias 관용 유지
 
@@ -137,6 +138,92 @@ def flatten_doc_plaintext(xml: str | None) -> str:
             blocks.append(block)
 
     return "\n\n".join(blocks)
+
+
+# ── NB_DOC_DATA 식약처 10 카테고리 정규화 ─────────────────────────────
+# (drug-info 응답용 — RAG 청킹용 6 섹션 분류와는 별개)
+# title 의 숫자/공백 prefix 를 떼고 키워드로 매칭. 매칭 실패 시 None.
+_NB_CATEGORY_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"경고"), "경고"),
+    (re.compile(r"투여하지\s*말|복용하지\s*말|사용하지\s*말|금기"), "금기"),
+    (re.compile(r"신중(히|\s)*투여|신중\s*복용"), "신중 투여"),
+    (re.compile(r"이상반응|부작용"), "이상반응"),
+    (re.compile(r"일반적\s*주의"), "일반적 주의"),
+    (re.compile(r"임부|임산부|수유"), "임부에 대한 투여"),
+    (re.compile(r"소아|어린이|영아|유아|신생아"), "소아에 대한 투여"),
+    (re.compile(r"고령자|노인"), "고령자에 대한 투여"),
+    (re.compile(r"과량|과용"), "과량투여시의 처치"),
+    (re.compile(r"적용상"), "적용상의 주의"),
+)
+ADVERSE_REACTION_KEY = "이상반응"
+
+
+def normalize_nb_article_title(title: str | None) -> str | None:
+    """식약처 NB ARTICLE.title 을 10 카테고리 키로 정규화.
+
+    예:
+        "1. 경고"           -> "경고"
+        "2.다음 환자에는..."  -> "금기"
+        "4. 이상반응"        -> "이상반응" (호출자가 side_effects 로 분리)
+        "11. 알 수 없는 분류" -> None
+
+    Args:
+        title: ARTICLE title 원본. None / 빈 문자열 → None.
+
+    Returns:
+        정규화된 카테고리 키 또는 None.
+    """
+    if not title:
+        return None
+    for pattern, key in _NB_CATEGORY_PATTERNS:
+        if pattern.search(title):
+            return key
+    return None
+
+
+def parse_nb_categories(xml: str | None) -> tuple[dict[str, list[str]], list[str]]:
+    """NB_DOC_DATA XML 을 식약처 카테고리별 dict + 이상반응 list 로 분리.
+
+    Args:
+        xml: NB_DOC_DATA raw XML. None / 빈 / 깨진 입력 → ({}, []).
+
+    Returns:
+        precautions: 식약처 9 카테고리 (이상반응 제외) → PARAGRAPH list
+        side_effects: 이상반응 카테고리의 PARAGRAPH list
+    """
+    articles = parse_doc_articles(xml)
+    if not articles:
+        return ({}, [])
+
+    precautions: dict[str, list[str]] = {}
+    side_effects: list[str] = []
+
+    for article in articles:
+        key = normalize_nb_article_title(article.title)
+        if key is None:
+            logger.debug("NB ARTICLE 미분류: %s", article.title)
+            continue
+        items = [line.strip() for line in article.body.splitlines() if line.strip()]
+        if not items:
+            continue
+        if key == ADVERSE_REACTION_KEY:
+            side_effects.extend(items)
+            continue
+        precautions.setdefault(key, []).extend(items)
+
+    return (precautions, side_effects)
+
+
+def parse_ud_plaintext(xml: str | None) -> str:
+    """UD_DOC_DATA (용법용량) XML 을 평문 문자열로 평탄화.
+
+    Args:
+        xml: UD_DOC_DATA raw XML. None / 빈 / 깨진 입력 → "".
+
+    Returns:
+        줄바꿈 결합된 평문.
+    """
+    return flatten_doc_plaintext(xml)
 
 
 def classify_article_section(title: str) -> MedicineChunkSection:

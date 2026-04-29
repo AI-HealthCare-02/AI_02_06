@@ -18,7 +18,11 @@ import httpx
 
 from app.models.data_sync_log import DataSyncLog
 from app.repositories.medicine_info_repository import MedicineInfoRepository
-from app.services.medicine_doc_parser import flatten_doc_plaintext
+from app.services.medicine_doc_parser import (
+    flatten_doc_plaintext,
+    parse_nb_categories,
+    parse_ud_plaintext,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +30,7 @@ logger = logging.getLogger(__name__)
 # 식약처 의약품 허가정보 서비스 (DrugPrdtPrmsnInfoService07)
 _BASE_URL = "https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07"
 _DETAIL_ENDPOINT = f"{_BASE_URL}/getDrugPrdtPrmsnDtlInq06"  # 허가 상세정보
+_INGREDIENT_ENDPOINT = f"{_BASE_URL}/getDrugPrdtMcpnDtlInq07"  # 약품-성분 1:N
 
 # ── 필터링 키워드 (병원 전용 주사제 제외, 자가주사는 유지) ────────────
 _EXCLUDE_KEYWORDS = ("주사", "수액", "이식")
@@ -35,6 +40,19 @@ _SELF_INJECT_KEYWORDS = ("인슐린", "삭센다", "자가주사", "펜주", "�
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "ai_worker" / "data"
 _REQUEST_TIMEOUT = 30.0
 _MAX_ROWS_PER_PAGE = 100
+
+
+def _split_nb_to_columns(nb_xml: str | None) -> dict:
+    """NB_DOC_DATA XML 을 medicine_info 의 precautions/side_effects 컬럼 dict 로 변환.
+
+    parse_nb_categories 의 (dict, list) 튜플을 컬럼 매핑 dict 로 wrap. None / 빈 결과는
+    None 으로 통일해 NULL 보장.
+    """
+    precautions, side_effects = parse_nb_categories(nb_xml)
+    return {
+        "precautions": precautions or None,
+        "side_effects": side_effects or None,
+    }
 
 
 class MedicineDataService:
@@ -283,8 +301,10 @@ class MedicineDataService:
             "ee_doc_data": item.get("EE_DOC_DATA") or None,
             "ud_doc_data": item.get("UD_DOC_DATA") or None,
             "nb_doc_data": item.get("NB_DOC_DATA") or None,
-            # UI 표시용 평문 효능 (XML 평문화)
+            # UI 표시용 평문 / 카테고리 분류 (XML → drug-info 응답 직결)
             "efficacy": flatten_doc_plaintext(item.get("EE_DOC_DATA")) or None,
+            "dosage": parse_ud_plaintext(item.get("UD_DOC_DATA")) or None,
+            **_split_nb_to_columns(item.get("NB_DOC_DATA")),
             # 동기화 타임스탬프 (tz-aware UTC — CLAUDE.md 4.2)
             "last_synced_at": datetime.now(tz=UTC),
         }
