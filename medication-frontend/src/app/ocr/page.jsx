@@ -117,6 +117,14 @@ export default function OcrPage() {
           </label>
         </div>
 
+        {/* 직접 약품 추가하기 버튼 (신규 추가) */}
+        <button
+          onClick={() => router.push('/ocr/result?draft_id=manual')}
+          className="w-full mt-6 bg-white rounded-2xl p-4 border-2 border-dashed border-blue-300 text-blue-500 font-bold hover:bg-blue-50 hover:border-blue-400 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+        >
+          <span className="text-xl">+</span> 직접 약품 추가하기
+        </button>
+
         {/* 하단 버튼 */}
         <div className="mt-8 flex gap-3">
           <button

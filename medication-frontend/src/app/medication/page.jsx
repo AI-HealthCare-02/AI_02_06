@@ -87,7 +87,7 @@ function formatYear(dateStr) {
   return dateStr.split('-')[0] + '년'
 }
 
-function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup }) {
+function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup, onDeleteMed }) {
   const { deptKey, items } = group
   const startDates = items.map(m => m.start_date).filter(Boolean).sort()
   const endDates = items.map(m => m.end_date).filter(Boolean).sort()
@@ -134,27 +134,38 @@ function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup }) {
       </div>
       <div className="divide-y divide-gray-50">
         {items.map((med) => (
-          <button
-            key={med.id}
-            onClick={() => onMedClick(med.id)}
-            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-gray-50 transition-colors cursor-pointer text-left"
-          >
-            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${med.is_active ? 'bg-green-400' : 'bg-gray-300'}`} />
-            <div className="flex-1 min-w-0">
-              <span className={`text-sm font-bold truncate block ${med.is_active ? 'text-gray-900' : 'text-gray-400'}`}>
-                {med.medicine_name}
-              </span>
-              {med.dose_per_intake && (
-                <span className="text-xs text-gray-400">{med.dose_per_intake}</span>
+          <div key={med.id} className="w-full flex items-center px-5 py-3 hover:bg-gray-50 transition-colors group">
+            <div
+              className="flex-1 flex items-center gap-3 cursor-pointer min-w-0"
+              onClick={() => onMedClick(med.id)}
+            >
+              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${med.is_active ? 'bg-green-400' : 'bg-gray-300'}`} />
+              <div className="flex-1 min-w-0">
+                <span className={`text-sm font-bold truncate block ${med.is_active ? 'text-gray-900' : 'text-gray-400'}`}>
+                  {med.medicine_name}
+                </span>
+                {med.dose_per_intake && (
+                  <span className="text-xs text-gray-400">{med.dose_per_intake}</span>
+                )}
+              </div>
+              {med.category && (
+                <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
+                  {med.category}
+                </span>
               )}
             </div>
-            {med.category && (
-              <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
-                {med.category}
-              </span>
-            )}
-            <ChevronRight size={13} className="text-gray-300 shrink-0" />
-          </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteMed([med]);
+              }}
+              className="ml-3 p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
+              aria-label="삭제"
+            >
+              <Trash2 size={16} />
+            </button>
+            <ChevronRight size={13} className="text-gray-300 shrink-0 ml-1" />
+          </div>
         ))}
       </div>
     </div>
@@ -434,6 +445,7 @@ export default function MedicationListPage() {
                       onMedClick={(id) => router.push(`/medication/${id}`)}
                       onEditGroup={(items) => router.push(`/medication/edit?ids=${items.map(m => m.id).join(',')}`)}
                       onDeleteGroup={handleDeleteGroup}
+                      onDeleteMed={handleDeleteGroup}
                     />
                   </div>
                 ))}
@@ -452,7 +464,9 @@ export default function MedicationListPage() {
               <div className="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-3">
                 <Trash2 size={20} className="text-red-500" />
               </div>
-              <p className="font-bold text-gray-900">처방전을 삭제할까요?</p>
+              <p className="font-bold text-gray-900">
+                {deleteTargetItems.length === 1 ? '약품을 삭제할까요?' : '처방전을 삭제할까요?'}
+              </p>
               <p className="text-sm text-gray-400 leading-relaxed">
                 아래 {deleteTargetItems.length}개 약품의 복용 기록이<br />영구적으로 삭제됩니다.
               </p>
