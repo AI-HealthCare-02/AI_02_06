@@ -4,17 +4,15 @@ This module provides business logic for medication management operations
 including creation, updates, and ownership verification.
 """
 
-import json
-import os
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from openai import AsyncOpenAI, OpenAIError
 
-from app.dtos.drug_info import DrugInfoResponse, DrugInteraction
+from app.dtos.drug_info import DrugInfoResponse
 from app.dtos.medication import MedicationBulkDeleteResponse, MedicationCreate, MedicationUpdate, PrescriptionDateItem
 from app.models.medication import Medication
 from app.repositories.medication_repository import MedicationRepository
+from app.repositories.medicine_info_repository import MedicineInfoRepository
 from app.repositories.profile_repository import ProfileRepository
 
 
@@ -363,76 +361,58 @@ class MedicationService:
         return [rid for rid in requested_ids if rid not in owned_set]
 
     async def get_drug_info_with_owner_check(self, medication_id: UUID, account_id: UUID) -> DrugInfoResponse:
-        """Get LLM-based drug information with ownership verification.
+        """Get drug information from MedicineInfo DB with ownership verification.
 
-        Returns warnings, side effects, and interactions from LLM. (캐싱 미적용 — 추후
-        Redis 등 외부 캐시 도입 시 별도 추가)
+        ``warnings`` 와 ``side_effects`` 는 식약처 마스터 DB (``MedicineInfo`` 테이블)
+        의 ``precautions`` / ``side_effects`` TEXT 컬럼에서 줄바꿈 분할로 list 화 한다.
+        ``interactions`` 는 컬럼이 없으므로 항상 빈 배열 — 향후 별도 마스터 도입 시 채움.
 
         Args:
             medication_id: Medication UUID.
             account_id: Account UUID for ownership check.
 
         Returns:
-            DrugInfoResponse: Drug information including warnings, side effects, and interactions.
+            DrugInfoResponse: 매칭된 마스터 데이터 또는 빈 배열 (DB miss / NULL).
         """
         medication = await self.get_medication_with_owner_check(medication_id, account_id)
         return await self._get_drug_info(medication.medicine_name)
 
     async def _get_drug_info(self, medicine_name: str) -> DrugInfoResponse:
-        """Fetch drug information by name from LLM (no caching).
+        """MedicineInfo 테이블에서 약품 정보 조회 — LLM 호출 없음.
+
+        흐름: 정확 일치 (``get_by_name``) → 미일치 시 ILIKE fallback (``search_by_name``)
+              → 둘 다 miss 면 빈 응답. NULL 컬럼도 빈 list 반환.
 
         Args:
-            medicine_name: Name of the medication.
+            medicine_name: 매칭할 약품명.
 
         Returns:
-            DrugInfoResponse: LLM-derived drug information.
-
-        Raises:
-            HTTPException: If OPENAI_API_KEY is missing or LLM call fails.
+            DrugInfoResponse — DB hit 시 채워진 값, miss / NULL 시 빈 배열.
         """
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            raise HTTPException(status_code=500, detail="OPENAI_API_KEY가 설정되지 않았습니다.")
+        repo = MedicineInfoRepository()
+        info = await repo.get_by_name(medicine_name)
+        if info is None:
+            candidates = await repo.search_by_name(medicine_name, limit=1)
+            info = candidates[0] if candidates else None
 
-        client = AsyncOpenAI(api_key=api_key)
-        prompt = f"""당신은 한국 약사 전문가입니다. '{medicine_name}' 약품에 대해 아래 JSON 형식으로만 답변하세요.
-
-{{
-  "medicine_name": "{medicine_name}",
-  "warnings": ["주의사항1", "주의사항2", ...],
-  "side_effects": ["부작용1", "부작용2", ...],
-  "interactions": [
-    {{"drug": "상호작용약품명", "description": "설명"}},
-    ...
-  ],
-  "severe_reaction_advice": "심각한 반응 시 조언 문장"
-}}
-
-규칙:
-- warnings: 복용 전 확인할 주의사항 3~5개 (임산부, 노약자, 음식 등)
-- side_effects: 주요 부작용 4~6개 (단어 형태, 예: "두통", "어지러움")
-- interactions: 병용 주의 약물 2~3개
-- 모든 내용은 한국어로 작성
-- JSON 외 다른 텍스트 없이 JSON만 반환"""
-
-        try:
-            response = await client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                response_format={"type": "json_object"},
-            )
-            raw = response.choices[0].message.content or "{}"
-            data = json.loads(raw)
+        if info is None:
             return DrugInfoResponse(
-                medicine_name=data.get("medicine_name", medicine_name),
-                warnings=data.get("warnings", []),
-                side_effects=data.get("side_effects", []),
-                interactions=[DrugInteraction(**i) for i in data.get("interactions", [])],
-                severe_reaction_advice=data.get(
-                    "severe_reaction_advice",
-                    "심한 부작용이 나타나면 즉시 복용을 중단하고 의사와 상담하세요.",
-                ),
+                medicine_name=medicine_name,
+                warnings=[],
+                side_effects=[],
+                interactions=[],
             )
-        except (OpenAIError, json.JSONDecodeError) as e:
-            raise HTTPException(status_code=502, detail=f"약품 정보를 가져오는 데 실패했습니다: {e}") from e
+
+        return DrugInfoResponse(
+            medicine_name=info.medicine_name,
+            warnings=_split_lines(info.precautions),
+            side_effects=_split_lines(info.side_effects),
+            interactions=[],
+        )
+
+
+def _split_lines(text: str | None) -> list[str]:
+    """TEXT 컬럼을 줄 단위 list 로 분할 — 빈 줄/공백만 있는 줄은 제외."""
+    if not text:
+        return []
+    return [line.strip() for line in text.splitlines() if line.strip()]
