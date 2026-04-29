@@ -45,6 +45,7 @@ from app.dtos.ocr import (
 from app.models.medication import Medication
 from app.models.ocr_draft import OcrDraft
 from app.repositories.ocr_draft_repository import OcrDraftRepository
+from app.services.recall_notification_service import check_and_alert_on_medication_save
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +268,7 @@ class OCRService:
         total_days = med.total_intake_days or 1
         total_count = daily_count * total_days
         today = datetime.now(tz=config.TIMEZONE).date()
-        return await Medication.create(
+        medication = await Medication.create(
             profile_id=str(profile_id),
             medicine_name=med.medicine_name,
             department=med.department,
@@ -283,6 +284,19 @@ class OCRService:
             dispensed_date=med.dispensed_date,
             is_active=True,
         )
+
+        # ── F3: OCR 확정 직후 회수 체크 (Phase 7, PLAN §16.3.2 헬퍼 위임) ──
+        # OCR 경로는 medication_service 를 거치지 않으므로 동일 헬퍼를
+        # 직접 호출해야 한다 (PLAN §16.3.1 우회 경로 가드).
+        try:
+            await check_and_alert_on_medication_save(medication)
+        except Exception:
+            logger.exception(
+                "[F3-OCR] recall hook failed for medication=%s",
+                getattr(medication, "id", "?"),
+            )
+
+        return medication
 
 
 def _to_poll_response(draft: OcrDraft) -> OcrDraftPollResponse:

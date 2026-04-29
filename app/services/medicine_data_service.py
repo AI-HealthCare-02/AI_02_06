@@ -24,6 +24,7 @@ from app.services.medicine_doc_parser import (
     parse_nb_categories,
     parse_ud_plaintext,
 )
+from app.utils.medicine_filters import is_hospital_only
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +33,6 @@ logger = logging.getLogger(__name__)
 _BASE_URL = "https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07"
 _DETAIL_ENDPOINT = f"{_BASE_URL}/getDrugPrdtPrmsnDtlInq06"  # 허가 상세정보
 _INGREDIENT_ENDPOINT = f"{_BASE_URL}/getDrugPrdtMcpnDtlInq07"  # 약품-성분 1:N
-
-# ── 필터링 키워드 (병원 전용 주사제 제외, 자가주사는 유지) ────────────
-_EXCLUDE_KEYWORDS = ("주사", "수액", "이식")
-_SELF_INJECT_KEYWORDS = ("인슐린", "삭센다", "자가주사", "펜주", "프리필드")
 
 # ── 백업 저장 경로 및 HTTP 설정 ──────────────────────────────────────
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "ai_worker" / "data"
@@ -298,24 +295,24 @@ class MedicineDataService:
         return all_items
 
     # ── 필터링: 병원 전용 주사제 판별 ──────────────────────────────
+    # 흐름: API row → ITEM_NAME 추출 → 공용 medicine_filters 위임
 
     @staticmethod
     def _is_hospital_only_injectable(item: dict) -> bool:
         """Check if the item is a hospital-only injectable drug.
 
-        Excludes injectables, infusions, and implants but keeps
-        self-injectable drugs like insulin and saxenda.
+        Thin wrapper that delegates to the reusable predicate in
+        ``app.utils.medicine_filters``. Kept as a method to preserve
+        the existing call signature used by `fetch_sample.py` and
+        downstream tests.
 
         Args:
-            item: Raw API response item dictionary.
+            item: Raw API response item dictionary (Dtl06 schema).
 
         Returns:
-            True if the item should be excluded from consumer DB.
+            True if the item should be excluded from the consumer DB.
         """
-        name = item.get("ITEM_NAME", "")
-        has_exclude = any(kw in name for kw in _EXCLUDE_KEYWORDS)
-        has_self_inject = any(kw in name for kw in _SELF_INJECT_KEYWORDS)
-        return has_exclude and not has_self_inject
+        return is_hospital_only(item.get("ITEM_NAME", ""))
 
     # ── API 응답 필드 -> DB 모델 필드 매핑 변환 ────────────────────
 

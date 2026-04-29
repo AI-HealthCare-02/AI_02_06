@@ -117,7 +117,7 @@ async def call_clova_ocr(image_path: str) -> dict:
 ```python
 # utils/rag.py
 async def generate_guide(context: str, query: str) -> str:
-    # Model: gpt-4o-mini (비용 최적화)
+    # Model: gpt-4o (품질 최적화)
     # Max tokens: 1000
     pass
 ```

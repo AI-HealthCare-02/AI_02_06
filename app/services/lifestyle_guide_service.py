@@ -76,11 +76,21 @@ class LifestyleGuideService:
             ``LifestyleGuide`` (status='pending'). 프론트는 ``id`` 로 SSE 연결.
 
         Raises:
-            ValueError: 활성 약물이 없으면 (LLM 호출 자체 무의미 — pre-check).
+            HTTPException 409: 활성 약물(복용 중 처방약) 미등록 시. detail 에
+                ``code=NO_ACTIVE_MEDICATIONS`` / ``message`` (사용자 안내) /
+                ``redirect_to=/ocr`` 가 포함되어 FE 가 토스트 + 라우팅을
+                한 번에 처리한다.
         """
         meds = await self.medication_repo.get_active_by_profile(profile_id)
         if not meds:
-            raise ValueError("활성 약물 목록이 비어 있습니다. 가이드를 생성하려면 복용 중인 약물이 필요합니다.")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "NO_ACTIVE_MEDICATIONS",
+                    "message": "처방전이 등록되어야 맞춤 가이드 생성이 가능합니다. 처방전을 먼저 등록해주세요.",
+                    "redirect_to": "/ocr",
+                },
+            )
 
         snapshot = [_med_to_dict(m) for m in meds]
         guide = await self.guide_repo.create_pending(profile_id=profile_id, medication_snapshot=snapshot)

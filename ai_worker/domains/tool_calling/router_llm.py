@@ -26,7 +26,7 @@ from app.services.tools.schemas import TOOL_SCHEMAS
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gpt-4o-mini"
+_MODEL = "gpt-4o"
 
 ROUTER_SYSTEM_PROMPT = (
     "당신은 'Dayak' 약사 챗봇의 라우터입니다. "

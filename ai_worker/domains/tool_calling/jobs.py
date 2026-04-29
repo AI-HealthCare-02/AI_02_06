@@ -19,6 +19,7 @@ DB 쿼리가 필요하므로 ``run_tool_calls_job`` 이 호출 시작 시 Tortoi
 import asyncio
 import logging
 from typing import Any
+from uuid import UUID
 
 from tortoise import Tortoise
 
@@ -31,6 +32,10 @@ from app.services.tools.maps.hospital_search import (
     HospitalCategory,
     search_hospitals_by_keyword,
     search_hospitals_by_location,
+)
+from app.services.tools.recalls.checker import (
+    check_manufacturer_recalls,
+    check_user_medications_recall,
 )
 
 logger = logging.getLogger(__name__)
@@ -128,6 +133,10 @@ async def _dispatch(call: dict[str, Any]) -> dict[str, Any]:
             return await _run_location(call)
         if name == _MEDICINE_KNOWLEDGE_TOOL_NAME:
             return await _run_medicine_knowledge(call)
+        if name == "check_user_medications_recall":
+            return await _run_user_recall(call)
+        if name == "check_manufacturer_recalls":
+            return await _run_manufacturer_recall(call)
     except Exception as exc:
         logger.exception("[ToolCalling] tool call %r failed", name)
         return {"error": f"{type(exc).__name__}: {exc}"}
@@ -184,3 +193,31 @@ def _is_valid_geolocation(geolocation: dict[str, Any] | None) -> bool:
 def _places_to_dict_list(places: list[KakaoPlace]) -> list[dict[str, Any]]:
     """KakaoPlace 리스트를 RQ pickle 안전한 dict 리스트로 변환."""
     return [p.model_dump() for p in places]
+
+
+# ── 회수·판매중지 툴 dispatch (Phase 7) ─────────────────────────────
+# 흐름: call.profile_id 추출 -> checker 호출 -> 응답 dict 그대로 반환
+# call payload 는 백엔드 _dispatch_tool_calls 가 profile_id 를 주입.
+
+
+def _resolve_profile_id(call: dict[str, Any]) -> UUID:
+    """Call payload 에서 profile_id 를 UUID 로 변환."""
+    raw = call.get("profile_id")
+    if raw is None:
+        msg = "missing profile_id: recall tool requires profile_id in call payload"
+        raise ValueError(msg)
+    return raw if isinstance(raw, UUID) else UUID(str(raw))
+
+
+async def _run_user_recall(call: dict[str, Any]) -> dict[str, Any]:
+    """Q1 — 사용자 복용약 회수 매칭 실행."""
+    profile_id = _resolve_profile_id(call)
+    return await check_user_medications_recall(profile_id=profile_id)
+
+
+async def _run_manufacturer_recall(call: dict[str, Any]) -> dict[str, Any]:
+    """Q2 — 제조사 회수 매칭 실행."""
+    profile_id = _resolve_profile_id(call)
+    arguments = call.get("arguments") or {}
+    manufacturer = arguments.get("manufacturer") or None
+    return await check_manufacturer_recalls(profile_id=profile_id, manufacturer=manufacturer)

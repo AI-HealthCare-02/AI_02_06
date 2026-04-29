@@ -64,6 +64,12 @@ async def enqueue_guide(
 
     Returns:
         ``LifestyleGuidePendingResponse`` — pending guide id + status.
+
+    Raises:
+        HTTPException 409: 활성 약물(복용 중인 처방약) 미등록 시 — service
+            가 직접 raise. 응답 ``detail`` 에 ``code=NO_ACTIVE_MEDICATIONS`` /
+            ``message`` (사용자 안내) / ``redirect_to=/ocr`` 가 포함되어
+            FE 가 토스트 표시 + 처방전 등록 페이지 라우팅을 한 번에 처리한다.
     """
     guide = await service.enqueue_guide_with_owner_check(profile_id, current_account.id)
     return LifestyleGuidePendingResponse(id=guide.id)

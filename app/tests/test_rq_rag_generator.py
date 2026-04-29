@@ -100,7 +100,7 @@ class TestGenerateChatResponseRoundtrip:
             result={
                 "answer": "활명수는 소화제입니다.",
                 "token_usage": {
-                    "model": "gpt-4o-mini",
+                    "model": "gpt-4o",
                     "prompt_tokens": 800,
                     "completion_tokens": 80,
                     "total_tokens": 880,
