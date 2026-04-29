@@ -88,7 +88,7 @@
         ├─ embed_text_via_rq (768d ko-sroberta)
         ├─ HybridRetriever (pgvector cosine + pg_trgm keyword + 가중 합산)
         ├─ context build (상위 K 청크 + 사용자 프로필)
-        └─ generate_chat_response_via_rq (gpt-4o-mini)
+        └─ generate_chat_response_via_rq (gpt-4o)
 
 [messages 테이블 metadata]
    USER 측: intent / retrieval(score, names) / query_keywords

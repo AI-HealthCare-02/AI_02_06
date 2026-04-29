@@ -14,7 +14,7 @@ from app.services.lifestyle_guide_prompt_builder import build_guide_prompt
 
 logger = get_logger(__name__)
 
-_LLM_MODEL = "gpt-4o-mini"
+_LLM_MODEL = "gpt-4o"
 _LLM_TEMPERATURE = 0.3
 
 

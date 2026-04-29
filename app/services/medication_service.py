@@ -431,7 +431,7 @@ class MedicationService:
 
         try:
             response = await client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 response_format={"type": "json_object"},
