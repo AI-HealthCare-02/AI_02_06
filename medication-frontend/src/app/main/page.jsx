@@ -9,6 +9,7 @@ import { useProfile } from '@/contexts/ProfileContext'
 import { useMedication } from '@/contexts/MedicationContext'
 import { useChallenge } from '@/contexts/ChallengeContext'
 import { useOcrDraft, useOcrEntryNavigator } from '@/contexts/OcrDraftContext'
+import TodaySchedule from '@/components/medication/TodaySchedule'
 
 // 활성 OCR draft 카드 — main 우측하단 floating (챗봇 아이콘 위)
 // 사용자가 X 로 카드 전체를 숨길 수 있고 (새로고침 시 다시 표시),
@@ -205,6 +206,9 @@ function MainPageContent() {
 
       {/* ── 대시보드 ── */}
       <main className="max-w-7xl mx-auto w-full px-6 py-14">
+        {/* 오늘의 복약 스케줄 — 약품 그리드 상단 전체 너비 */}
+        <TodaySchedule medications={medications} profileId={selectedProfileId} />
+
         <div className="grid md:grid-cols-12 gap-6 items-start">
           {/* 복약 현황 */}
           <section className="md:col-span-8 bg-white rounded-[32px] p-8 border border-gray-100">
