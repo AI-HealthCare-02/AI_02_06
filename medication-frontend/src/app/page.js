@@ -1,5 +1,6 @@
 'use client'
 import { useRouter } from 'next/navigation'
+import { useEffect, useRef, useState } from 'react' // ← [수정] useEffect, useState 추가
 import { Camera, Pill, MessageCircle, ArrowRight } from 'lucide-react'
 
 const features = [
@@ -26,16 +27,108 @@ const useCases = [
   { label: '만성질환 관리', desc: '꾸준한 복약 습관 형성' },
 ]
 
+// ← [추가] 전역 변수로 자동 스크롤 상태 관리
+let isAutoScrolling = false
+let autoScrollTimeout = null
+
+// ← [추가] 배경 이미지 배열
+const backgroundImages = [
+  '/hero_bg_1.png',
+  '/hero_bg_2.png',
+  '/hero_bg_3.png',
+]
+
 export default function LandingPage() {
   const router = useRouter()
+  // ← [추가] 현재 배경 이미지 인덱스 상태
+  const [currentBgIndex, setCurrentBgIndex] = useState(0)
+  // ← [추가] 배경 이미지 슬라이드쇼 타이머 ref
+  const bgSlideShowTimeoutRef = useRef(null)
+
+  // ← [추가] 배경 이미지 슬라이드쇼 로직
+  useEffect(() => {
+    const startSlideShow = () => {
+      bgSlideShowTimeoutRef.current = setTimeout(() => {
+        setCurrentBgIndex(prevIndex => (prevIndex + 1) % backgroundImages.length)
+      }, 3000) // 5초마다 다음 이미지로 전환
+    }
+
+    startSlideShow()
+
+    return () => {
+      if (bgSlideShowTimeoutRef.current) {
+        clearTimeout(bgSlideShowTimeoutRef.current)
+      }
+    }
+  }, [currentBgIndex])
+
+  // ← [추가] 자동 스크롤 함수
+  const handleAutoScroll = () => {
+    if (isAutoScrolling) return
+
+    isAutoScrolling = true
+    console.log('[Auto-Scroll] 시작')
+
+    const featuresSection = document.getElementById('features-section')
+    if (featuresSection) {
+      featuresSection.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      console.log('[Auto-Scroll] 1단계: 기능 소개로 이동')
+    }
+
+    autoScrollTimeout = setTimeout(() => {
+      const useCasesSection = document.getElementById('usecases-section')
+      if (useCasesSection) {
+        useCasesSection.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        console.log('[Auto-Scroll] 2단계: 사용 사례로 이동')
+      }
+
+      autoScrollTimeout = setTimeout(() => {
+        const ctaSection = document.getElementById('cta-section')
+        if (ctaSection) {
+          ctaSection.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          console.log('[Auto-Scroll] 3단계: CTA로 이동')
+        }
+
+        isAutoScrolling = false
+        console.log('[Auto-Scroll] 완료')
+      }, 2000)
+    }, 2000)
+  }
+
+  // ← [추가] 사용자 스크롤 감지
+  const handleUserScroll = () => {
+    if (isAutoScrolling) {
+      isAutoScrolling = false
+      if (autoScrollTimeout) {
+        clearTimeout(autoScrollTimeout)
+        autoScrollTimeout = null
+      }
+      console.log('[Auto-Scroll] 사용자 스크롤로 인해 중단됨')
+    }
+  }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div
+      className="min-h-screen bg-white"
+      onWheel={handleUserScroll}
+      onTouchMove={handleUserScroll}
+    >
 
       {/* ── 히어로 섹션 ── full-width 다크 */}
       <section
         className="relative w-full min-h-[620px] flex items-center justify-center overflow-hidden bg-black"
+        // ← [추가] 배경 이미지 동적 설정 및 페이드 애니메이션
+        style={{
+          backgroundImage: `url('${backgroundImages[currentBgIndex]}')`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundAttachment: 'fixed',
+          transition: 'background-image 1s ease-in-out', // 1초에 걸쳐 부드럽게 전환
+        }}
       >
+        {/* ← [추가] 배경 이미지 위의 다크 오버레이 (텍스트 가독성 유지) */}
+        <div className="absolute inset-0 bg-black/40" />
+
         {/* 그리드 패턴 */}
         <div
           className="absolute inset-0 pointer-events-none opacity-20"
@@ -85,7 +178,8 @@ export default function LandingPage() {
             AI 기반 지능형 복약 관리
           </p>
           <h1 className="text-5xl md:text-7xl lg:text-8xl font-black text-white leading-[1.05] tracking-tighter mb-8">
-            복약의 새로운<br />
+            복약의 새로운  
+
             <span className="text-gray-600">기준</span>
           </h1>
           <p className="text-gray-500 text-base md:text-lg mb-12 leading-relaxed max-w-xl mx-auto font-medium">
@@ -101,16 +195,29 @@ export default function LandingPage() {
               <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
             </button>
             <button
+              onClick={handleAutoScroll}
               className="px-10 py-4 text-white text-sm font-black rounded-full border border-white/20 hover:bg-white/5 transition-all cursor-pointer"
             >
               서비스 소개
             </button>
           </div>
+
+          {/* ← [추가] 배경 이미지 인디케이터 (선택사항) */}
+          <div className="flex gap-2 justify-center mt-12">
+            {backgroundImages.map((_, index) => (
+              <div
+                key={index}
+                className={`w-2 h-2 rounded-full transition-all ${
+                  index === currentBgIndex ? 'bg-white w-8' : 'bg-white/40'
+                }`}
+              />
+            ))}
+          </div>
         </div>
       </section>
 
       {/* ── 기능 소개 ── */}
-      <section className="max-w-6xl mx-auto px-6 py-32">
+      <section id="features-section" className="max-w-6xl mx-auto px-6 py-32">
         <div className="text-center mb-20">
           <p className="text-[11px] font-black text-gray-400 tracking-[0.3em] uppercase mb-4">Core Value</p>
           <h2 className="text-4xl md:text-5xl font-black text-gray-900 tracking-tighter">
@@ -134,7 +241,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── 사용 사례 ── */}
-      <section className="bg-slate-50 py-32">
+      <section id="usecases-section" className="bg-slate-50 py-32">
         <div className="max-w-6xl mx-auto px-6">
           <div className="text-center mb-16">
             <p className="text-[11px] font-black text-gray-400 tracking-[0.3em] uppercase mb-4">Target</p>
@@ -157,7 +264,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── CTA 섹션 ── */}
-      <section className="py-32 text-center bg-black relative overflow-hidden">
+      <section id="cta-section" className="py-32 text-center bg-black relative overflow-hidden">
         <div className="absolute inset-0 opacity-10">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-blue-500 rounded-full blur-[120px]" />
         </div>
