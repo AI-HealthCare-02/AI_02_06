@@ -108,17 +108,17 @@ export default function MedicationDetailPage() {
     if (med) setIsLoading(false)
   }, [med])
 
-  // 주의사항/부작용/상호작용 탭 선택 시 drug-info — Context 의 lazy cache 사용
-  // ('용법' 탭에서는 호출 안 함, 한 번 받은 결과는 같은 세션 동안 cache 재활용)
+  // 모든 탭에서 drug-info 사용 (용법 탭에도 식약처 표준 용법 표시).
+  // Context 의 lazy cache 사용 — 한 번 받은 결과는 같은 세션 동안 cache 재활용.
   useEffect(() => {
-    if (!med || activeTab === '용법') return
+    if (!med) return
     if (drugInfo) return
     setIsDrugInfoLoading(true)
     getDrugInfo(id)
       .then(setDrugInfo)
       .catch(err => console.error(err))
       .finally(() => setIsDrugInfoLoading(false))
-  }, [activeTab, med, drugInfo, id, getDrugInfo])
+  }, [med, drugInfo, id, getDrugInfo])
 
   const handleDelete = async () => {
     setIsDeleting(true)
@@ -246,23 +246,41 @@ export default function MedicationDetailPage() {
                     {med.end_date ? ` ~ ${med.end_date}` : ''}
                   </p>
                 </div>
+                {/* 식약처 표준 용법 (UD_DOC_DATA 평문화 — 처방전 용법과 별개로 참고용) */}
+                {drugInfo?.dosage && (
+                  <div className="mt-4 p-4 bg-blue-50 rounded-xl">
+                    <p className="text-xs font-black text-blue-600 mb-2 uppercase tracking-wide">
+                      식약처 표준 용법
+                    </p>
+                    <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">
+                      {drugInfo.dosage}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* 주의사항 탭 */}
+            {/* 주의사항 탭 — 식약처 카테고리(경고/금기/신중 투여/임부/...)별 그룹 표시 */}
             {activeTab === '주의사항' && (
-              <div className="space-y-3 animate-in fade-in duration-200">
+              <div className="space-y-5 animate-in fade-in duration-200">
                 {isDrugInfoLoading ? (
                   <DrugInfoSkeleton />
                 ) : drugInfo?.warnings?.length > 0 ? (
-                  <>
-                    {drugInfo.warnings.map((w, i) => (
-                      <div key={i} className="flex gap-3 p-4 bg-yellow-50 rounded-xl">
-                        <AlertTriangle size={16} className="text-yellow-500 shrink-0 mt-0.5" />
-                        <p className="text-sm text-gray-600 leading-relaxed">{w}</p>
+                  drugInfo.warnings.map((section) => (
+                    <div key={section.category}>
+                      <h3 className="text-xs font-black text-gray-700 mb-2 uppercase tracking-wide">
+                        {section.category}
+                      </h3>
+                      <div className="space-y-2">
+                        {section.items.map((item, i) => (
+                          <div key={i} className="flex gap-3 p-4 bg-yellow-50 rounded-xl">
+                            <AlertTriangle size={16} className="text-yellow-500 shrink-0 mt-0.5" />
+                            <p className="text-sm text-gray-600 leading-relaxed">{item}</p>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </>
+                    </div>
+                  ))
                 ) : (
                   <p className="text-sm text-gray-400 text-center py-6">주의사항 정보를 불러올 수 없습니다.</p>
                 )}
