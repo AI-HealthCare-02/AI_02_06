@@ -20,12 +20,7 @@ import asyncio
 import time
 from typing import Any
 
-# Queue 타입 힌트용만 import — 실제 인스턴스는 외부 주입 (테스트 용이성).
-try:
-    from rq import Queue  # pragma: no cover — type hint only
-except ImportError:  # pragma: no cover
-    Queue = Any  # type: ignore[misc, assignment]
-
+from rq import Queue
 
 EMBEDDING_DIMENSIONS = 768
 _DEFAULT_POLL_INTERVAL_SEC = 0.1

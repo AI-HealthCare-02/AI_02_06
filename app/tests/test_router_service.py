@@ -72,15 +72,19 @@ class TestHospitalKeywordToolSchema:
 
 
 class TestToolSchemasList:
-    def test_contains_hospital_tools(self) -> None:
-        """병원/약국 검색 툴 2종은 항상 등록되어 있어야 한다.
+    def test_contains_all_tools(self) -> None:
+        """현재 등록된 5 종 tool — 병원 2종 + RAG 약품지식 1종 + 회수 2종.
 
-        Phase 7 에서 회수 관련 툴 2종이 추가되어 set 엄격 동등 비교는 깨졌다.
-        부분집합(subset) 비교로 hospital 2종 회귀만 가드한다. 다른 툴 추가/제거
-        는 본 테스트와 무관하게 각자 own 테스트에서 검증.
+        엄격 동등 비교로 향후 tool 추가/제거를 즉시 감지한다.
         """
         names = {t["function"]["name"] for t in TOOL_SCHEMAS}
-        assert {"search_hospitals_by_location", "search_hospitals_by_keyword"} <= names
+        assert names == {
+            "search_hospitals_by_location",
+            "search_hospitals_by_keyword",
+            "search_medicine_knowledge_base",
+            "check_user_medications_recall",
+            "check_manufacturer_recalls",
+        }
 
 
 # ── needs_geolocation_for ──────────────────────────────────────

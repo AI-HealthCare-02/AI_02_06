@@ -18,7 +18,12 @@ import httpx
 
 from app.models.data_sync_log import DataSyncLog
 from app.repositories.medicine_info_repository import MedicineInfoRepository
-from app.services.medicine_doc_parser import flatten_doc_plaintext
+from app.repositories.medicine_ingredient_repository import MedicineIngredientRepository
+from app.services.medicine_doc_parser import (
+    flatten_doc_plaintext,
+    parse_nb_categories,
+    parse_ud_plaintext,
+)
 from app.utils.medicine_filters import is_hospital_only
 
 logger = logging.getLogger(__name__)
@@ -27,11 +32,25 @@ logger = logging.getLogger(__name__)
 # 식약처 의약품 허가정보 서비스 (DrugPrdtPrmsnInfoService07)
 _BASE_URL = "https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07"
 _DETAIL_ENDPOINT = f"{_BASE_URL}/getDrugPrdtPrmsnDtlInq06"  # 허가 상세정보
+_INGREDIENT_ENDPOINT = f"{_BASE_URL}/getDrugPrdtMcpnDtlInq07"  # 약품-성분 1:N
 
 # ── 백업 저장 경로 및 HTTP 설정 ──────────────────────────────────────
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "ai_worker" / "data"
 _REQUEST_TIMEOUT = 30.0
 _MAX_ROWS_PER_PAGE = 100
+
+
+def _split_nb_to_columns(nb_xml: str | None) -> dict:
+    """NB_DOC_DATA XML 을 medicine_info 의 precautions/side_effects 컬럼 dict 로 변환.
+
+    parse_nb_categories 의 (dict, list) 튜플을 컬럼 매핑 dict 로 wrap. None / 빈 결과는
+    None 으로 통일해 NULL 보장.
+    """
+    precautions, side_effects = parse_nb_categories(nb_xml)
+    return {
+        "precautions": precautions or None,
+        "side_effects": side_effects or None,
+    }
 
 
 class MedicineDataService:
@@ -44,6 +63,7 @@ class MedicineDataService:
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
         self.repository = MedicineInfoRepository()
+        self.ingredient_repository = MedicineIngredientRepository()
 
     # ── 메인 동기화 메서드 ─────────────────────────────────────────
     # 전체 흐름:
@@ -133,6 +153,66 @@ class MedicineDataService:
             "updated": stats["updated"],
         }
 
+    # ── 약품-성분(Mcpn07) 동기화 ─────────────────────────────────────────
+    # 흐름:
+    #   1. Mcpn07 endpoint 페이징 수집
+    #   2. ITEM_SEQ -> medicine_info_id FK 매핑 (선행 sync 필요)
+    #   3. 매칭 안 되는 row 는 skip (medicine_info 미등록 약품)
+    #   4. (medicine_info_id, mtral_sn) UPSERT
+
+    async def sync_ingredients(self) -> dict[str, int]:
+        """식약처 Mcpn07 응답을 받아 medicine_ingredient 테이블을 채움.
+
+        medicine_info 가 먼저 sync 되어 있어야 FK 해석 가능. 모르는
+        item_seq 는 skip (로그 only).
+
+        Returns:
+            {"fetched": n, "inserted": i, "updated": u, "skipped": s}.
+        """
+        params = {
+            "serviceKey": self.api_key,
+            "type": "json",
+            "numOfRows": _MAX_ROWS_PER_PAGE,
+            "pageNo": 1,
+        }
+        logger.info("Starting ingredient sync (Mcpn07)")
+        raw_items = await self._fetch_all_pages(params, endpoint=_INGREDIENT_ENDPOINT)
+        if not raw_items:
+            logger.info("No ingredient data to sync")
+            return {"fetched": 0, "inserted": 0, "updated": 0, "skipped": 0}
+
+        # ITEM_SEQ -> medicine_info.id 매핑 (한 번에 batch lookup)
+        item_seqs = [item.get("ITEM_SEQ", "") for item in raw_items]
+        id_map = await self.ingredient_repository.get_medicine_id_map(item_seqs)
+
+        transformed: list[dict] = []
+        skipped = 0
+        for item in raw_items:
+            row = self._transform_ingredient_item(item, id_map)
+            if row is None:
+                skipped += 1
+                continue
+            transformed.append(row)
+
+        if not transformed:
+            logger.warning("All ingredient rows skipped — medicine_info empty?")
+            return {"fetched": len(raw_items), "inserted": 0, "updated": 0, "skipped": skipped}
+
+        stats = await self.ingredient_repository.bulk_upsert(transformed)
+        logger.info(
+            "Ingredient sync complete: fetched=%d, inserted=%d, updated=%d, skipped=%d",
+            len(raw_items),
+            stats["inserted"],
+            stats["updated"],
+            skipped,
+        )
+        return {
+            "fetched": len(raw_items),
+            "inserted": stats["inserted"],
+            "updated": stats["updated"],
+            "skipped": skipped,
+        }
+
     # ── API 파라미터 구성 (전체: 필터 없음 / 증분: start_change_date 설정) ──
 
     async def _build_params(self, full_sync: bool) -> dict:
@@ -165,13 +245,14 @@ class MedicineDataService:
 
     # ── 페이징 수집 (pageNo를 증가시키며 totalCount에 도달할 때까지 반복) ──
 
-    async def _fetch_all_pages(self, params: dict) -> list[dict]:
+    async def _fetch_all_pages(self, params: dict, endpoint: str = _DETAIL_ENDPOINT) -> list[dict]:
         """Fetch all pages of data from the public API.
 
         Paginates through API responses until all data is collected.
 
         Args:
             params: Base API request parameters.
+            endpoint: API endpoint URL (default: Dtl06 — 허가 상세).
 
         Returns:
             List of all item dictionaries from the API.
@@ -183,7 +264,7 @@ class MedicineDataService:
             while True:
                 params["pageNo"] = page
                 response = await client.get(
-                    _DETAIL_ENDPOINT,
+                    endpoint,
                     params=params,
                 )
                 response.raise_for_status()
@@ -280,10 +361,49 @@ class MedicineDataService:
             "ee_doc_data": item.get("EE_DOC_DATA") or None,
             "ud_doc_data": item.get("UD_DOC_DATA") or None,
             "nb_doc_data": item.get("NB_DOC_DATA") or None,
-            # UI 표시용 평문 효능 (XML 평문화)
+            # UI 표시용 평문 / 카테고리 분류 (XML → drug-info 응답 직결)
             "efficacy": flatten_doc_plaintext(item.get("EE_DOC_DATA")) or None,
+            "dosage": parse_ud_plaintext(item.get("UD_DOC_DATA")) or None,
+            **_split_nb_to_columns(item.get("NB_DOC_DATA")),
             # 동기화 타임스탬프 (tz-aware UTC — CLAUDE.md 4.2)
             "last_synced_at": datetime.now(tz=UTC),
+        }
+
+    # ── Mcpn07 응답 -> medicine_ingredient row 변환 ─────────────────
+
+    @staticmethod
+    def _transform_ingredient_item(item: dict, id_map: dict[str, int]) -> dict | None:
+        """Mcpn07 한 row 를 medicine_ingredient UPSERT 입력 dict 로 변환.
+
+        Args:
+            item: Mcpn07 API item (ITEM_SEQ / MTRAL_SN / MTRAL_NM 등).
+            id_map: ITEM_SEQ -> MedicineInfo.id 매핑.
+
+        Returns:
+            UPSERT dict 또는 None (medicine_info 미존재 / 필수 필드 누락 시).
+        """
+        item_seq = item.get("ITEM_SEQ", "")
+        medicine_info_id = id_map.get(item_seq)
+        if medicine_info_id is None:
+            return None
+
+        try:
+            mtral_sn = int(item.get("MTRAL_SN") or 0)
+        except (ValueError, TypeError):
+            return None
+
+        mtral_name = (item.get("MTRAL_NM") or "").strip()
+        if not mtral_name or mtral_sn <= 0:
+            return None
+
+        return {
+            "medicine_info_id": medicine_info_id,
+            "mtral_sn": mtral_sn,
+            "mtral_code": item.get("MTRAL_CODE") or None,
+            "mtral_name": mtral_name,
+            "main_ingr_eng": item.get("MAIN_INGR_ENG") or None,
+            "quantity": str(item.get("QNT")) if item.get("QNT") not in (None, "") else None,
+            "unit": item.get("INGD_UNIT_CD") or None,
         }
 
     # ── 원본 데이터 JSON 백업 (ai_worker/data/에 타임스탬프 파일) ──

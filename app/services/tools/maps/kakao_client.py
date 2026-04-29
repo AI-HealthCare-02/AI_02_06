@@ -143,8 +143,7 @@ async def kakao_local_search(
     Raises:
         KakaoAPIError: 4xx, 5xx 재시도 실패, 타임아웃, JSON/스키마 오류.
     """
-    key = api_key or config.KAKAO_CLIENT_ID
-    headers = {"Authorization": f"KakaoAK {key}"}
+    headers = {"Authorization": f"KakaoAK {api_key or config.KAKAO_CLIENT_ID}"}
     params = _build_params(
         query=query,
         x=x,
@@ -154,11 +153,35 @@ async def kakao_local_search(
         page=page,
         size=size,
     )
-
     http_client = client or _get_shared_client()
-
     logger.debug("[ToolCalling] Kakao Local search query=%r has_coords=%s", query, x is not None and y is not None)
+    response = await _request_with_retry(http_client, params, headers, query=query)
+    places = _parse_response(response)
+    logger.info("[ToolCalling] Kakao Local search hit=%d query=%r", len(places), query)
+    return places
 
+
+async def _request_with_retry(
+    http_client: httpx.AsyncClient,
+    params: dict[str, Any],
+    headers: dict[str, str],
+    *,
+    query: str,
+) -> httpx.Response:
+    """GET ``KAKAO_ENDPOINT`` with single 5xx retry; 4xx/timeout raise immediately.
+
+    Args:
+        http_client: Reused ``AsyncClient``.
+        params: Pre-built query parameters.
+        headers: Authorization header dict.
+        query: Original keyword (logged on failure paths).
+
+    Returns:
+        Successful (2xx) ``httpx.Response``.
+
+    Raises:
+        KakaoAPIError: Timeout / transport error / 4xx / exhausted 5xx retry.
+    """
     last_error: Exception | None = None
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
@@ -183,9 +206,7 @@ async def kakao_local_search(
             logger.error("[ToolCalling] Kakao API %d query=%r body=%r", status, query, response.text[:200])
             raise KakaoAPIError(f"Kakao API {status}: {response.text[:200]}")
 
-        places = _parse_response(response)
-        logger.info("[ToolCalling] Kakao Local search hit=%d query=%r", len(places), query)
-        return places
+        return response
 
     # 방어적: 위 루프가 항상 return/raise 로 끝나지만 mypy 안심용.
     raise KakaoAPIError("Kakao API exhausted retries") from last_error

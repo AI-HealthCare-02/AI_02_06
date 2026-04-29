@@ -11,32 +11,12 @@ import BottomNav from '@/components/layout/BottomNav'
 import EmptyState from '@/components/common/EmptyState'
 import api, { showError } from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
+import { useLifestyleGuide } from '@/contexts/LifestyleGuideContext'
+import { useChallenge, useChallengeStart, useChallengeCheck } from '@/contexts/ChallengeContext'
 import StartChallengeModal from '@/components/common/StartChallengeModal'
 import toast from 'react-hot-toast'
-import { streamSSE } from '@/lib/sseClient'
 
-const GUIDE_TERMINAL_ERROR_MESSAGES = {
-  no_active_meds: '활성 약물이 없어 가이드를 만들 수 없어요. 복약 등록 후 다시 시도해주세요.',
-  failed: '가이드 생성 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.',
-}
-
-/**
- * 가이드 생성 SSE 를 ready/terminal 까지 자동 재연결하며 await for-of 로 소비.
- * timeout event 시 새 연결 — 무한 재시도 (cancel 또는 ready 까지).
- *
- * @yields {{id, profile_id, status, content, medication_snapshot, created_at, processed_at}}
- */
-async function* watchGuideStatus(guideId, signal) {
-  while (true) {
-    let timedOut = false
-    for await (const ev of streamSSE(`/api/v1/lifestyle-guides/${guideId}/stream`, { signal })) {
-      if (ev.event === 'update') yield ev.data
-      else if (ev.event === 'timeout') { timedOut = true; break }
-      else if (ev.event === 'error') throw new Error(ev.data?.detail || 'sse error')
-    }
-    if (!timedOut) return
-  }
-}
+// 가이드 생성 SSE / terminal error mapping 은 LifestyleGuideContext 로 이동 완료.
 
 // ── 탭 메타데이터 ──────────────────────────────────────────────────────────────
 // key: API 응답 content 객체의 키값 및 challenge.category 매핑 값과 일치해야 함
@@ -211,8 +191,17 @@ function SymptomLogForm({ profileId, onSaved }) {
 //   1) COMPLETED → 초록 "완료" 뱃지 (버튼 없음)
 //   2) is_active=false → "시작하기" 버튼 (과거 가이드 열람 시 비활성화)
 //   3) is_active=true → 오늘 체크 여부에 따라 "오늘 완료 체크" 버튼 or "오늘 완료!" 텍스트
-function ChallengeBanner({ challenge, isViewingHistory, onStart, onCheck, isProcessing, onGoToChallenge }) {
+function ChallengeBanner({ challenge, isViewingHistory }) {
+  const router = useRouter()
+  // 시작/체크 정책은 hook 으로 ─ 어디서 호출하든 동일 동작.
+  const { isStarting, startTarget, requestStart } = useChallengeStart()
+  const { checkingId, checkToday } = useChallengeCheck()
+
   if (!challenge) return null
+
+  const isStartingThis = isStarting && startTarget?.id === challenge.id
+  const isChecking = checkingId === challenge.id
+  const isProcessing = isStartingThis || isChecking
 
   const today = new Date().toISOString().split('T')[0]
   // completed_dates 배열에 오늘 날짜가 있는지 확인 (string/Date 양쪽 타입 대응)
@@ -254,7 +243,7 @@ function ChallengeBanner({ challenge, isViewingHistory, onStart, onCheck, isProc
         ) : !challenge.is_active ? (
           // 상태 2: 미시작 → 시작하기 버튼 (PATCH {is_active: true})
           <button
-            onClick={() => onStart(challenge)}
+            onClick={() => requestStart(challenge)}
             disabled={isProcessing}
             className={`ml-3 px-4 py-2 rounded-xl text-xs font-bold shrink-0 transition-colors cursor-pointer ${
               isProcessing ? 'bg-gray-100 text-gray-400 cursor-wait' : 'bg-gray-900 text-white hover:bg-gray-700'
@@ -269,7 +258,7 @@ function ChallengeBanner({ challenge, isViewingHistory, onStart, onCheck, isProc
               오늘 완료!
             </span>
             <button
-              onClick={onGoToChallenge}
+              onClick={() => router.push('/challenge')}
               className="text-xs font-bold text-gray-400 hover:text-gray-700 px-2 py-2 rounded-xl hover:bg-gray-100 transition-colors cursor-pointer"
               title="챌린지 페이지에서 보기"
             >
@@ -279,7 +268,7 @@ function ChallengeBanner({ challenge, isViewingHistory, onStart, onCheck, isProc
         ) : (
           // 상태 3-a: 진행중, 오늘 미체크 → 완료 체크 버튼 (PATCH {completed_dates, challenge_status})
           <button
-            onClick={() => onCheck(challenge)}
+            onClick={() => checkToday(challenge)}
             disabled={isProcessing}
             className={`ml-3 px-3 py-2 rounded-xl text-xs font-bold shrink-0 transition-colors cursor-pointer ${
               isProcessing ? 'bg-gray-100 text-gray-400 cursor-wait' : 'bg-blue-500 text-white hover:bg-blue-600'
@@ -296,84 +285,59 @@ function ChallengeBanner({ challenge, isViewingHistory, onStart, onCheck, isProc
 // ── 메인 페이지 ────────────────────────────────────────────────────────────────
 export default function LifestyleGuidePage() {
   const router = useRouter()
-  const { selectedProfileId: profileId, isLoading: isProfileLoading } = useProfile()
+  const { selectedProfileId: profileId } = useProfile()
+  const {
+    guides,
+    latestGuide,
+    isLoading: guidesLoading,
+    generateGuide,
+    deleteGuide,
+  } = useLifestyleGuide()
+  const { challengesByGuide } = useChallenge()
+  // 챌린지 시작/체크 모두 hook 으로 단일 정책. 페이지는 derived 만 책임.
+  const { startTarget, isStarting, requestStart, cancelStart, confirmStart } = useChallengeStart()
+  const { checkingId, checkToday } = useChallengeCheck()
 
-  const [isLoading, setIsLoading] = useState(true)
   const [isGenerating, setIsGenerating] = useState(false)
-  const [guides, setGuides] = useState([])                   // 전체 가이드 이력 목록 (최신순)
   const [selectedGuide, setSelectedGuide] = useState(null)   // 현재 날짜 칩으로 선택된 가이드
   const [activeTab, setActiveTab] = useState('interaction')  // 현재 선택된 탭 키
 
-  const [guideChallenges, setGuideChallenges] = useState([])         // 선택된 가이드에 연결된 챌린지 목록
-  const [isLoadingChallenges, setIsLoadingChallenges] = useState(false)
-  const [processingChallengeId, setProcessingChallengeId] = useState(null) // 현재 처리 중인 챌린지 ID
-  const [startTarget, setStartTarget] = useState(null)   // 모달에 전달할 챌린지 객체
-  const [isStarting, setIsStarting] = useState(false)    // 모달 확인 버튼 처리 중 여부
 
-  const isInitialLoad = useRef(true)
   const chipScrollRef = useRef(null)
+  const isLoading = guidesLoading
+
+  // selectedGuide 의 챌린지는 ChallengeContext store 에서 derived
+  const guideChallenges = selectedGuide ? challengesByGuide(selectedGuide.id) : []
+  const isLoadingChallenges = false  // store 에서 derived 라 별도 로딩 없음
 
   // 선택된 가이드가 최신(guides[0])이 아닌 경우 과거 열람 모드
   // → 과거 열람 모드에서는 챌린지 시작/체크 버튼이 모두 비활성화됨
-  const isViewingHistory = guides.length > 0 && selectedGuide?.id !== guides[0]?.id
+  // selectedGuide 가 null 인 상태 (generation 중 transient 등) 에서 배너 렌더되어
+  // null.created_at 접근하는 것을 방지하려 selectedGuide 존재 여부도 명시 가드.
+  const isViewingHistory = !!selectedGuide && guides.length > 0 && selectedGuide.id !== guides[0]?.id
 
-  // ── 초기 로딩 ──
-  // profileId가 확정되면 최신 가이드와 전체 이력을 병렬로 요청
-  // Promise.allSettled 사용: 하나가 실패해도 나머지 결과는 활용
+  // 가이드 store 변동 시 selectedGuide 자동 보정.
+  //
+  // 단순 id 비교만으로는 부족 — Context 의 generateGuide 가 SSE ready 시점에
+  // store 의 placeholder 를 같은 id 로 in-place 교체하므로 (setGuides(prev.map))
+  // page-local selectedGuide 객체가 stale placeholder 를 가리키고 있을 수 있다.
+  // 따라서 store 의 fresh 객체로 reference 도 동기화한다.
   useEffect(() => {
-    if (isProfileLoading) return
-    if (!profileId) {
-      setIsLoading(false)
-      return
-    }
-    const load = async () => {
-      try {
-        if (isInitialLoad.current) setIsLoading(true)
-
-        const [latestRes, listRes] = await Promise.allSettled([
-          api.get(`/api/v1/lifestyle-guides/latest?profile_id=${profileId}`),
-          api.get(`/api/v1/lifestyle-guides?profile_id=${profileId}`),
-        ])
-
-        const list = listRes.status === 'fulfilled' ? listRes.value.data : []
-        setGuides(list)
-
-        // 최신 가이드를 기본 선택 (실패 시 목록의 첫 번째로 대체)
-        if (latestRes.status === 'fulfilled') {
-          setSelectedGuide(latestRes.value.data)
-        } else if (list.length > 0) {
-          setSelectedGuide(list[0])
-        }
-      } catch (err) {
-        if (err.response?.status !== 401) showError('데이터를 불러오는데 실패했습니다.')
-      } finally {
-        setIsLoading(false)
-        isInitialLoad.current = false
+    if (selectedGuide) {
+      const fresh = guides.find(g => g.id === selectedGuide.id)
+      if (fresh) {
+        if (fresh !== selectedGuide) setSelectedGuide(fresh)
+        return
       }
     }
-    load()
-  }, [profileId, isProfileLoading])
-
-  // ── 선택된 가이드의 챌린지 로딩 ──
-  // 날짜 칩으로 다른 가이드 선택 시마다 해당 가이드에 연결된 챌린지 목록 재요청
-  useEffect(() => {
-    if (!selectedGuide?.id) {
-      setGuideChallenges([])
-      return
+    if (latestGuide) {
+      setSelectedGuide(latestGuide)
+    } else if (guides.length > 0) {
+      setSelectedGuide(guides[0])
+    } else {
+      setSelectedGuide(null)
     }
-    const loadChallenges = async () => {
-      setIsLoadingChallenges(true)
-      try {
-        const res = await api.get(`/api/v1/lifestyle-guides/${selectedGuide.id}/challenges`)
-        setGuideChallenges(res.data)
-      } catch {
-        setGuideChallenges([])
-      } finally {
-        setIsLoadingChallenges(false)
-      }
-    }
-    loadChallenges()
-  }, [selectedGuide?.id])
+  }, [latestGuide, guides, selectedGuide])
 
   // ── 현재 탭에 해당하는 챌린지 1개 ──
   // 하단 배너에 표시할 챌린지: 현재 탭의 category와 일치하는 것 중 DELETED 제외
@@ -395,41 +359,10 @@ export default function LifestyleGuidePage() {
     if (isGenerating) return
     setIsGenerating(true)
     const abortController = new AbortController()
-
     try {
-      const enqueueRes = await api.post(
-        `/api/v1/lifestyle-guides/generate?profile_id=${profileId}`,
-        null,
-      )
-      const pendingId = enqueueRes.data.id
-      const pendingGuide = {
-        id: pendingId,
-        profile_id: profileId,
-        status: 'pending',
-        content: {},
-        medication_snapshot: [],
-        created_at: new Date().toISOString(),
-        processed_at: null,
-      }
-      setGuides((prev) => [pendingGuide, ...prev])
-      setSelectedGuide(pendingGuide)
-
-      for await (const payload of watchGuideStatus(pendingId, abortController.signal)) {
-        const status = payload.status
-        if (status === 'ready') {
-          setGuides((prev) => prev.map((g) => (g.id === pendingId ? payload : g)))
-          setSelectedGuide(payload)
-          toast.success('새 가이드가 생성되었습니다!')
-          return
-        }
-        if (status in GUIDE_TERMINAL_ERROR_MESSAGES) {
-          showError(GUIDE_TERMINAL_ERROR_MESSAGES[status])
-          setGuides((prev) => prev.filter((g) => g.id !== pendingId))
-          setSelectedGuide((prev) => (prev?.id === pendingId ? null : prev))
-          return
-        }
-        // status='pending' — 다음 update 대기 (스켈레톤 유지)
-      }
+      // Context 의 generateGuide 가 placeholder 삽입 + SSE update + ready 자동 처리
+      await generateGuide(profileId, abortController.signal)
+      toast.success('새 가이드가 생성되었습니다!')
     } catch (err) {
       // BE 409 + detail.code=NO_ACTIVE_MEDICATIONS → 토스트 + 처방전 등록 페이지 자동 이동
       const detail = err.response?.data?.detail
@@ -445,46 +378,23 @@ export default function LifestyleGuidePage() {
     }
   }
 
-  // ── 가이드 삭제 ──
-  // DELETE /api/v1/lifestyle-guides/{id}
-  // 미시작 챌린지는 서버에서 소프트 삭제, 진행중/완료 챌린지는 guide_id=NULL로 유지
   const handleDeleteGuide = async (guide) => {
     if (!confirm(`${formatFullDate(guide.created_at)} 가이드를 삭제하시겠습니까?`)) return
     try {
-      await api.delete(`/api/v1/lifestyle-guides/${guide.id}`)
-      const newGuides = guides.filter((g) => g.id !== guide.id)
-      setGuides(newGuides)
-      if (selectedGuide?.id === guide.id) {
-        setSelectedGuide(newGuides[0] || null)
-      }
+      await deleteGuide(guide.id)
       toast.success('가이드가 삭제되었습니다.')
     } catch {
       showError('가이드 삭제에 실패했습니다.')
     }
   }
 
-  // ── 챌린지 시작 ──
-  // 시작하기 버튼 클릭 → 모달 표시 (즉시 API 호출 X)
-  const handleChallengeStart = (challenge) => {
-    setStartTarget(challenge)
-  }
-
-  // ── 챌린지 시작 확인 (모달 onConfirm) ──
-  // PATCH /api/v1/challenges/{id}/start { difficulty, target_days }
-  // /start 엔드포인트: is_active=True + started_at 타임스탬프 기록 + 커스텀값 저장
+  // ── 챌린지 시작 (모달 onConfirm) ──
+  // useChallengeStart 의 confirmStart 가 PATCH /api/v1/challenges/{id}/start 호출.
+  // ChallengeContext 가 응답으로 store in-place 갱신 → guideChallenges derived 자동 반영.
   const handleConfirmStart = async (difficulty, targetDays) => {
-    if (!startTarget || isStarting) return
-    setIsStarting(true)
-    setProcessingChallengeId(startTarget.id)
     try {
-      const res = await api.patch(`/api/v1/challenges/${startTarget.id}/start`, {
-        difficulty,
-        target_days: targetDays,
-      })
-      setGuideChallenges((prev) =>
-        prev.map((c) => (c.id === startTarget.id ? { ...c, ...res.data } : c))
-      )
-      setStartTarget(null)
+      const updated = await confirmStart(difficulty, targetDays)
+      if (!updated) return
       toast(
         (t) => (
           <div className="flex items-center gap-3">
@@ -501,45 +411,10 @@ export default function LifestyleGuidePage() {
       )
     } catch {
       showError('챌린지 시작에 실패했습니다.')
-    } finally {
-      setIsStarting(false)
-      setProcessingChallengeId(null)
     }
   }
 
-  // ── 챌린지 오늘 완료 체크 ──
-  // PATCH /api/v1/challenges/{id} { completed_dates, challenge_status }
-  // 목표 달성 일수(target_days) 도달 시 자동으로 COMPLETED 상태로 전환
-  const handleChallengeCheck = async (challenge) => {
-    if (processingChallengeId) return
-    const today = new Date().toISOString().split('T')[0]
-    const alreadyChecked = challenge.completed_dates?.some(
-      (d) => (typeof d === 'string' ? d : d.toISOString?.().split('T')[0]) === today
-    )
-    if (alreadyChecked) {
-      showError('오늘은 이미 체크했습니다!')
-      return
-    }
-
-    setProcessingChallengeId(challenge.id)
-    try {
-      const newDates = [...(challenge.completed_dates || []), today]
-      // 완료 날짜 수가 목표 일수 이상이면 COMPLETED, 아니면 IN_PROGRESS 유지
-      const isCompleted = newDates.length >= challenge.target_days
-      const res = await api.patch(`/api/v1/challenges/${challenge.id}`, {
-        completed_dates: newDates,
-        challenge_status: isCompleted ? 'COMPLETED' : 'IN_PROGRESS',
-      })
-      setGuideChallenges((prev) =>
-        prev.map((c) => (c.id === challenge.id ? { ...c, ...res.data } : c))
-      )
-      if (isCompleted) toast.success('챌린지를 완료했습니다! 수고하셨어요.')
-    } catch {
-      showError('체크에 실패했습니다.')
-    } finally {
-      setProcessingChallengeId(null)
-    }
-  }
+  // 체크 정책은 useChallengeCheck hook 으로 이전 — handleChallengeCheck 제거됨.
 
   // ── 로딩 스켈레톤 ──
   if (isLoading) {
@@ -752,7 +627,8 @@ export default function LifestyleGuidePage() {
                       const checkedToday = c.completed_dates?.some(
                         (d) => (typeof d === 'string' ? d : d.toISOString?.().split('T')[0]) === today
                       )
-                      const isProcessing = processingChallengeId === c.id
+                      const isProcessing =
+                        (isStarting && startTarget?.id === c.id) || checkingId === c.id
 
                       return (
                         <div
@@ -778,7 +654,7 @@ export default function LifestyleGuidePage() {
                               <span className="bg-green-50 text-green-500 text-[10px] font-bold px-2 py-1 rounded-full">완료</span>
                             ) : !c.is_active ? (
                               <button
-                                onClick={() => handleChallengeStart(c)}
+                                onClick={() => requestStart(c)}
                                 disabled={isViewingHistory || isProcessing}
                                 className={`text-[10px] font-bold px-3 py-1.5 rounded-full transition-colors ${
                                   isViewingHistory
@@ -794,7 +670,7 @@ export default function LifestyleGuidePage() {
                               <span className="bg-green-50 text-green-500 text-[10px] font-bold px-2 py-1 rounded-full">오늘 완료</span>
                             ) : (
                               <button
-                                onClick={() => handleChallengeCheck(c)}
+                                onClick={() => checkToday(c)}
                                 disabled={isViewingHistory || isProcessing}
                                 className={`text-[10px] font-bold px-3 py-1.5 rounded-full transition-colors ${
                                   isViewingHistory
@@ -819,6 +695,9 @@ export default function LifestyleGuidePage() {
         )}
       </div>
 
+      {/* (lifestyle-guide 하단 챌린지 배너 제거 — main PR 의도. 챌린지 시작은
+          가이드 내 추천 카드의 "시작하기" 버튼이 useChallengeStart hook 으로 직접
+          처리, 별도 floating banner 는 화면을 가려 제거됨.) */}
 
       <BottomNav />
 
@@ -827,7 +706,7 @@ export default function LifestyleGuidePage() {
         <StartChallengeModal
           challenge={startTarget}
           onConfirm={handleConfirmStart}
-          onClose={() => setStartTarget(null)}
+          onClose={cancelStart}
           isLoading={isStarting}
         />
       )}

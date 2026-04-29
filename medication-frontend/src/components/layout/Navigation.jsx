@@ -7,6 +7,7 @@ import LogoutModal, { useLogout } from '@/components/auth/LogoutModal'
 import ChatModal from '@/components/chat/ChatModal'
 import ProfileSwitcher from '@/components/layout/ProfileSwitcher'
 import { useProfile } from '@/contexts/ProfileContext'
+import { useOcrEntryNavigator } from '@/contexts/OcrDraftContext'
 
 export default function Navigation() {
   const router = useRouter()
@@ -18,6 +19,7 @@ export default function Navigation() {
   const isAuthPage = pathname === '/login' || pathname.startsWith('/auth/')
 
   const { selectedProfileId } = useProfile()
+  const goToOcrEntry = useOcrEntryNavigator()
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 10)
@@ -55,21 +57,32 @@ export default function Navigation() {
               <span className="font-semibold text-[15px] tracking-tight text-gray-900">Downforce</span>
             </Link>
 
-            {/* 앱 내부 페이지 데스크탑 네비게이션 */}
+            {/* 앱 내부 페이지 데스크탑 네비게이션.
+                "처방전 등록" 메뉴는 활성 draft 가 있으면 result 로 보내야 하므로
+                정적 Link 가 아닌 useOcrEntryNavigator 훅 사용. */}
             {!isLanding && (
               <div className="hidden md:flex items-center gap-1">
-                {menus.map((menu) => (
-                  <Link
-                    key={menu.path}
-                    href={menu.path}
-                    className={`px-4 py-1.5 text-[13px] rounded-lg transition-all
-                      ${pathname === menu.path
-                        ? 'text-gray-900 font-bold bg-gray-50'
-                        : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50/50'}`}
-                  >
-                    {menu.label}
-                  </Link>
-                ))}
+                {menus.map((menu) => {
+                  const isActive = menu.path === '/ocr'
+                    ? pathname.startsWith('/ocr')
+                    : pathname === menu.path
+                  const className = `px-4 py-1.5 text-[13px] rounded-lg transition-all
+                    ${isActive
+                      ? 'text-gray-900 font-bold bg-gray-50'
+                      : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50/50'}`
+                  if (menu.path === '/ocr') {
+                    return (
+                      <button key={menu.path} onClick={goToOcrEntry} className={`${className} cursor-pointer`}>
+                        {menu.label}
+                      </button>
+                    )
+                  }
+                  return (
+                    <Link key={menu.path} href={menu.path} className={className}>
+                      {menu.label}
+                    </Link>
+                  )
+                })}
               </div>
             )}
           </div>

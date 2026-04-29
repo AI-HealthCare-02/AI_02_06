@@ -5,6 +5,11 @@ import Navigation from '@/components/layout/Navigation'
 import BottomNav from '@/components/layout/BottomNav'
 import GlobalAuthGuard from '@/components/auth/AuthGuard'
 import { ProfileProvider } from '@/contexts/ProfileContext'
+import { MedicationProvider } from '@/contexts/MedicationContext'
+import { ChallengeProvider } from '@/contexts/ChallengeContext'
+import { LifestyleGuideProvider } from '@/contexts/LifestyleGuideContext'
+import { OcrDraftProvider } from '@/contexts/OcrDraftContext'
+import { ChatSessionProvider } from '@/contexts/ChatSessionContext'
 
 // 폰트 최적화: preload와 display swap 적용
 const geistSans = Geist({
@@ -44,9 +49,19 @@ export default function RootLayout({ children }) {
       <body className="min-h-full flex flex-col">
         <GlobalAuthGuard>
           <ProfileProvider>
-            <Navigation />
-            {children}
-            <BottomNav />
+            <MedicationProvider>
+              <ChallengeProvider>
+                <LifestyleGuideProvider>
+                  <OcrDraftProvider>
+                    <ChatSessionProvider>
+                      <Navigation />
+                      {children}
+                      <BottomNav />
+                    </ChatSessionProvider>
+                  </OcrDraftProvider>
+                </LifestyleGuideProvider>
+              </ChallengeProvider>
+            </MedicationProvider>
           </ProfileProvider>
         </GlobalAuthGuard>
         <Toaster

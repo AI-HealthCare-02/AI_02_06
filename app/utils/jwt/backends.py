@@ -64,10 +64,12 @@ class TokenBackend:
 
     @cached_property
     def prepared_signing_key(self) -> Any:
+        """Cached, library-ready signing key (parsed once on first access)."""
         return self._prepare_key(self.signing_key)
 
     @cached_property
     def prepared_verifying_key(self) -> Any:
+        """Cached, library-ready verifying key (parsed once on first access)."""
         return self._prepare_key(self.verifying_key)
 
     def _prepare_key(self, key: str | None) -> Any:

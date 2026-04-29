@@ -1,13 +1,11 @@
-"""AI-Worker RAG task 계약 테스트.
+"""AI-Worker RAG task 계약 테스트 (옵션 C 이후 잔여).
 
 FastAPI 프로세스에서 ML(임베딩/LLM)을 떼어내 AI-Worker로 옮기기 위한
-RQ 작업 3종의 **시그니처·입출력 계약**을 락한다. 실제 모델 로딩과
-OpenAI 호출은 Phase X-2 / X-4에서 구현되며, 본 테스트는 인터페이스
-안정성만 검증한다.
+RQ 작업 2종의 **시그니처·입출력 계약**을 락한다. 옵션 C 에서
+``rewrite_query_job`` 은 폐기됐다.
 
 Contract lock:
 - embed_text_job(text)                      -> list[float]   (768 dim)
-- rewrite_query_job(query, history)         -> dict          (rewritten, tokens)
 - generate_chat_response_job(context, query, history) -> dict (reply, tokens)
 
 모든 함수는 async (RQ 2.x native async job) 로 구현되어야 한다.
@@ -36,24 +34,11 @@ class TestEmbedTextJobSignature:
         assert sig.parameters["text"].annotation is str
 
 
-class TestRewriteQueryJobSignature:
-    """rewrite_query_job — 대화 맥락 기반 쿼리 재작성 RQ job.
+class TestRewriteQueryJobRemoved:
+    """옵션 C: rewrite_query_job 은 폐기됐다 (Router LLM 가 흡수)."""
 
-    파이프라인 호출 패턴:
-    ``rewrite_query(history=..., current_query=...)`` 를 그대로 따라간다.
-    """
-
-    def test_exists(self) -> None:
-        assert hasattr(rag_tasks, "rewrite_query_job")
-
-    def test_is_async(self) -> None:
-        assert inspect.iscoroutinefunction(rag_tasks.rewrite_query_job)
-
-    def test_signature_has_history_and_current_query(self) -> None:
-        sig = inspect.signature(rag_tasks.rewrite_query_job)
-        params = set(sig.parameters.keys())
-        assert "history" in params
-        assert "current_query" in params
+    def test_does_not_exist(self) -> None:
+        assert not hasattr(rag_tasks, "rewrite_query_job")
 
 
 class TestGenerateChatResponseJobSignature:
@@ -79,10 +64,11 @@ class TestGenerateChatResponseJobSignature:
 
 
 class TestModuleExports:
-    """공개 API로 세 함수가 노출되어야 FastAPI 쪽에서 enqueue 가능."""
+    """공개 API로 두 함수가 노출되어야 FastAPI 쪽에서 enqueue 가능."""
 
-    def test_all_three_exported(self) -> None:
+    def test_remaining_two_exported(self) -> None:
         public = {name for name in dir(rag_tasks) if not name.startswith("_")}
         assert "embed_text_job" in public
-        assert "rewrite_query_job" in public
         assert "generate_chat_response_job" in public
+        # 옵션 C: rewrite_query_job 은 export 되지 말아야 함
+        assert "rewrite_query_job" not in public

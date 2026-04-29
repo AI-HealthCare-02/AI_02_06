@@ -1,9 +1,7 @@
 """Unit tests for batch worker functions — intake_log_worker and medication_worker."""
 
-from datetime import date, time
+from datetime import date
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 
 class TestGenerateTodayIntakeLogs:

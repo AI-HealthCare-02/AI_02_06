@@ -47,7 +47,7 @@ def check_attack_patterns(value: str) -> str | None:
         value: Input value to check.
 
     Returns:
-        Optional[str]: Attack pattern name if found, None otherwise.
+        str | None: Attack pattern name if found, None otherwise.
     """
     for pattern, name in COMPILED_ATTACK_PATTERNS:
         if pattern.search(value):
@@ -62,7 +62,7 @@ def check_suspicious_patterns(value: str) -> str | None:
         value: Input value to check.
 
     Returns:
-        Optional[str]: Suspicious pattern name if found, None otherwise.
+        str | None: Suspicious pattern name if found, None otherwise.
     """
     for pattern, name in COMPILED_SUSPICIOUS_PATTERNS:
         if pattern.search(value):
@@ -77,7 +77,7 @@ def scan_request_params(request: Request) -> tuple[str | None, str | None]:
         request: FastAPI request object.
 
     Returns:
-        Tuple[Optional[str], Optional[str]]: (attack_pattern, suspicious_pattern)
+        tuple[str | None, str | None]: (attack_pattern, suspicious_pattern)
             Pattern names if found, None otherwise.
     """
     attack_found = None

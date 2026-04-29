@@ -128,13 +128,17 @@ class MedicineInfo(models.Model):
         null=True,
         description="Drug efficacy and effects",
     )
-    side_effects = fields.TextField(
+    side_effects = fields.JSONField(
         null=True,
-        description="Known side effects",
+        description="이상반응 PARAGRAPH list (NB_DOC_DATA 4번 이상반응 카테고리)",
     )
-    precautions = fields.TextField(
+    precautions = fields.JSONField(
         null=True,
-        description="Usage precautions",
+        description="식약처 9 카테고리(이상반응 제외) dict",
+    )
+    dosage = fields.TextField(
+        null=True,
+        description="용법용량 평문화 (UD_DOC_DATA → flatten plaintext)",
     )
 
     # ── 공공데이터 API 추가 메타 필드 (RAG 품질 강화용) ─────────────────

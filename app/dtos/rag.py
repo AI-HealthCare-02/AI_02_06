@@ -6,9 +6,10 @@ Data transfer objects for the medicine_chunk + medicine_info RAG pipeline:
 - SearchResult: MedicineInfo parent + aggregated matched chunks + scores.
 - RetrievalMetadata: summary of the retrieval stage (for debug/cache keys).
 - TokenUsage: LLM token usage for the assistant turn.
-- ChatCompletion: RAGGenerator output (answer + optional token usage).
-- RewriteStatus / RewriteResult: LLM query-rewrite outcome.
-- RAGResponse: the final pipeline payload returned to the API layer.
+- ChatCompletion: LLM output (answer + optional token usage).
+- SummaryStatus / SummaryResult: session compaction LLM outcome.
+- RAGResponse: legacy pipeline payload (옵션 C 잔재 — Step 5 의 RAGPipeline
+  폐기와 함께 호출처 0, 향후 정리 후보).
 """
 
 from enum import StrEnum
@@ -88,22 +89,6 @@ class ChatCompletion(BaseModel):
 
     answer: str = Field(..., description="Generated assistant reply")
     token_usage: TokenUsage | None = Field(None, description="LLM token usage when available")
-
-
-class RewriteStatus(StrEnum):
-    """Outcome of the LLM query-rewrite stage."""
-
-    OK = "ok"
-    UNRESOLVABLE = "unresolvable"
-    FALLBACK = "fallback"
-
-
-class RewriteResult(BaseModel):
-    """Structured result of RAGGenerator.rewrite_query."""
-
-    status: RewriteStatus = Field(..., description="Rewrite outcome category")
-    query: str = Field(..., description="Query to use downstream (rewritten on ok, original otherwise)")
-    token_usage: TokenUsage | None = Field(None, description="LLM token usage when the rewrite call succeeded")
 
 
 class SummaryStatus(StrEnum):

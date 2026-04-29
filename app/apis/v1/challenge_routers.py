@@ -76,7 +76,7 @@ async def list_challenges(
         active_only: Whether to return only active challenges.
 
     Returns:
-        List[ChallengeResponse]: List of challenges.
+        list[ChallengeResponse]: List of challenges.
     """
     if profile_id:
         if active_only:

@@ -46,6 +46,13 @@ export default function GlobalAuthGuard({ children }) {
         return
       }
 
+      // 이미 인증 확인된 세션이면 라우트 이동 시 GET /profiles 재호출 안 함.
+      // (로그아웃은 페이지 새로고침을 동반해 컴포넌트가 unmount → 다음 mount 시 isAuthenticated=false 로 자연 reset)
+      if (isAuthenticated) {
+        setIsLoading(false)
+        return
+      }
+
       try {
         // 인증 확인 API 호출 (인터셉터 비활성화로 빠른 판정 — RTR 은 skip)
         await api.get('/api/v1/profiles', {
@@ -66,7 +73,7 @@ export default function GlobalAuthGuard({ children }) {
     }
 
     checkAuth()
-  }, [router, pathname])
+  }, [router, pathname, isAuthenticated])
 
   // 로딩 중
   if (isLoading) {

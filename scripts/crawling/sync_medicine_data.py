@@ -58,6 +58,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Public data API key (default: from .env)",
     )
+    parser.add_argument(
+        "--include-ingredients",
+        action="store_true",
+        help="Also sync medicine_ingredient table (Mcpn07 endpoint)",
+    )
     return parser.parse_args()
 
 
@@ -65,12 +70,13 @@ def parse_args() -> argparse.Namespace:
 # 흐름: DB 연결 -> MedicineDataService.sync() -> 결과 로그 -> DB 종료
 
 
-async def run_sync(full_sync: bool, api_key: str) -> None:
+async def run_sync(full_sync: bool, api_key: str, include_ingredients: bool) -> None:
     """Initialize DB connection and run sync operation.
 
     Args:
         full_sync: Whether to perform full or incremental sync.
         api_key: Public data API key for authentication.
+        include_ingredients: If True, also sync medicine_ingredient (Mcpn07).
     """
     await Tortoise.init(config=TORTOISE_ORM)
     logger.info("Database connection established")
@@ -85,6 +91,16 @@ async def run_sync(full_sync: bool, api_key: str) -> None:
             stats["inserted"],
             stats["updated"],
         )
+
+        if include_ingredients:
+            ing_stats = await service.sync_ingredients()
+            logger.info(
+                "Ingredient sync: fetched=%d, inserted=%d, updated=%d, skipped=%d",
+                ing_stats["fetched"],
+                ing_stats["inserted"],
+                ing_stats["updated"],
+                ing_stats["skipped"],
+            )
     finally:
         await Tortoise.close_connections()
         logger.info("Database connection closed")
@@ -105,7 +121,7 @@ def main() -> None:
     sync_type = "full" if args.full else "incremental"
     logger.info("Starting %s medicine data sync", sync_type)
 
-    asyncio.run(run_sync(full_sync=args.full, api_key=api_key))
+    asyncio.run(run_sync(full_sync=args.full, api_key=api_key, include_ingredients=args.include_ingredients))
 
 
 if __name__ == "__main__":

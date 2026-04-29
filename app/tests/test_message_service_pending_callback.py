@@ -34,9 +34,14 @@ def stub_repo(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         captured["assistant"].append((sid, content, metadata))
         return msg
 
+    # 옵션 D — resolve_pending_turn 의 count_by_session 호출 stub
+    async def fake_count(_self, _sid) -> int:
+        return 0
+
     from app.repositories.message_repository import MessageRepository
 
     monkeypatch.setattr(MessageRepository, "create_assistant_message", fake_assistant)
+    monkeypatch.setattr(MessageRepository, "count_by_session", fake_count)
     return captured
 
 

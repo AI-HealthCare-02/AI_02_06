@@ -1,11 +1,14 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/Header'
 import BottomNav from '@/components/layout/BottomNav'
 import EmptyState from '@/components/common/EmptyState'
-import api, { showError } from '@/lib/api'
+import { showError } from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
+import { useChallenge, useChallengeStart } from '@/contexts/ChallengeContext'
+import StartChallengeModal from '@/components/common/StartChallengeModal'
+import { useLifestyleGuide } from '@/contexts/LifestyleGuideContext'
 import toast from 'react-hot-toast'
 
 // SVG 아이콘 컴포넌트 (진행중/완료 카드 아이콘 폴백용)
@@ -107,19 +110,23 @@ function getDaysSince(startedDate) {
 
 export default function ChallengePage() {
   const router = useRouter()
-  const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('추천')
-  const [ongoing, setOngoing] = useState([])
-  const [completed, setCompleted] = useState([])
   const [processingIds, setProcessingIds] = useState([])
-  const [recommended, setRecommended] = useState([])
-  const [isLoadingRecommended, setIsLoadingRecommended] = useState(false)
-  const [noGuide, setNoGuide] = useState(false)
-  const [recommendedError, setRecommendedError] = useState(false)
 
   const { selectedProfileId: profileId } = useProfile()
-  const isInitialLoad = useRef(true)
-  const [isRefreshing, setIsRefreshing] = useState(false)
+  // 모든 server state 는 Context 가 단일 진실로 관리
+  const {
+    activeChallenges,
+    completedChallenges,
+    unstartedByGuide,
+    isLoading: challengesLoading,
+    updateChallenge,
+    deleteChallenge,
+  } = useChallenge()
+  // 챌린지 시작은 어디서 호출하든 StartChallengeModal 확인 후 실행 (단일 정책)
+  const { startTarget, isStarting, requestStart, cancelStart, confirmStart } = useChallengeStart()
+  const { latestGuide, isLoading: guidesLoading } = useLifestyleGuide()
+  const isLoading = challengesLoading || guidesLoading
 
   const getIconByTitle = (title) => {
     if (title.includes('금연')) return <Icons.NoSmoking />
@@ -135,86 +142,32 @@ export default function ChallengePage() {
     return <Icons.Target />
   }
 
-  const fetchRecommended = async () => {
-    if (!profileId) return
-    setIsLoadingRecommended(true)
-    setNoGuide(false)
-    setRecommendedError(false)
+  // 추천 = 최신 가이드의 미시작 챌린지 (Context 의 unstartedByGuide selector)
+  const recommended = latestGuide ? unstartedByGuide(latestGuide.id) : []
+  const noGuide = !guidesLoading && !latestGuide
+
+  // ongoing/completed 는 derived (icon 추가만 페이지에서)
+  const ongoing = activeChallenges.map(c => ({
+    ...c,
+    icon: getIconByTitle(c.title),
+    current: c.completed_dates?.length || 0,
+  }))
+  const completed = completedChallenges.map(c => ({
+    ...c,
+    icon: getIconByTitle(c.title),
+  }))
+
+  // 모달 onConfirm — useChallengeStart 의 confirmStart 가 PATCH /start 호출.
+  // 성공 시 Context 가 응답으로 list 자동 갱신 (active 로 이동, recommended 에서 자동 제거).
+  const handleConfirmStart = async (difficulty, targetDays) => {
     try {
-      const latestRes = await api.get(`/api/v1/lifestyle-guides/latest?profile_id=${profileId}`)
-      const guide = latestRes.data
-      const challengeRes = await api.get(`/api/v1/lifestyle-guides/${guide.id}/challenges`)
-      const unstarted = challengeRes.data.filter(c => !c.is_active && c.challenge_status !== 'DELETED')
-      setRecommended(unstarted)
-    } catch (err) {
-      if (err.response?.status === 404) {
-        setNoGuide(true)
-      } else if (err.response?.status !== 401) {
-        setRecommendedError(true)
+      const updated = await confirmStart(difficulty, targetDays)
+      if (updated) {
+        toast.success('챌린지가 시작되었습니다!')
+        setActiveTab('진행중')
       }
-    } finally {
-      setIsLoadingRecommended(false)
-    }
-  }
-
-  useEffect(() => {
-    if (!profileId) return
-    const fetchData = async () => {
-      try {
-        if (isInitialLoad.current) {
-          setIsLoading(true)
-        } else {
-          setIsRefreshing(true)
-        }
-        const challengeRes = await api.get(`/api/v1/challenges?profile_id=${profileId}`)
-
-        const activeChallenges = challengeRes.data
-          .filter((c) => c.challenge_status === 'IN_PROGRESS' && c.is_active)
-          .map((c) => ({
-            ...c,
-            icon: getIconByTitle(c.title),
-            current: c.completed_dates?.length || 0,
-          }))
-
-        const completedChallenges = challengeRes.data
-          .filter((c) => c.challenge_status === 'COMPLETED')
-          .map((c) => ({
-            ...c,
-            icon: getIconByTitle(c.title),
-          }))
-
-        setOngoing(activeChallenges)
-        setCompleted(completedChallenges)
-      } catch (err) {
-        if (err.response?.status !== 401) {
-          showError('데이터를 불러오는데 실패했습니다.')
-        }
-      } finally {
-        setIsLoading(false)
-        setIsRefreshing(false)
-        isInitialLoad.current = false
-      }
-    }
-    fetchData()
-    fetchRecommended()
-  }, [profileId])
-
-  const handleStartGuideChallenge = async (challenge) => {
-    if (processingIds.includes(challenge.id)) return
-    setProcessingIds(prev => [...prev, challenge.id])
-    try {
-      const res = await api.patch(`/api/v1/challenges/${challenge.id}`, { is_active: true })
-      setRecommended(prev => prev.filter(c => c.id !== challenge.id))
-      setOngoing(prev => [
-        { ...res.data, icon: getIconByTitle(res.data.title), current: res.data.completed_dates?.length || 0 },
-        ...prev,
-      ])
-      toast.success('챌린지가 시작되었습니다!')
-      setActiveTab('진행중')
     } catch (err) {
       showError(err.parsed?.message || '챌린지 시작에 실패했습니다.')
-    } finally {
-      setProcessingIds(prev => prev.filter(id => id !== challenge.id))
     }
   }
 
@@ -232,23 +185,13 @@ export default function ChallengePage() {
     try {
       const newCompletedDates = [...(challenge.completed_dates || []), today]
       const isCompleted = newCompletedDates.length >= challenge.target_days
-
-      const response = await api.patch(`/api/v1/challenges/${challenge.id}`, {
+      const updated = await updateChallenge(challenge.id, {
         completed_dates: newCompletedDates,
         challenge_status: isCompleted ? 'COMPLETED' : 'IN_PROGRESS',
       })
-
-      if (response.data.challenge_status === 'COMPLETED') {
-        setOngoing(prev => prev.filter(c => c.id !== challenge.id))
-        setCompleted(prev => [{ ...response.data, icon: challenge.icon }, ...prev])
+      if (updated.challenge_status === 'COMPLETED') {
         toast.success('챌린지를 완료했습니다! 수고하셨어요.')
         setActiveTab('완료')
-      } else {
-        setOngoing(prev => prev.map(c =>
-          c.id === challenge.id
-            ? { ...c, completed_dates: newCompletedDates, current: newCompletedDates.length }
-            : c
-        ))
       }
     } catch (err) {
       showError(err.parsed?.message || '체크에 실패했습니다.')
@@ -260,8 +203,7 @@ export default function ChallengePage() {
   const handleAbandon = async (challenge) => {
     if (!confirm(`'${challenge.title}' 챌린지를 포기하시겠습니까?`)) return
     try {
-      await api.delete(`/api/v1/challenges/${challenge.id}`)
-      setOngoing(prev => prev.filter(c => c.id !== challenge.id))
+      await deleteChallenge(challenge.id)
       toast.success('챌린지가 삭제되었습니다.')
     } catch (err) {
       showError(err.parsed?.message || '삭제에 실패했습니다.')
@@ -286,7 +228,7 @@ export default function ChallengePage() {
   }
 
   return (
-    <main className={`min-h-screen bg-gray-50 pb-24 transition-opacity duration-200 ${isRefreshing ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
+    <main className="min-h-screen bg-gray-50 pb-24">
       <Header title="생활습관 챌린지" subtitle="건강한 습관을 만들어보세요" showBack={true} />
 
       <div className="max-w-3xl mx-auto px-6 py-6">
@@ -318,23 +260,12 @@ export default function ChallengePage() {
         {/* 추천 탭 — AI 가이드 기반 */}
         {activeTab === '추천' && (
           <div className="space-y-3">
-            {isLoadingRecommended ? (
-              <div className="space-y-3 animate-pulse">
-                {[1, 2, 3].map(i => <div key={i} className="bg-white rounded-2xl h-20 w-full" />)}
-              </div>
-            ) : noGuide ? (
+            {noGuide ? (
               <EmptyState
                 title="아직 AI 추천 챌린지가 없어요"
                 message="생활습관 가이드를 먼저 받아보세요"
                 onAction={() => router.push('/lifestyle-guide')}
                 actionLabel="가이드 받기"
-              />
-            ) : recommendedError ? (
-              <EmptyState
-                title="추천 챌린지를 불러오지 못했어요"
-                message="잠시 후 다시 시도해주세요"
-                onAction={fetchRecommended}
-                actionLabel="다시 시도"
               />
             ) : recommended.length === 0 ? (
               <EmptyState
@@ -345,7 +276,6 @@ export default function ChallengePage() {
               />
             ) : (
               recommended.map((item) => {
-                const isProcessing = processingIds.includes(item.id)
                 const categoryMeta = item.category ? CATEGORY_META[item.category] : null
                 return (
                   <div key={item.id} className="bg-white rounded-2xl shadow-sm p-5 border border-gray-50 hover:border-blue-100 transition-all">
@@ -368,14 +298,14 @@ export default function ChallengePage() {
                         </div>
                       </div>
                       <button
-                        onClick={() => handleStartGuideChallenge(item)}
-                        disabled={isProcessing}
+                        onClick={() => requestStart(item)}
+                        disabled={isStarting}
                         className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors shrink-0
-                          ${isProcessing
-                            ? 'bg-gray-600 text-gray-400 cursor-wait'
-                            : 'bg-gray-50 text-gray-600 hover:bg-gray-100 cursor-pointer'}`}
+                          ${isStarting
+                            ? 'bg-blue-300 text-white cursor-wait'
+                            : 'bg-blue-500 text-white hover:bg-blue-600 cursor-pointer'}`}
                       >
-                        {isProcessing ? '처리중...' : '시작하기'}
+                        {isStarting && startTarget?.id === item.id ? '처리중...' : '시작하기'}
                       </button>
                     </div>
                   </div>
@@ -507,6 +437,16 @@ export default function ChallengePage() {
         )}
       </div>
       <BottomNav />
+
+      {/* 챌린지 시작 확인 모달 — useChallengeStart 흐름 (모든 진입점 공통) */}
+      {startTarget && (
+        <StartChallengeModal
+          challenge={startTarget}
+          onConfirm={handleConfirmStart}
+          onClose={cancelStart}
+          isLoading={isStarting}
+        />
+      )}
     </main>
   )
 }

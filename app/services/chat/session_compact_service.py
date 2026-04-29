@@ -18,16 +18,16 @@ from dataclasses import dataclass
 import logging
 
 from app.dtos.rag import SummaryResult, SummaryStatus
-from app.services.rag.intent.intents import IntentType
 
 logger = logging.getLogger(__name__)
 
 # Intents whose USER turn (and its paired ASSISTANT turn) pollute the
 # medical-context summary and must be removed before the LLM sees them.
-_NOISE_INTENTS: frozenset[str] = frozenset({
-    IntentType.OUT_OF_SCOPE.value,
-    IntentType.GENERAL_CHAT.value,
-})
+# 옵션 C 에서 IntentType enum 이 폐기된 이후, 본 sentinel 들은 두 갈래로 채워질 수
+# 있다: (a) 옵션 C 이전에 저장된 messages.metadata.intent (legacy 기록 호환),
+# (b) 추후 기능에서 Router 결과를 인지해 다시 채우게 될 경우. 둘 다 lowercase
+# StrEnum value 와 동일한 string 으로 통일된다.
+_NOISE_INTENTS: frozenset[str] = frozenset({"out_of_scope", "general_chat"})
 
 # Minimum usable messages after filtering; below this we skip the LLM call
 # entirely and return an EMPTY result so the caller keeps the prior summary.

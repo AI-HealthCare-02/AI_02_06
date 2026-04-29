@@ -29,7 +29,7 @@ export default function SurveyPage() {
     // 최종 데이터 검증
     const h = parseInt(formData.height);
     const w = parseFloat(formData.weight);
-    
+
     if (formData.height && (h < 50 || h > 250)) {
       toast.error("키는 50cm ~ 250cm 사이로 입력해주세요.");
       return;
@@ -54,10 +54,10 @@ export default function SurveyPage() {
 
       const res = await api.get('/api/v1/profiles')
       const selfProfile = res.data.find(p => p.relation_type === 'SELF')
-      
+
       if (selfProfile) {
         await api.patch(`/api/v1/profiles/${selfProfile.id}`, {
-          health_survey: healthSurvey
+          health_survey: healthSurvey,
         })
       }
 

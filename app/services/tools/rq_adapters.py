@@ -27,14 +27,10 @@ import logging
 import time
 from typing import Any
 
+from app.dtos.tools import RouteResult
 from app.services.tools.router import parse_router_response
 
 logger = logging.getLogger(__name__)
-
-try:
-    from app.dtos.tools import RouteResult  # only the DTO is needed here
-except ImportError:  # pragma: no cover — defensive; DTO always present in app runtime
-    RouteResult = Any  # type: ignore[misc, assignment]
 
 ROUTE_INTENT_JOB_REF = "ai_worker.domains.tool_calling.jobs.route_intent_job"
 RUN_TOOL_CALLS_JOB_REF = "ai_worker.domains.tool_calling.jobs.run_tool_calls_job"

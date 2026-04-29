@@ -1,59 +1,15 @@
-"""RAG service package.
+"""RAG service package — 옵션 C 이후의 잔여 모듈만 export.
 
-The top-level namespace is intentionally minimal so that the leaf
-`config` module (embedding model name, dimensions) can be imported by
-lower layers (`app.models.medicine_info`, `app.dtos.rag`) without
-triggering the full pipeline graph. Public components live at explicit
-submodule paths:
+옵션 C 에서 RAG retrieval 은 ai-worker 의 Router LLM tool dispatch 로 흡수
+되어 FastAPI 측에서는 더 이상 RAGPipeline / get_rag_pipeline 같은 진입점이
+없다. 본 패키지의 잔여 책임:
 
-    from app.services.rag.pipeline import RAGPipeline
-    from app.services.rag.retrievers.hybrid import HybridRetriever
-    from app.services.rag.providers.rq_embedding import RQEmbeddingProvider
-    from app.services.rag.providers.rq_llm import RQRAGGenerator
+- ``app.services.rag.config`` — 임베딩 모델 이름·차원 (모델·DTO 가 참조)
+- ``app.services.rag.retrievers.hybrid`` — ai-worker 가 import 해 사용
+- ``app.services.rag.providers.rq_llm.RQRAGGenerator`` —
+  ``session_compact_service`` 가 ``summarize_messages`` 만 사용
+- ``app.services.rag.protocols`` — ``EmbeddingProvider`` / ``Retriever``
+  Protocol 정의 (HybridRetriever 시그니처용)
+
+Public 진입점은 explicit submodule path 로만 노출한다.
 """
-
-_pipeline: "RAGPipeline | None" = None  # noqa: F821  # forward ref resolved lazily
-
-
-async def get_rag_pipeline() -> "RAGPipeline":  # noqa: F821  # forward ref resolved lazily
-    """Get or create the global RAGPipeline instance.
-
-    Wires the RAG pipeline with AI-Worker-backed embedding and LLM
-    providers. FastAPI never loads the embedding model or constructs an
-    OpenAI client; instead both paths enqueue RQ jobs to the "ai" queue
-    and await results.
-    """
-    global _pipeline
-
-    if _pipeline is None:
-        from rq import Queue
-
-        from app.core.config import config
-        from app.core.redis_client import make_sync_redis
-        from app.repositories.profile_repository import ProfileRepository
-        from app.services.rag.intent.classifier import IntentClassifier
-        from app.services.rag.pipeline import RAGPipeline
-        from app.services.rag.providers.rq_embedding import RQEmbeddingProvider
-        from app.services.rag.providers.rq_llm import RQRAGGenerator
-        from app.services.rag.retrievers.hybrid import HybridRetriever
-        from app.services.rag.tools import ToolRouter
-
-        redis_conn = make_sync_redis(config.REDIS_URL)
-        ai_queue = Queue("ai", connection=redis_conn)
-
-        embedding_provider = RQEmbeddingProvider(queue=ai_queue)
-        rag_generator = RQRAGGenerator(queue=ai_queue)
-
-        _pipeline = RAGPipeline(
-            embedding_provider=embedding_provider,
-            retriever=HybridRetriever(embedding_provider=embedding_provider),
-            intent_classifier=IntentClassifier(),
-            tool_router=ToolRouter(),
-            rag_generator=rag_generator,
-            profile_repository=ProfileRepository(),
-        )
-
-    return _pipeline
-
-
-__all__ = ["get_rag_pipeline"]

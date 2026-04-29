@@ -82,7 +82,7 @@ export default function ProfileSwitcher() {
           </ul>
           <div className="px-3 py-2 border-t border-gray-100">
             <button
-              onClick={() => { router.push('/mypage'); setIsOpen(false) }}
+              onClick={() => { router.push('/mypage?tab=family'); setIsOpen(false) }}
               className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 rounded-lg transition-colors text-left"
             >
               <Plus size={13} className="text-gray-400" />

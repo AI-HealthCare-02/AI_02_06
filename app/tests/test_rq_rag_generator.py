@@ -1,10 +1,8 @@
-"""FastAPI 측 RQ 기반 RAGGenerator 어댑터 계약 테스트.
+"""FastAPI 측 RQ 기반 LLM 어댑터 계약 테스트 (옵션 C 이후 잔여).
 
-``RQEmbeddingProvider`` 와 대칭되는 LLM 전용 어댑터. FastAPI 프로세스는
-OpenAI 클라이언트를 만들지 않고 Redis Queue("ai") 에 두 개의 LLM job 을
-enqueue 한다. 어댑터는 기존 ``RAGGenerator`` 의 공개 메서드 시그니처
-(``rewrite_query``, ``generate_chat_response``) 를 그대로 보존하여
-``RAGPipeline`` 재배선 없이 교체 가능하도록 한다.
+옵션 C 에서 ``rewrite_query`` 가 폐기됐으므로 본 파일은 ``generate_chat_response``
+와 실패 모드 / 비차단 폴링만 검증한다. ``summarize_messages`` 는 별도의
+session_compact_service 테스트에서 통합 검증된다.
 """
 
 import asyncio
@@ -13,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from app.dtos.rag import ChatCompletion, RewriteResult, RewriteStatus, TokenUsage
+from app.dtos.rag import ChatCompletion, TokenUsage
 from app.services.rag.providers.rq_llm import (
     LLMJobError,
     LLMTimeoutError,
@@ -62,80 +60,16 @@ class _FakeQueue:
 
 
 class TestApiShape:
-    """RAGGenerator 의 공개 메서드 시그니처를 준수해야 RAGPipeline 호환."""
-
-    def test_rewrite_query_is_async(self) -> None:
-        assert inspect.iscoroutinefunction(RQRAGGenerator.rewrite_query)
+    """RQRAGGenerator 의 공개 메서드 시그니처."""
 
     def test_generate_chat_response_is_async(self) -> None:
         assert inspect.iscoroutinefunction(RQRAGGenerator.generate_chat_response)
-
-    def test_rewrite_query_signature(self) -> None:
-        sig = inspect.signature(RQRAGGenerator.rewrite_query)
-        params = set(sig.parameters.keys())
-        assert "history" in params
-        assert "current_query" in params
 
     def test_generate_chat_response_signature(self) -> None:
         sig = inspect.signature(RQRAGGenerator.generate_chat_response)
         params = set(sig.parameters.keys())
         assert "messages" in params
         assert "system_prompt" in params
-
-
-@pytest.mark.asyncio
-class TestRewriteQueryRoundtrip:
-    """rewrite_query 는 rewrite_query_job 을 enqueue하고 dict 결과를 RewriteResult로 승격한다."""
-
-    async def test_enqueues_rewrite_job(self) -> None:
-        queue = _FakeQueue()
-        queue.next_job = _FakeJob(
-            result={"status": "ok", "query": "활명수의 효능", "token_usage": None},
-            status="finished",
-        )
-        gen = RQRAGGenerator(queue=queue, poll_interval=0.01, timeout=1.0)
-
-        await gen.rewrite_query(history=[], current_query="활명수 효능 알려줘")
-
-        func_ref, args, _kwargs = queue.calls[0]
-        assert "rewrite_query_job" in func_ref
-        assert args == ([], "활명수 효능 알려줘")
-
-    async def test_returns_rewrite_result_ok(self) -> None:
-        queue = _FakeQueue()
-        queue.next_job = _FakeJob(
-            result={
-                "status": "ok",
-                "query": "활명수의 효능",
-                "token_usage": {
-                    "model": "gpt-4o",
-                    "prompt_tokens": 230,
-                    "completion_tokens": 10,
-                    "total_tokens": 240,
-                },
-            },
-            status="finished",
-        )
-        gen = RQRAGGenerator(queue=queue, poll_interval=0.01, timeout=1.0)
-
-        result = await gen.rewrite_query(history=[], current_query="x")
-
-        assert isinstance(result, RewriteResult)
-        assert result.status == RewriteStatus.OK
-        assert result.query == "활명수의 효능"
-        assert isinstance(result.token_usage, TokenUsage)
-        assert result.token_usage.total_tokens == 240
-
-    async def test_returns_rewrite_result_unresolvable(self) -> None:
-        queue = _FakeQueue()
-        queue.next_job = _FakeJob(
-            result={"status": "unresolvable", "query": "원본", "token_usage": None},
-            status="finished",
-        )
-        gen = RQRAGGenerator(queue=queue, poll_interval=0.01, timeout=1.0)
-
-        result = await gen.rewrite_query(history=[], current_query="원본")
-        assert result.status == RewriteStatus.UNRESOLVABLE
 
 
 @pytest.mark.asyncio
@@ -192,7 +126,7 @@ class TestFailureModes:
         gen = RQRAGGenerator(queue=queue, poll_interval=0.01, timeout=0.05)
 
         with pytest.raises(LLMTimeoutError):
-            await gen.rewrite_query(history=[], current_query="x")
+            await gen.generate_chat_response(messages=[], system_prompt=None)
 
     async def test_failed_status_raises(self) -> None:
         queue = _FakeQueue()

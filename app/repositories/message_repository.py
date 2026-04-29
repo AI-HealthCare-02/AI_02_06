@@ -26,6 +26,10 @@ class MessageRepository:
             deleted_at__isnull=True,
         ).first()
 
+    async def count_by_session(self, session_id: UUID) -> int:
+        """세션의 살아있는(soft delete 제외) 메시지 수 — 옵션 D 의 compact trigger 입력."""
+        return await ChatMessage.filter(session_id=session_id, deleted_at__isnull=True).count()
+
     async def get_by_session(self, session_id: UUID, limit: int | None = None) -> list[ChatMessage]:
         """Get all messages in a session (chronological order).
 

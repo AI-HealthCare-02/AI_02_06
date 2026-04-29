@@ -119,6 +119,30 @@ class OcrDraftRepository:
             processed_at=datetime.now(tz=config.TIMEZONE),
         )
 
+    async def mark_terminal_failure(
+        self,
+        draft_id: UUID | str,
+        status: OcrDraftStatusValue,
+    ) -> None:
+        """ai-worker terminal failure 자동 롤백 — status + consumed_at 동시 set.
+
+        ``no_text`` / ``no_candidates`` / ``failed`` 도달 시 ai-worker 가 그
+        자리에서 호출한다. ``consumed_at`` 을 함께 채우므로 ``list_active`` 의
+        ``consumed_at IS NULL`` 게이트로 자동 제외되고, ``find_active_by_hash``
+        의 dedup 매칭에서도 자동 제외 → 동일 사진 재시도 시 새 draft 정상 생성.
+
+        Args:
+            draft_id: 처리 중이던 draft ID.
+            status: terminal failure status (no_text / no_candidates / failed).
+        """
+        now = datetime.now(tz=config.TIMEZONE)
+        await OcrDraft.filter(id=str(draft_id)).update(
+            status=status.value,
+            medicines=[],
+            processed_at=now,
+            consumed_at=now,
+        )
+
     async def mark_consumed(self, draft_id: UUID | str, profile_id: UUID | str) -> bool:
         """Confirm 시 atomic 게이트 — consumed_at 을 1회만 설정.
 

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Trash2 } from 'lucide-react'
 import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
+import { useMedication } from '@/contexts/MedicationContext'
 
 function EditSkeleton() {
   return (
@@ -28,6 +29,7 @@ function MedicationEditContent() {
   // URL 쿼리 ?ids=id1,id2,... 로 처방전 그룹 내 약품 ID 목록 전달받음
   // medication/page.jsx의 onEditGroup에서 ids=items.map(m=>m.id).join(',') 형태로 생성
   const ids = searchParams.get('ids')?.split(',').filter(Boolean) ?? []
+  const { medications, updateMedication } = useMedication()
 
   const [isLoading, setIsLoading] = useState(true)
   const [meds, setMeds] = useState([])
@@ -41,15 +43,25 @@ function MedicationEditContent() {
       return
     }
 
+    // MedicationContext 의 store 에서 ids 매칭 우선 (페이지 이동 시 즉시 반영)
+    const cached = ids.map(id => medications.find(m => m.id === id)).filter(Boolean)
+    if (cached.length === ids.length) {
+      setMeds(cached)
+      setPrescriptionDate(cached[0]?.dispensed_date || cached[0]?.start_date || '')
+      setIsLoading(false)
+      return
+    }
+    if (medications.length === 0) {
+      // Context 의 첫 fetch 가 아직 진행 중일 수 있어 다음 effect 까지 대기
+      return
+    }
+    // 일부 매칭 누락 (직접 URL 진입 등) → fallback 으로 bulk fetch
     const fetchMedications = async () => {
       try {
-        // 그룹 내 여러 약품을 병렬 조회 (순차 요청 대비 응답 속도 개선)
         const results = await Promise.all(ids.map(id => api.get(`/api/v1/medications/${id}`)))
         const fetched = results.map(r => r.data)
         setMeds(fetched)
-        // 처방일 초기값: 첫 번째 약품의 dispensed_date 우선, 없으면 start_date
-        const firstDate = fetched[0]?.dispensed_date || fetched[0]?.start_date || ''
-        setPrescriptionDate(firstDate)
+        setPrescriptionDate(fetched[0]?.dispensed_date || fetched[0]?.start_date || '')
       } catch {
         alert('약품 정보를 불러올 수 없습니다.')
         router.push('/medication')
@@ -57,10 +69,9 @@ function MedicationEditContent() {
         setIsLoading(false)
       }
     }
-
     fetchMedications()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [medications])
 
   const handleInputChange = (index, field, value) => {
     setMeds(prev => {
@@ -83,10 +94,10 @@ function MedicationEditContent() {
 
     setIsSubmitting(true)
     try {
-      // 그룹 내 모든 약품을 병렬 PATCH — 처방일(dispensed_date)은 공통값으로 일괄 적용
+      // Context 의 updateMedication 이 응답으로 store in-place 갱신 → list 자동 반영
       await Promise.all(
         meds.map(med =>
-          api.patch(`/api/v1/medications/${med.id}`, {
+          updateMedication(med.id, {
             medicine_name: med.medicine_name,
             department: med.department || null,
             category: med.category || null,

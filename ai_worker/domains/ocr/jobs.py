@@ -95,10 +95,15 @@ def _persist_terminal(draft_id: str, status: OcrDraftStatusValue) -> None:
 
 
 async def _update_status_only(draft_id: str, status: OcrDraftStatusValue) -> None:
-    """결과 medicines 가 비어있는 terminal status 의 lifecycle."""
+    """Terminal failure 의 lifecycle — status + consumed_at 함께 set 해 자동 롤백.
+
+    실패 draft 가 사용자 카드(activeDrafts)에 누적되지 않도록 ai-worker 가 그
+    자리에서 ``consumed_at`` 도 채운다. 24h cron 이 hard delete 하기 전까지
+    DB 에는 남지만, ``consumed_at IS NULL`` 게이트로 모든 활성 조회에서 제외된다.
+    """
     await Tortoise.init(config=TORTOISE_ORM)
     try:
-        await OcrDraftRepository().update_result(draft_id, status, [])
+        await OcrDraftRepository().mark_terminal_failure(draft_id, status)
     finally:
         await Tortoise.close_connections()
 

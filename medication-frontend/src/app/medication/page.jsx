@@ -1,10 +1,11 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Pill, ChevronRight, Plus, Building2, Pencil, Trash2, CheckCircle2 } from 'lucide-react'
 import BottomNav from '@/components/layout/BottomNav'
-import api from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
+import { useMedication } from '@/contexts/MedicationContext'
+import { useOcrEntryNavigator } from '@/contexts/OcrDraftContext'
 
 function MedicationListSkeleton() {
   return (
@@ -206,14 +207,13 @@ function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup, onDe
 }
 
 const TABS = [
-  { label: '복용중', param: 'active_only=true' },
-  { label: '완료', param: 'inactive_only=true' },
+  { label: '복용중' },
+  { label: '완료' },
 ]
 
 export default function MedicationListPage() {
   const router = useRouter()
-  const [isLoading, setIsLoading] = useState(true)
-  const [medications, setMedications] = useState([])
+  const goToOcrEntry = useOcrEntryNavigator()
   const [activeTab, setActiveTab] = useState('복용중')
   const [selectedDate, setSelectedDate] = useState(null)
   const [deleteTargetItems, setDeleteTargetItems] = useState(null)
@@ -222,11 +222,11 @@ export default function MedicationListPage() {
   const [todayLogs, setTodayLogs] = useState([])
   const [isCompleting, setIsCompleting] = useState(false)
 
-  const { selectedProfileId: profileId } = useProfile()
-  const isInitialLoad = useRef(true)
-  const [isRefreshing, setIsRefreshing] = useState(false)
+  // MedicationContext 가 단일 진실 — 자체 fetch 제거, 탭 전환 시 client-side filter
+  const { activeMedications, completedMedications, isLoading, deleteMedications } = useMedication()
+  const medications = activeTab === '복용중' ? activeMedications : completedMedications
 
-  // 오늘 날짜 복약 기록 조회 (처방전별 완료 여부 확인용)
+  // 오늘 복약 기록은 별도 endpoint (intake-logs) — Context 외부 fetch
   const fetchTodayLogs = async () => {
     if (!profileId) return
     try {
@@ -238,30 +238,8 @@ export default function MedicationListPage() {
     }
   }
 
-  const fetchMedications = async (isInitial = false) => {
-    if (isInitial || isInitialLoad.current) {
-      setIsLoading(true)
-    } else {
-      setIsRefreshing(true)
-    }
-    try {
-      const tab = TABS.find(t => t.label === activeTab)
-      const res = await api.get(`/api/v1/medications?profile_id=${profileId}&${tab.param}`)
-      setMedications(res.data || [])
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setIsLoading(false)
-      setIsRefreshing(false)
-      isInitialLoad.current = false
-    }
-  }
-
   useEffect(() => {
     if (!profileId) return
-    isInitialLoad.current = true
-    // 약 목록과 오늘 복약 기록을 함께 조회
-    fetchMedications(true)
     fetchTodayLogs()
     setSelectedDate(null)
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -312,9 +290,9 @@ export default function MedicationListPage() {
     if (!deleteTargetItems || isDeleting) return
     setIsDeleting(true)
     try {
-      await Promise.all(deleteTargetItems.map(med => api.delete(`/api/v1/medications/${med.id}`)))
+      // Context 의 deleteMedications 가 응답 받자마자 setMedications 자동 갱신
+      await deleteMedications(deleteTargetItems.map(m => m.id))
       setDeleteTargetItems(null)
-      await fetchMedications()
     } catch (err) {
       console.error(err)
       alert('삭제 중 오류가 발생했습니다. 다시 시도해주세요.')
@@ -323,7 +301,7 @@ export default function MedicationListPage() {
     }
   }
 
-  if (isLoading) return <MedicationListSkeleton />
+  if (isLoading || !profileId) return <MedicationListSkeleton />
 
   // 오늘 TAKEN 상태인 medication_id 집합 (PrescriptionGroup 완료 여부 판단용)
   const completedMedIds = new Set(
@@ -341,8 +319,7 @@ export default function MedicationListPage() {
     : { title: '완료된 처방 내역이 없어요', sub: '복용이 끝난 처방전은 여기에 표시됩니다' }
 
   return (
-    <main className={`min-h-screen bg-gray-50 pb-24 transition-opacity duration-200 ${isRefreshing ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
-
+    <main className="min-h-screen bg-gray-50 pb-24">
       {/* 헤더 — 전체 너비 */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <h1 className="font-bold text-gray-900 text-lg">복약 가이드</h1>
@@ -355,7 +332,7 @@ export default function MedicationListPage() {
             생활습관 가이드 →
           </button>
           <button
-            onClick={() => router.push('/ocr')}
+            onClick={goToOcrEntry}
             className="flex items-center gap-1 text-sm font-bold text-gray-900 cursor-pointer hover:opacity-70 transition-opacity"
           >
             <Plus size={16} />
@@ -432,7 +409,7 @@ export default function MedicationListPage() {
                   </p>
                   {activeTab === '복용중' && !selectedDate && (
                     <button
-                      onClick={() => router.push('/ocr')}
+                      onClick={goToOcrEntry}
                       className="px-6 py-3 bg-gray-900 text-white text-sm font-bold rounded-full cursor-pointer hover:bg-gray-800 transition-colors"
                     >
                       처방전 등록하기

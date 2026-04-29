@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from 'react'
 import { X } from 'lucide-react'
-import api, { showError } from '@/lib/api'
+import { showError } from '@/lib/api'
+import { useProfile } from '@/contexts/ProfileContext'
 
 export default function SurveyModal({ onClose, userName, profileId }) {
+  const { profiles, updateProfile, createProfile } = useProfile()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [existingProfile, setExistingProfile] = useState(null)
   const [form, setForm] = useState({
@@ -13,38 +15,35 @@ export default function SurveyModal({ onClose, userName, profileId }) {
     conditions: [], allergies: []
   })
 
+  // ProfileContext 가 이미 가진 데이터 재사용 — 별도 GET /profiles/{id} 호출 안 함.
+  // form 은 사용자 입력 상태라 props/context 변동 시 1회 sync (mount + profileId 변경 시).
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!profileId) return
-    const fetchProfile = async () => {
-      try {
-        const res = await api.get(`/api/v1/profiles/${profileId}`)
-        const profile = res.data
-        if (profile) {
-          setExistingProfile(profile)
-          if (profile.health_survey) {
-            const survey = profile.health_survey
-            setForm({
-              age: survey.age?.toString() || '',
-              gender: survey.gender || '',
-              height: survey.height?.toString() || '',
-              weight: survey.weight?.toString() || '',
-              is_smoking: survey.is_smoking ?? null,
-              is_drinking: survey.is_drinking ?? null,
-              conditions: survey.conditions || [],
-              allergies: survey.allergies || []
-            })
-          }
-        }
-      } catch (err) { console.error(err) }
+    const profile = profiles.find(p => p.id === profileId)
+    if (!profile) return
+    setExistingProfile(profile)
+    if (profile.health_survey) {
+      const survey = profile.health_survey
+      setForm({
+        age: survey.age?.toString() || '',
+        gender: survey.gender || '',
+        height: survey.height?.toString() || '',
+        weight: survey.weight?.toString() || '',
+        is_smoking: survey.is_smoking ?? null,
+        is_drinking: survey.is_drinking ?? null,
+        conditions: survey.conditions || [],
+        allergies: survey.allergies || [],
+      })
     }
-    fetchProfile()
-  }, [profileId])
+  }, [profileId, profiles])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleSkip = async () => {
     if (!existingProfile) {
       setIsSubmitting(true)
       try {
-        await api.post('/api/v1/profiles', { relation_type: 'SELF', name: userName || '나', health_survey: null })
+        await createProfile({ relation_type: 'SELF', name: userName || '나', health_survey: null })
       } catch (err) { console.error(err) }
       setIsSubmitting(false)
     }
@@ -69,9 +68,9 @@ export default function SurveyModal({ onClose, userName, profileId }) {
     }
     try {
       if (existingProfile) {
-        await api.patch(`/api/v1/profiles/${existingProfile.id}`, { health_survey: healthSurvey })
+        await updateProfile(existingProfile.id, { health_survey: healthSurvey })
       } else {
-        await api.post('/api/v1/profiles', { relation_type: 'SELF', name: userName || '나', health_survey: healthSurvey })
+        await createProfile({ relation_type: 'SELF', name: userName || '나', health_survey: healthSurvey })
       }
       onClose()
     } catch (err) {

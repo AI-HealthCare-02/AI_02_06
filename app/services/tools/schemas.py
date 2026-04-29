@@ -1,12 +1,17 @@
 """OpenAI ``tools`` 파라미터에 그대로 넣을 수 있는 함수 선언.
 
-Router LLM 은 두 함수만 인지한다:
+Router LLM 은 다섯 함수를 인지한다:
 - ``search_hospitals_by_location`` — 사용자 GPS 좌표가 필요한 위치 검색.
 - ``search_hospitals_by_keyword`` — 지명/지역명/랜드마크 등 자유 키워드 검색.
+- ``search_medicine_knowledge_base`` — 약 정보/부작용/복용법/상호작용 등
+  의학 지식 검색 (RAG retrieval). 의학 도메인 질문이면 본 tool 호출 강제.
+- ``check_user_medications_recall`` — 사용자 복용약의 식약처 회수/판매중지
+  조회 (회수/리콜/ban/판매금지 등 동의어 풀 강화).
+- ``check_manufacturer_recalls`` — 제조사 단위 회수 이력 조회.
 
 병렬 호출 정책:
     호출 측에서 ``parallel_tool_calls=True`` + ``tool_choice="auto"`` 로
-    호출하면 LLM 이 두 함수를 한 응답에 묶어 호출할 수 있다. message_service
+    호출하면 LLM 이 여러 함수를 한 응답에 묶어 호출할 수 있다. message_service
     는 모든 결과를 ``asyncio.gather`` 로 모아 2nd LLM 호출에 전달한다.
 
 description 은 한국어:
@@ -67,6 +72,32 @@ HOSPITAL_KEYWORD_TOOL: dict[str, Any] = {
     },
 }
 
+MEDICINE_KNOWLEDGE_TOOL: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "search_medicine_knowledge_base",
+        "description": (
+            "약 정보, 부작용, 복용법, 효능, 성분, 상호작용 등 의학 도메인 지식 질문에 사용한다. "
+            "사용자 질문이 의학/약학 도메인이면 반드시 호출. 일반 잡담·인사·정치·날씨 등 "
+            "도메인 외 질문에는 호출하지 않는다. 인자 query 는 대화 이력의 대명사·생략된 "
+            "주어·지시어를 풀어 self-contained 한 한 문장으로 작성한다."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "검색 질의. history 의 대명사·생략된 주어를 풀어 한 문장으로 작성. "
+                        "예: '타이레놀의 부작용', '오메가3와 와파린의 상호작용'"
+                    ),
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+
 # ── 식약처 회수·판매중지 툴 (Phase 7, §15.3 동의어 풀 강화) ──────────
 # Router LLM 의 매칭 정확도를 위해 description 에 회수 도메인 동의어를
 # 명시한다. OpenAI Function Calling 공식 best practice — 동의어 10~15개
@@ -118,6 +149,7 @@ CHECK_MANUFACTURER_RECALLS_TOOL: dict[str, Any] = {
 TOOL_SCHEMAS: list[dict[str, Any]] = [
     HOSPITAL_LOCATION_TOOL,
     HOSPITAL_KEYWORD_TOOL,
+    MEDICINE_KNOWLEDGE_TOOL,
     CHECK_USER_MEDICATIONS_RECALL_TOOL,
     CHECK_MANUFACTURER_RECALLS_TOOL,
 ]

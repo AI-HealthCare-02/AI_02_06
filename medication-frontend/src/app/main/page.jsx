@@ -6,6 +6,9 @@ import { Pill, Flame, Plus, MessageCircle, FileText, Loader2, X, Trash2 } from '
 import ChatModal from '@/components/chat/ChatModal'
 import SurveyModal from '@/components/common/SurveyModal'
 import { useProfile } from '@/contexts/ProfileContext'
+import { useMedication } from '@/contexts/MedicationContext'
+import { useChallenge } from '@/contexts/ChallengeContext'
+import { useOcrDraft, useOcrEntryNavigator } from '@/contexts/OcrDraftContext'
 
 // 활성 OCR draft 카드 — main 우측하단 floating (챗봇 아이콘 위)
 // 사용자가 X 로 카드 전체를 숨길 수 있고 (새로고침 시 다시 표시),
@@ -100,103 +103,81 @@ function MainPageContent() {
   const [isLoading, setIsLoading] = useState(true)
   const [showSurvey, setShowSurvey] = useState(false)
   const [showChat, setShowChat] = useState(false)
-  const [medications, setMedications] = useState([])
   const [activeChallenge, setActiveChallenge] = useState(null)
-  const [activeDrafts, setActiveDrafts] = useState([])
   const [greeting, setGreeting] = useState({ msg: '반가워요', sub: '오늘 하루도 건강하게 시작해봐요' })
 
   const { selectedProfileId, selectedProfile } = useProfile()
+  // 4 Context 가 모든 server state 를 단일 진실로 관리 — 자체 fetch 0
+  const { activeMedications: medications } = useMedication()
+  const { activeChallenges } = useChallenge()
+  const { activeDrafts, removeDraftLocally, refetchDrafts } = useOcrDraft()
+  const goToOcrFlow = useOcrEntryNavigator()
   const userName = selectedProfile?.name?.split('(')[0] || '사용자'
   const isInitialLoad = useRef(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
 
   // 설문 팝업 쿼리 파라미터 감지
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (searchParams.get('showSurvey') === 'true') {
       setShowSurvey(true)
       router.replace('/main', { scroll: false })
     }
   }, [searchParams, router])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
+  // Context 들이 자동으로 server state 를 관리 — 페이지는 derived state 만 갱신.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!selectedProfileId) return
-    const initPage = async () => {
-      try {
-        if (isInitialLoad.current) {
-          setIsLoading(true)
-        } else {
-          setIsRefreshing(true)
-        }
-        const [medRes, challengeRes, draftsRes] = await Promise.all([
-          api.get(`/api/v1/medications?profile_id=${selectedProfileId}&active_only=true`),
-          api.get(`/api/v1/challenges?profile_id=${selectedProfileId}`).catch(() => ({ data: [] })),
-          api.get('/api/v1/ocr/drafts/active').catch(() => ({ data: { drafts: [] } })),
-        ])
-        setMedications(medRes.data || [])
-        setActiveDrafts(draftsRes.data?.drafts || [])
-        const inProgress = (challengeRes.data || []).filter(c => c.challenge_status === 'IN_PROGRESS')
-        if (inProgress.length > 0) {
-          const random = inProgress[Math.floor(Math.random() * inProgress.length)]
-          setActiveChallenge(random)
-        } else {
-          setActiveChallenge(null)
-        }
-        const hour = new Date().getHours()
-        if (hour < 12) setGreeting({ msg: '좋은 아침이에요', sub: '오늘 하루도 건강하게 시작해봐요' })
-        else if (hour < 17) setGreeting({ msg: '좋은 오후예요', sub: '점심 식사 후 약 챙기셨나요?' })
-        else setGreeting({ msg: '좋은 저녁이에요', sub: '저녁 복약 시간을 확인해보세요' })
-      } catch (err) { console.error(err) } finally {
-        setIsLoading(false)
-        setIsRefreshing(false)
-        isInitialLoad.current = false
-      }
-    }
-    initPage()
+    isInitialLoad.current = false
+    setIsLoading(false)
+    const hour = new Date().getHours()
+    if (hour < 12) setGreeting({ msg: '좋은 아침이에요', sub: '오늘 하루도 건강하게 시작해봐요' })
+    else if (hour < 17) setGreeting({ msg: '좋은 오후예요', sub: '점심 식사 후 약 챙기셨나요?' })
+    else setGreeting({ msg: '좋은 저녁이에요', sub: '저녁 복약 시간을 확인해보세요' })
   }, [selectedProfileId])
 
-  // ── 활성 draft 재동기화 ───────────────────────────────────────────────
-  // 흐름: 1) result 페이지가 sessionStorage 에 남긴 consumed marker 즉시 반영
-  //       2) window focus 시 백엔드 재조회 (App Router page cache 우회 안전망)
+  // 진행 중 챌린지에서 랜덤 1개 — activeChallenges 갱신 시 자동 반영
   useEffect(() => {
-    const consumedId = typeof window !== 'undefined' && sessionStorage.getItem('ocr_consumed_draft_id')
-    if (consumedId) {
-      setActiveDrafts((prev) => prev.filter((d) => d.draft_id !== consumedId))
-      sessionStorage.removeItem('ocr_consumed_draft_id')
+    if (activeChallenges.length === 0) {
+      setActiveChallenge(null)
+      return
     }
+    const random = activeChallenges[Math.floor(Math.random() * activeChallenges.length)]
+    setActiveChallenge(random)
+  }, [activeChallenges])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
+  // main 페이지 진입 시 / 프로필 전환 시 OCR drafts 동기화.
+  // - result 페이지에서 SSE 로 ready 도달한 draft 가 Context activeDrafts 에는
+  //   반영되지 않은 상태로 main 으로 돌아오면, refetch 가 없으면 새로고침해야
+  //   카드가 보였다 → mount/프로필 전환 시 명시적 refetch 로 해결.
+  // - refetchDrafts 자체가 selectedProfileId 의존이라 변경 시 의존성 재생성되어
+  //   effect 가 재호출됨 (안전망: Context effect 가 missed 한 경우도 cover).
+  useEffect(() => {
+    if (selectedProfileId) refetchDrafts()
+  }, [selectedProfileId, refetchDrafts])
+
+  // window focus 시 drafts 재동기화 (백그라운드에서 다른 탭에서 등록·완료한 draft 반영)
+  useEffect(() => {
     if (!selectedProfileId) return
-    const refetchActiveDrafts = async () => {
-      try {
-        const res = await api.get('/api/v1/ocr/drafts/active')
-        setActiveDrafts(res.data?.drafts || [])
-      } catch {
-        // ignore — 사용자 흐름 차단하지 않음
-      }
-    }
-    window.addEventListener('focus', refetchActiveDrafts)
-    return () => window.removeEventListener('focus', refetchActiveDrafts)
-  }, [selectedProfileId])
-
-  // 처리 중이거나 확인 대기 중인 draft 가 있으면 그쪽으로 이동, 없으면 업로드 페이지로.
-  // 업로드 버튼 + 빈 약 카드의 등록 버튼 모두 동일 분기를 공유한다.
-  const goToOcrFlow = useCallback(() => {
-    if (activeDrafts.length > 0) {
-      router.push(`/ocr/result?draft_id=${activeDrafts[0].draft_id}`)
-    } else {
-      router.push('/ocr')
-    }
-  }, [activeDrafts, router])
+    window.addEventListener('focus', refetchDrafts)
+    return () => window.removeEventListener('focus', refetchDrafts)
+  }, [selectedProfileId, refetchDrafts])
 
   // 카드에서 개별 draft 폐기 — 백엔드 DELETE 후 즉시 목록에서 제외.
   // 실패 시에도 사용자 흐름을 차단하지 않고 silently skip (24h 후 자동 정리됨).
   const handleDeleteDraft = useCallback(async (draftId) => {
     try {
-      await api.delete(`/api/v1/ocr/draft/${draftId}`)
+      await api.delete(`/api/v1/ocr/draft/${draftId}`, {
+        params: selectedProfileId ? { profile_id: selectedProfileId } : undefined,
+      })
     } catch {
       // ignore
     }
-    setActiveDrafts((prev) => prev.filter((d) => d.draft_id !== draftId))
-  }, [])
+    removeDraftLocally(draftId)
+  }, [removeDraftLocally, selectedProfileId])
 
   if (isLoading) return <MainSkeleton />
 
@@ -296,8 +277,11 @@ function MainPageContent() {
         </div>
       </main>
 
-      {/* 처리 중·확인 대기 OCR draft 카드 (우측하단 floating) */}
+      {/* 처리 중·확인 대기 OCR draft 카드 (우측하단 floating).
+          key={selectedProfileId} 로 프로필 전환 시 unmount/remount → 내부 dismissed
+          state 가 자동 reset 되어 새 프로필에서 카드를 다시 볼 수 있다. */}
       <ActiveDraftsCard
+        key={selectedProfileId}
         drafts={activeDrafts}
         onSelect={(draftId) => router.push(`/ocr/result?draft_id=${draftId}`)}
         onDelete={handleDeleteDraft}

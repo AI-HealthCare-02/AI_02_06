@@ -122,6 +122,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """Rate limiting middleware for request throttling."""
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        """Apply per-IP rate limit then forward to the next ASGI handler.
+
+        Limits depend on path/method (auth strictest, mutations medium, GET lenient).
+        Excluded paths (health/docs) bypass entirely.
+
+        Args:
+            request: Incoming HTTP request.
+            call_next: Next ASGI middleware/handler.
+
+        Returns:
+            Response from the downstream handler, or 429 JSON when limit exceeded.
+        """
         path = request.url.path
         method = request.method
 

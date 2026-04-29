@@ -6,15 +6,13 @@ with automatic expiration handling and token backend integration.
 
 from calendar import timegm
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import uuid4
 
 from app.core import config
+from app.utils.jwt.backends import TokenBackend
 from app.utils.jwt.exceptions import ExpiredTokenError, TokenBackendError, TokenBackendExpiredError, TokenError
 from app.utils.jwt.state import token_backend
-
-if TYPE_CHECKING:
-    from app.utils.jwt.backends import TokenBackend
 
 
 class Token:
@@ -30,7 +28,7 @@ class Token:
 
     token_type: str | None = None
     lifetime: timedelta | None = None
-    _token_backend: "TokenBackend" = token_backend
+    _token_backend: TokenBackend = token_backend
 
     def __init__(self, token: str | None = None, verify: bool = True) -> None:
         """Initialize token instance.

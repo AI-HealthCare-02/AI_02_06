@@ -1,16 +1,13 @@
-"""RQ 기반 RAGGenerator 어댑터 (FastAPI 측).
+"""RQ 기반 LLM 어댑터 (FastAPI 측).
 
-``RAGPipeline`` 은 ``RAGGenerator`` 인스턴스를 ``rag_generator=`` 로 주입받아
-``rewrite_query`` / ``generate_chat_response`` 를 호출한다. 본 어댑터는 이
-공개 메서드 두 개를 그대로 구현하되, OpenAI 호출을 직접 수행하지 않고
-Redis Queue("ai") 에 ``rewrite_query_job`` / ``generate_chat_response_job``
-을 enqueue한 뒤 결과를 기다려 ``RewriteResult`` / ``ChatCompletion`` DTO
-로 재포장한다.
+옵션 C 이후 본 어댑터의 호출자는 ``session_compact_service`` 의
+``summarize_messages`` 만 남았다. 다른 LLM 호출 (Router LLM, 2nd LLM,
+RAG retrieval) 은 모두 ``app/services/tools/rq_adapters.py`` 의 전용 함수
+들이 담당한다.
 
 Design rationale:
-- FastAPI 이미지는 ``openai`` 라이브러리를 더 이상 직접 호출하지 않아도
-  되지만, ``rq.Queue.enqueue`` 와 DTO 재포장용 import 만 남긴다.
-- 시그니처 동치성 덕분에 ``RAGPipeline`` 코드는 수정 불필요.
+- FastAPI 이미지는 ``openai`` 라이브러리를 직접 호출하지 않는다.
+  ``rq.Queue.enqueue`` 와 DTO 재포장용 import 만 남긴다.
 - 폴링 루프는 ``asyncio.sleep`` 으로 FastAPI 이벤트 루프를 막지 않는다.
 """
 
@@ -18,15 +15,10 @@ import asyncio
 import time
 from typing import Any
 
-try:
-    from rq import Queue  # pragma: no cover — type hint only
-except ImportError:  # pragma: no cover
-    Queue = Any  # type: ignore[misc, assignment]
+from rq import Queue
 
 from app.dtos.rag import (
     ChatCompletion,
-    RewriteResult,
-    RewriteStatus,
     SummaryResult,
     SummaryStatus,
     TokenUsage,
@@ -34,7 +26,6 @@ from app.dtos.rag import (
 
 _DEFAULT_POLL_INTERVAL_SEC = 0.1
 _DEFAULT_TIMEOUT_SEC = 60.0  # LLM은 임베딩보다 느리므로 더 긴 상한.
-_REWRITE_JOB_REF = "ai_worker.domains.rag.jobs.rewrite_query_job"
 _GENERATE_JOB_REF = "ai_worker.domains.rag.jobs.generate_chat_response_job"
 _COMPACT_JOB_REF = "ai_worker.domains.session_compact.jobs.compact_messages_job"
 
@@ -48,11 +39,13 @@ class LLMJobError(RuntimeError):
 
 
 class RQRAGGenerator:
-    """RAGGenerator-shaped adapter that delegates to AI-Worker via RQ.
+    """RQ-backed LLM adapter — 옵션 C 이후로는 summarize 전용.
 
-    ``RAGPipeline`` uses this in place of the legacy ``RAGGenerator`` so
-    that OpenAI API calls happen inside the AI-Worker process while
-    FastAPI only deals with HTTP I/O and Redis roundtrips.
+    FastAPI 측에서 OpenAI API 를 직접 호출하지 않고 ai-worker 의 RQ job 에
+    위임한다. Router LLM / 2nd LLM / retrieval 은 ``app/services/tools/
+    rq_adapters.py`` 가 담당하므로 본 클래스의 잔여 메서드는 세션 요약
+    경로 (``summarize_messages``) 와 LLM 응답 생성 (``generate_chat_response``)
+    뿐이다.
     """
 
     def __init__(
@@ -65,16 +58,6 @@ class RQRAGGenerator:
         self._queue = queue
         self._poll_interval = poll_interval
         self._timeout = timeout
-
-    async def rewrite_query(
-        self,
-        history: list[dict[str, str]],
-        current_query: str,
-    ) -> RewriteResult:
-        """Enqueue a rewrite job and return the DTO the pipeline expects."""
-        job = self._queue.enqueue(_REWRITE_JOB_REF, history, current_query)
-        raw = await self._await_result(job)
-        return _to_rewrite_result(raw)
 
     async def generate_chat_response(
         self,
@@ -118,16 +101,6 @@ class RQRAGGenerator:
 
 
 # ── dict → DTO 변환 ────────────────────────────────────────────
-
-
-def _to_rewrite_result(raw: dict[str, Any]) -> RewriteResult:
-    usage_raw = raw.get("token_usage")
-    token_usage = TokenUsage(**usage_raw) if usage_raw else None
-    return RewriteResult(
-        status=RewriteStatus(raw["status"]),
-        query=raw["query"],
-        token_usage=token_usage,
-    )
 
 
 def _to_chat_completion(raw: dict[str, Any]) -> ChatCompletion:

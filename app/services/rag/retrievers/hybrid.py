@@ -128,19 +128,40 @@ class HybridRetriever:
             appears once and its chunks are sorted by vector_score desc.
             The outer list is ordered by each medicine's top-1 chunk score.
         """
-        connection = connections.get("default")
-        vector_str = f"[{','.join(map(str, query_embedding))}]"
+        sql, params = self._build_vector_search_sql(query_embedding, filters, similarity_threshold, limit)
+        rows = await connections.get("default").execute_query_dict(sql, params)
+        logger.info("[RAG] pgvector(chunk): %d rows (threshold=%.2f)", len(rows), similarity_threshold)
+        raw_hits = [self._row_to_hit(row) for row in rows]
+        return self._group_chunks_by_medicine(raw_hits)
 
+    @staticmethod
+    def _build_vector_search_sql(
+        query_embedding: list[float],
+        filters: SearchFilters,
+        similarity_threshold: float,
+        limit: int,
+    ) -> tuple[str, list]:
+        """Build the SQL + params for the chunk-level pgvector search.
+
+        Args:
+            query_embedding: Query vector.
+            filters: Metadata filters.
+            similarity_threshold: Minimum cosine similarity (0..1).
+            limit: Max rows to fetch.
+
+        Returns:
+            ``(sql, params)`` ready for ``connection.execute_query_dict``.
+        """
+        vector_str = f"[{','.join(map(str, query_embedding))}]"
         where_conditions: list[str] = ["(mc.embedding <=> $1) < $2"]
         params: list = [vector_str, 1 - similarity_threshold]
         idx = 3
-
         if filters.medicine_names:
             where_conditions.append(f"mi.medicine_name = ANY(${idx})")
             params.append(filters.medicine_names)
             idx += 1
-
         where_clause = " AND ".join(where_conditions)
+        # where_conditions 의 모든 element 는 코드 내부 상수 + 값은 $N 바인딩 → SQL injection 안전.
         sql = f"""
         SELECT
             mc.id AS chunk_id,
@@ -171,44 +192,39 @@ class HybridRetriever:
         WHERE {where_clause}
         ORDER BY distance ASC
         LIMIT ${idx}
-        """  # noqa: S608  # nosec B608  — where_conditions 모두 코드 내부 상수, 값은 $N 파라미터 바인딩
+        """  # noqa: S608  # nosec B608
         params.append(limit)
+        return sql, params
 
-        rows = await connection.execute_query_dict(sql, params)
-        logger.info("[RAG] pgvector(chunk): %d rows (threshold=%.2f)", len(rows), similarity_threshold)
-
-        # Build raw hits preserving order (already sorted by distance asc)
-        raw_hits: list[tuple[MedicineInfo, MedicineChunk, float]] = []
-        for row in rows:
-            distance = row["distance"]
-            vector_score = 1 - distance
-            medicine = MedicineInfo(
-                id=row["mi_id"],
-                item_seq=row["item_seq"],
-                medicine_name=row["medicine_name"],
-                item_eng_name=row["item_eng_name"],
-                entp_name=row["entp_name"],
-                category=row["category"],
-                efficacy=row["efficacy"],
-                side_effects=row["side_effects"],
-                precautions=row["precautions"],
-                atc_code=row["atc_code"],
-                ee_doc_url=row["ee_doc_url"],
-                ud_doc_url=row["ud_doc_url"],
-                nb_doc_url=row["nb_doc_url"],
-            )
-            chunk = MedicineChunk(
-                id=row["chunk_id"],
-                medicine_info_id=row["medicine_info_id"],
-                section=row["section"],
-                chunk_index=row["chunk_index"],
-                content=row["content"],
-                token_count=row["token_count"],
-                model_version=row["model_version"],
-            )
-            raw_hits.append((medicine, chunk, vector_score))
-
-        return self._group_chunks_by_medicine(raw_hits)
+    @staticmethod
+    def _row_to_hit(row: dict) -> tuple[MedicineInfo, MedicineChunk, float]:
+        """Map one SQL row to ``(medicine, chunk, vector_score)``."""
+        vector_score = 1 - row["distance"]
+        medicine = MedicineInfo(
+            id=row["mi_id"],
+            item_seq=row["item_seq"],
+            medicine_name=row["medicine_name"],
+            item_eng_name=row["item_eng_name"],
+            entp_name=row["entp_name"],
+            category=row["category"],
+            efficacy=row["efficacy"],
+            side_effects=row["side_effects"],
+            precautions=row["precautions"],
+            atc_code=row["atc_code"],
+            ee_doc_url=row["ee_doc_url"],
+            ud_doc_url=row["ud_doc_url"],
+            nb_doc_url=row["nb_doc_url"],
+        )
+        chunk = MedicineChunk(
+            id=row["chunk_id"],
+            medicine_info_id=row["medicine_info_id"],
+            section=row["section"],
+            chunk_index=row["chunk_index"],
+            content=row["content"],
+            token_count=row["token_count"],
+            model_version=row["model_version"],
+        )
+        return medicine, chunk, vector_score
 
     def _group_chunks_by_medicine(
         self,

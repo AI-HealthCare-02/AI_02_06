@@ -1,9 +1,10 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { X, Send, RefreshCw, Plus, Pencil, Trash2, Check } from 'lucide-react'
+import { X, Send, RefreshCw, Plus, Pencil, Trash2, Check, MapPin } from 'lucide-react'
 import PropTypes from 'prop-types'
 import Markdown from 'react-markdown'
 import api, { showError } from '@/lib/api'
+import { useChatSession } from '@/contexts/ChatSessionContext'
 
 // Assistant 메시지는 LLM 이 Markdown 으로 답하므로 커스텀 컴포넌트 매핑으로
 // Tailwind 스타일을 주입한다. Tailwind Typography 플러그인 없이도 읽기 좋은
@@ -56,8 +57,16 @@ function formatDefaultSessionTitle(date = new Date()) {
  * @param {string} props.profileId - 프로필 ID (필수)
  */
 export default function ChatModal({ onClose, profileId }) {
-  const [sessions, setSessions] = useState([])
-  const [activeSessionId, setActiveSessionId] = useState(null)
+  // ChatSessionContext 가 sessions list 와 activeSessionId 를 단일 진실로 관리
+  const {
+    sessions,
+    activeSessionId,
+    setActiveSessionId,
+    createSession,
+    renameSession,
+    deleteSession,
+    refetchSessions,
+  } = useChatSession()
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -68,6 +77,15 @@ export default function ChatModal({ onClose, profileId }) {
   const [editingSessionId, setEditingSessionId] = useState(null)
   const [editingTitle, setEditingTitle] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+
+  // GPS 권한 토글 (JIT opt-in 정책)
+  // - 새 세션은 토글이 hidden (세션 변경 시 reset)
+  // - 사용자가 GPS 가 필요한 질문을 처음 던지면 토글이 등장 (gpsToggleVisible=true)
+  // - 사용자가 ON 하기 전까지 위치는 보내지 않음 (즉시 denied POST)
+  // - ON 일 때 들어온 pending turn 은 navigator.geolocation 흐름으로 진행
+  const [gpsToggleVisible, setGpsToggleVisible] = useState(false)
+  const [gpsToggleOn, setGpsToggleOn] = useState(false)
+  const [pendingGpsTurnId, setPendingGpsTurnId] = useState(null)
 
   const scrollRef = useRef(null)
   const editInputRef = useRef(null)
@@ -85,35 +103,19 @@ export default function ChatModal({ onClose, profileId }) {
     }
   }, [])
 
-  // 세션 초기화: 리스트 조회 → 없으면 신규 생성 → 가장 최근 세션 활성화
+  // 세션 초기화: Context 가 이미 list 보유 → 가장 최근 세션 활성화 (또는 빈 상태)
   const initSession = useCallback(async () => {
     if (!profileId) {
       setMessages([{ role: 'assistant', content: '프로필 정보를 불러올 수 없습니다.' }])
       setIsInitializing(false)
       return
     }
-
     setIsInitializing(true)
     setInitError(false)
-
     try {
-      const sessionsRes = await api.get('/api/v1/chat-sessions', {
-        params: { profile_id: profileId },
-      })
-
-      const sessionList = sessionsRes.data || []
-      setSessions(sessionList)
-
-      if (sessionList.length === 0) {
-        // Lazy: 첫 메시지 전송 시 세션이 생성된다
-        setActiveSessionId(null)
-        setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
-        return
-      }
-
-      const currentSessionId = sessionList[0].id
-      setActiveSessionId(currentSessionId)
-      await loadMessagesForSession(currentSessionId)
+      // 모달 열림 시 최신 세션 목록 ensure (다른 디바이스/탭에서 변경 가능성)
+      await refetchSessions()
+      // sessions / activeSessionId 보정은 아래 별도 effect 에서 수행
     } catch (err) {
       console.error('세션 초기화 실패:', err)
       showError('채팅 세션을 시작할 수 없습니다.')
@@ -122,17 +124,49 @@ export default function ChatModal({ onClose, profileId }) {
     } finally {
       setIsInitializing(false)
     }
-  }, [profileId, loadMessagesForSession])
+  }, [profileId, refetchSessions])
 
   useEffect(() => {
     initSession()
   }, [initSession])
+
+  // sessions 변동 시 activeSessionId 보정 (메시지 로드는 아래 별도 effect)
+  useEffect(() => {
+    if (isInitializing) return
+    if (sessions.length === 0) {
+      if (activeSessionId !== null) setActiveSessionId(null)
+      setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
+      return
+    }
+    if (!activeSessionId || !sessions.find(s => s.id === activeSessionId)) {
+      setActiveSessionId(sessions[0].id)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions, isInitializing])
+
+  // activeSessionId 변경 시마다 (모달 첫 mount 포함) 메시지 자동 로드.
+  // ChatSessionContext 의 activeSessionId 는 모달 unmount 후에도 보존되므로,
+  // 모달 다시 열면 이 effect 가 즉시 발동해 기존 메시지를 표시한다.
+  useEffect(() => {
+    if (!activeSessionId) return
+    if (sessions.length > 0 && !sessions.find(s => s.id === activeSessionId)) return
+    loadMessagesForSession(activeSessionId).catch(err => console.error(err))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId])
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [messages, isLoading])
+
+  // 세션이 바뀌면 GPS 토글 상태를 새 세션 기준으로 reset
+  // (새 세션의 첫 GPS 검색에서 다시 등장하도록 hidden + OFF)
+  useEffect(() => {
+    setGpsToggleVisible(false)
+    setGpsToggleOn(false)
+    setPendingGpsTurnId(null)
+  }, [activeSessionId])
 
   // 편집 모드 진입 시 입력창에 포커스
   useEffect(() => {
@@ -142,9 +176,10 @@ export default function ChatModal({ onClose, profileId }) {
     }
   }, [editingSessionId])
 
-  // 세션 전환
+  // 세션 전환 — isLoading (현재 세션 답변 대기) 와 무관하게 항상 가능.
+  // 새 세션의 isPendingResponse 는 그 세션 메시지 기준으로 재계산되어 자동 분리됨.
   const switchSession = async (sessionId) => {
-    if (sessionId === activeSessionId || isLoading) return
+    if (sessionId === activeSessionId) return
     setActiveSessionId(sessionId)
     setConfirmDeleteId(null)
     try {
@@ -155,16 +190,11 @@ export default function ChatModal({ onClose, profileId }) {
     }
   }
 
-  // 새 세션 생성
+  // 새 세션 생성 — 다른 세션 답변 대기 중에도 항상 허용 (각 세션은 독립).
   const handleCreateSession = async () => {
-    if (isLoading || isInitializing || !profileId) return
+    if (isInitializing || !profileId) return
     try {
-      const res = await api.post('/api/v1/chat-sessions', {
-        profile_id: profileId,
-        title: formatDefaultSessionTitle(),
-      })
-      const newSession = res.data
-      setSessions(prev => [newSession, ...prev])
+      const newSession = await createSession(profileId, formatDefaultSessionTitle())
       setActiveSessionId(newSession.id)
       setMessages([{ role: 'assistant', content: '안녕하세요! 복약 관련 궁금한 것을 물어보세요.' }])
     } catch (err) {
@@ -200,8 +230,7 @@ export default function ChatModal({ onClose, profileId }) {
       return
     }
     try {
-      const res = await api.patch(`/api/v1/chat-sessions/${sessionId}`, { title: trimmed })
-      setSessions(prev => prev.map(s => (s.id === sessionId ? res.data : s)))
+      await renameSession(sessionId, trimmed)
     } catch (err) {
       console.error('세션 이름 변경 실패:', err)
       showError('이름을 변경하지 못했습니다.')
@@ -216,16 +245,16 @@ export default function ChatModal({ onClose, profileId }) {
       setConfirmDeleteId(sessionId)
       return
     }
-    // 확정 클릭
+    // 확정 클릭 — Context 가 응답으로 sessions 자동 갱신 + activeSessionId 자동 reset
     try {
-      await api.delete(`/api/v1/chat-sessions/${sessionId}`)
-      const remaining = sessions.filter(s => s.id !== sessionId)
-      setSessions(remaining)
+      const wasActive = sessionId === activeSessionId
+      await deleteSession(sessionId)
       setConfirmDeleteId(null)
 
-      // 활성 세션을 지운 경우: 다음(이전에 대화한) 세션으로 전환.
-      // 남은 세션이 없으면 빈 상태 유지 (첫 메시지 전송 시 lazy 생성).
-      if (sessionId === activeSessionId) {
+      // 활성 세션을 지운 경우: 남은 첫 세션으로 자동 전환 (sessions 변동 effect 처리)
+      // 단, 메시지 로드는 여기서 직접 호출 (effect 가 동기화 한 turn 늦을 수 있음)
+      if (wasActive) {
+        const remaining = sessions.filter(s => s.id !== sessionId)
         if (remaining.length > 0) {
           const nextId = remaining[0].id
           setActiveSessionId(nextId)
@@ -295,25 +324,40 @@ export default function ChatModal({ onClose, profileId }) {
     setMessages(prev => [...prev, { role: 'assistant', content }])
   }, [])
 
+  // GPS 토글 클릭 — OFF→ON 전환 시 대기 중인 pending turn 이 있으면 즉시 진행
+  const handleGpsToggle = useCallback(async () => {
+    const next = !gpsToggleOn
+    setGpsToggleOn(next)
+    if (!next) return // ON→OFF 는 다음 GPS 요청에서만 효과 (이번 turn 은 자연 만료)
+    if (!pendingGpsTurnId) return
+    const turn_id = pendingGpsTurnId
+    setPendingGpsTurnId(null)
+    setIsLoading(true)
+    try {
+      await handleGeolocationCallback({ turn_id })
+    } finally {
+      setIsLoading(false)
+    }
+  }, [gpsToggleOn, pendingGpsTurnId, handleGeolocationCallback])
+
+  // 마지막 메시지가 user 면 BE 응답 대기 중 — 모달 unmount 후 재진입해도 이 상태
+  // 가 자동 인식돼서 (1) 점점점 스켈레톤 표시 (2) 중복 전송 차단 모두 작동.
+  const isPendingResponse = messages.length > 0 && messages[messages.length - 1].role === 'user'
+
   const handleSend = async () => {
     const message = input.trim()
-    if (!message || isLoading || isInitializing) return
+    if (!message || isLoading || isInitializing || isPendingResponse) return
 
     setInput('')
     setMessages(prev => [...prev, { role: 'user', content: message }])
     setIsLoading(true)
 
     try {
-      // Lazy session creation: 아직 세션이 없으면 여기서 생성한다
+      // Lazy session creation: 아직 세션이 없으면 여기서 생성한다 — Context 가 sessions 자동 갱신
       let sid = activeSessionId
       if (!sid) {
-        const createRes = await api.post('/api/v1/chat-sessions', {
-          profile_id: profileId,
-          title: formatDefaultSessionTitle(),
-        })
-        const newSession = createRes.data
+        const newSession = await createSession(profileId, formatDefaultSessionTitle())
         sid = newSession.id
-        setSessions(prev => [newSession, ...prev])
         setActiveSessionId(sid)
       }
 
@@ -323,9 +367,29 @@ export default function ChatModal({ onClose, profileId }) {
       })
 
       // 202 Accepted + action=request_geolocation: Router LLM 이 위치 기반
-      // 툴을 고른 상태. 브라우저 GPS 후 /tool-result 로 재요청한다.
+      // 툴을 고른 상태. JIT 토글 정책 — 사용자가 토글을 ON 한 경우만 즉시
+      // navigator.geolocation 호출, 아니면 토글을 등장시키고 사용자 결정 대기.
       if (res.status === 202 && res.data?.action === 'request_geolocation') {
-        await handleGeolocationCallback(res.data)
+        if (gpsToggleOn) {
+          // 토글 ON: 평소 흐름 그대로 GPS 받아서 tool-result POST
+          await handleGeolocationCallback(res.data)
+        } else {
+          // 토글 OFF (default): 토글 등장 + pending turn_id 보존.
+          // 사용자가 토글 ON 누르면 그때 handleGeolocationCallback 진행.
+          setPendingGpsTurnId(res.data.turn_id)
+          if (!gpsToggleVisible) {
+            setGpsToggleVisible(true)
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: '이 검색은 위치 정보가 필요해요. 아래 위치 토글을 켜주시면 검색을 진행할게요. (60초 안에 결정해 주세요)'
+            }])
+          } else {
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: '위치 토글이 꺼져있어요. 아래 토글을 켜주시면 검색을 진행할게요.'
+            }])
+          }
+        }
         return
       }
 
@@ -354,7 +418,7 @@ export default function ChatModal({ onClose, profileId }) {
           <div className="p-3 border-b border-gray-100">
             <button
               onClick={handleCreateSession}
-              disabled={isInitializing || isLoading}
+              disabled={isInitializing}
               className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-gray-700 disabled:bg-gray-400 active:scale-95 transition-all cursor-pointer"
             >
               <Plus size={16} />
@@ -468,7 +532,7 @@ export default function ChatModal({ onClose, profileId }) {
               </div>
             ))}
 
-            {(isInitializing || isLoading) && (
+            {(isInitializing || isLoading || isPendingResponse) && (
               <div className="flex justify-start">
                   <div className="bg-white border border-gray-200 px-4 py-3 rounded-2xl rounded-bl-none shadow-sm flex gap-1.5">
                     <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
@@ -477,6 +541,29 @@ export default function ChatModal({ onClose, profileId }) {
                   </div>
               </div>)}
           </div>
+
+          {/* GPS 권한 토글 (JIT — 첫 위치 검색 후 등장, 이후 같은 세션 동안 유지) */}
+          {gpsToggleVisible && (
+            <div className="px-4 py-2 bg-blue-50 border-t border-blue-100 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm text-gray-700">
+                <MapPin size={14} className={gpsToggleOn ? 'text-gray-900' : 'text-gray-400'} />
+                <span>위치 정보 사용 {gpsToggleOn ? '켜짐' : '꺼짐'}</span>
+              </div>
+              <button
+                onClick={handleGpsToggle}
+                disabled={isLoading || isInitializing}
+                className={`relative w-10 h-5 rounded-full transition-colors disabled:opacity-50 cursor-pointer
+                  ${gpsToggleOn ? 'bg-gray-900' : 'bg-gray-300'}`}
+                aria-label={gpsToggleOn ? '위치 사용 끄기' : '위치 사용 켜기'}
+                aria-pressed={gpsToggleOn}
+              >
+                <span
+                  className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all
+                    ${gpsToggleOn ? 'right-0.5' : 'left-0.5'}`}
+                />
+              </button>
+            </div>
+          )}
 
           {/* 입력창 */}
           <div className="p-4 bg-white border-t border-gray-100 flex gap-2 items-center">
@@ -496,13 +583,19 @@ export default function ChatModal({ onClose, profileId }) {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyUp={(e) => { if (e.key === 'Enter') handleSend() }}
-                  disabled={isInitializing}
-                  placeholder={isInitializing ? '연결 중...' : '메시지를 입력하세요'}
+                  disabled={isInitializing || isPendingResponse}
+                  placeholder={
+                    isInitializing
+                      ? '연결 중...'
+                      : isPendingResponse
+                        ? '답변을 기다리는 중...'
+                        : '메시지를 입력하세요'
+                  }
                   className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-gray-400 transition-all disabled:opacity-50"
                 />
                 <button
                   onClick={handleSend}
-                  disabled={isLoading || !input.trim() || isInitializing}
+                  disabled={isLoading || !input.trim() || isInitializing || isPendingResponse}
                   className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-900 text-white hover:bg-gray-700 disabled:bg-gray-100 disabled:text-gray-300 active:scale-95 transition-all cursor-pointer"
                 >
                   <Send size={16} />

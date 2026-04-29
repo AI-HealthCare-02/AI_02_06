@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
-import { User, Activity, Users, Home, Trash2, X, Check, Plus, FileText, LogOut } from 'lucide-react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { User, Activity, Users, Home, Trash2, X, Check, Plus, FileText, LogOut, Pencil } from 'lucide-react'
 import EmptyState from '@/components/common/EmptyState'
 import BottomNav from '@/components/layout/BottomNav'
 import LogoutModal, { useLogout, DeleteAccountModal, useDeleteAccount } from '@/components/auth/LogoutModal'
@@ -182,8 +182,8 @@ function HealthInfoModal({ info, onClose, onSave }) {
 
 function FamilyModal({ member, onClose, onSave }) {
   const [formData, setFormData] = useState(
-    member 
-      ? { name: member.name, relation_type: member.relation_type, gender: member.gender || 'MALE' } 
+    member
+      ? { name: member.name, relation_type: member.relation_type, gender: member.gender || 'MALE' }
       : { name: '', relation_type: 'PARENT', gender: 'MALE' }
   )
 
@@ -197,8 +197,8 @@ function FamilyModal({ member, onClose, onSave }) {
         </div>
         <div>
           <label className="text-xs font-black text-gray-400 mb-2 block ml-1">관계</label>
-          <select 
-            value={`${formData.relation_type}-${formData.gender}`} 
+          <select
+            value={`${formData.relation_type}-${formData.gender}`}
             onChange={(e) => {
               const val = e.target.value;
               let relation = 'OTHER';
@@ -241,13 +241,30 @@ function MyPageSkeleton() {
 
 export default function MyPage() {
   const router = useRouter()
-  const { selectedProfileId: profileId, selectedProfile, refetchProfiles } = useProfile()
+  const searchParams = useSearchParams()
+  const {
+    selectedProfileId: profileId,
+    selectedProfile,
+    profiles,
+    updateProfile,
+    createProfile,
+    deleteProfile,
+    setSelectedProfileId,
+    refetchProfiles,
+  } = useProfile()
   const isInitialLoad = useRef(true)
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [activeMenu, setActiveMenu] = useState('기본정보')
-  const [userProfile, setUserProfile] = useState(null)
-  const [family, setFamily] = useState([])
+  // ProfileContext 의 데이터를 그대로 파생 사용 (single source of truth).
+  // mutation 시 ProfileContext 가 in-place 갱신하므로 자동 리렌더.
+  const userProfile = selectedProfile
+  // 가족 관리 탭 = "내 모든 프로필" 뷰. SELF 도 포함해 표시하되 SELF 를 항상 맨 앞으로.
+  const family = [...profiles].sort((a, b) => {
+    if (a.relation_type === 'SELF') return -1
+    if (b.relation_type === 'SELF') return 1
+    return 0
+  })
   const [ongoingCount, setOngoingCount] = useState(0)
   const [streakDays, setStreakDays] = useState(0)
   const [todayTakenCount, setTodayTakenCount] = useState(0)
@@ -261,25 +278,31 @@ export default function MyPage() {
     fetchData()
   }, [profileId])
 
-  useEffect(() => {
-    if (selectedProfile?.relation_type !== 'SELF' && activeMenu === '가족관리') {
-      setActiveMenu('기본정보')
-    }
-  }, [selectedProfile?.relation_type, activeMenu])
+  // 가족관리 탭은 모든 프로필 상태에서 표시되며 (HEAD 의 옵션 B fix), main 의 강제 탭
+  // 전환 useEffect 는 의도와 어긋나 제거.
 
+  // ProfileSwitcher 의 "프로필 추가" 버튼이 ?tab=family 로 진입하면 가족관리 탭 자동 활성화.
+  // 활성화 직후 URL 의 ?tab= query 는 router.replace 로 정리 (history 오염 방지).
+  useEffect(() => {
+    if (searchParams.get('tab') === 'family') {
+      setActiveMenu('가족관리')
+      router.replace('/mypage')
+    }
+  }, [searchParams, router])
+
+  // ProfileContext 가 이미 가진 profiles 재사용 — /profiles 와 /profiles/{id} GET 안 함.
+  // 페이지 자체에서 GET 하는 건 챌린지/스트릭 같이 ProfileContext 가 모르는 데이터만.
   const fetchData = async () => {
     if (isInitialLoad.current) setIsLoading(true)
     else setIsRefreshing(true)
     try {
-      const [profileRes, listRes, challengeRes, streakRes, todayLogsRes] = await Promise.all([
-        api.get(`/api/v1/profiles/${profileId}`),
-        api.get('/api/v1/profiles'),
+      // ProfileContext 가 profile / list 는 이미 fetch — 페이지는 챌린지/스트릭/오늘
+      // 복약 같은 Context 외부 데이터만 호출.
+      const [challengeRes, streakRes, todayLogsRes] = await Promise.all([
         api.get(`/api/v1/challenges?profile_id=${profileId}`),
         api.get(`/api/v1/intake-logs/streak?profile_id=${profileId}`),
         api.get(`/api/v1/intake-logs?profile_id=${profileId}`),
       ])
-      setUserProfile(profileRes.data)
-      setFamily(listRes.data.filter(p => p.relation_type !== 'SELF'))
       setOngoingCount(challengeRes.data.filter(c => c.challenge_status === 'IN_PROGRESS').length)
       setStreakDays(streakRes.data.streak_days ?? 0)
       setTodayTakenCount((todayLogsRes.data || []).filter(l => l.intake_status === 'TAKEN').length)
@@ -290,13 +313,16 @@ export default function MyPage() {
     }
   }
 
+  // mutation 핸들러는 ProfileContext 가 응답으로 in-place 갱신하므로 수동 fetchData 호출 안 함.
+  // challenge/streak 데이터는 [profileId] effect 가 selectedProfileId 변경 시 자동 재조회 —
+  // 활성 프로필 삭제 시 stale profileId 로 fetchData 가 호출되어 발생하던 404 경합 제거.
+
   const handleSaveBasic = async (newData) => {
     try {
-      await api.patch(`/api/v1/profiles/${userProfile.id}`, { name: newData.nickname })
+      await updateProfile(userProfile.id, { name: newData.nickname })
       toast.success('닉네임이 수정되었습니다.')
       if (refetchProfiles) await refetchProfiles()
       setModalType(null)
-      fetchData()
     } catch (err) { handleApiError(err) }
   }
 
@@ -318,10 +344,9 @@ export default function MyPage() {
         conditions: newData.conditions.length > 0 ? newData.conditions : null,
         allergies: newData.allergies.length > 0 ? newData.allergies : null,
       }
-      await api.patch(`/api/v1/profiles/${userProfile.id}`, { health_survey: healthSurvey })
+      await updateProfile(userProfile.id, { health_survey: healthSurvey })
       toast.success('건강 정보가 업데이트되었습니다.')
       setModalType(null)
-      fetchData()
     } catch (err) { handleApiError(err) }
   }
 
@@ -336,16 +361,15 @@ export default function MyPage() {
         health_survey: { gender: newData.gender }
       };
       if (selectedFamilyMember) {
-        await api.patch(`/api/v1/profiles/${selectedFamilyMember.id}`, payload)
+        await updateProfile(selectedFamilyMember.id, newData)
         toast.success('가족 정보가 수정되었습니다.')
       } else {
-        await api.post('/api/v1/profiles', payload)
+        await createProfile({ ...newData, account_id: userProfile.account_id, health_survey: {} })
         toast.success('가족이 추가되었습니다.')
       }
       if (refetchProfiles) await refetchProfiles()
       setModalType(null)
       setSelectedFamilyMember(null)
-      fetchData()
     } catch (err) { handleApiError(err) }
   }
 
@@ -353,10 +377,8 @@ export default function MyPage() {
     e.stopPropagation()
     if (!confirm('정말로 삭제하시겠습니까?')) return
     try {
-      await api.delete(`/api/v1/profiles/${id}`)
+      await deleteProfile(id)
       toast.success('삭제되었습니다.')
-      if (refetchProfiles) await refetchProfiles()
-      fetchData()
     } catch (err) { handleApiError(err) }
   }
 
@@ -368,7 +390,7 @@ export default function MyPage() {
   const menuItems = [
     { id: '기본정보', label: '기본 정보', icon: <User size={18} /> },
     { id: '건강정보', label: '건강 정보', icon: <Activity size={18} /> },
-    ...(selectedProfile?.relation_type === 'SELF' ? [{ id: '가족관리', label: '가족 관리', icon: <Users size={18} /> }] : []),
+    { id: '가족관리', label: '가족 관리', icon: <Users size={18} /> },
   ]
 
   // [추가] 상세 관계 텍스트 변환 함수
@@ -486,24 +508,77 @@ export default function MyPage() {
                 </div>
                 {family.length > 0 ? (
                   <div className="grid sm:grid-cols-2 gap-4">
-                    {family.map((member) => (
-                      <div key={member.id} onClick={() => { setSelectedFamilyMember(member); setModalType('family'); }} className="bg-slate-50 rounded-[32px] p-8 hover:bg-white hover:shadow-md transition-all flex justify-between items-center group cursor-pointer border border-transparent hover:border-gray-100">
-                        <div className="flex items-center gap-5">
-                          <div className="w-16 h-16 bg-white rounded-[24px] flex items-center justify-center text-2xl font-black text-gray-700 group-hover:bg-gray-900 group-hover:text-white transition-all shadow-sm">{member.name[0]}</div>
-                          <div>
-                            <p className="text-lg font-black text-gray-800">{member.name}</p>
-                            {/* [수정] 가족 목록 상세 호칭 표시 */}
-                            <p className="text-xs font-bold text-gray-400 uppercase">
-                              {member.relation_type === 'PARENT' ? (member.gender === 'MALE' ? '아버지' : '어머니') :
-                               member.relation_type === 'CHILD' ? (member.gender === 'MALE' ? '아들' : '딸') :
-                               member.relation_type === 'SPOUSE' ? (member.gender === 'MALE' ? '남편' : '아내') :
-                               relationLabels[member.relation_type]}
-                            </p>
+                    {family.map((member) => {
+                      const isSelf = member.relation_type === 'SELF'
+                      const isActive = member.id === profileId
+                      // 카드 본체 클릭 = 프로필 전환. 편집/삭제는 stopPropagation 으로 분리.
+                      const handleSwitchProfile = () => {
+                        if (!isActive) setSelectedProfileId(member.id)
+                      }
+                      const handleEdit = (e) => {
+                        e.stopPropagation()
+                        if (isSelf) {
+                          // 본인 정보 수정은 기본정보 탭의 BasicInfoModal 사용
+                          setActiveMenu('기본정보')
+                          return
+                        }
+                        setSelectedFamilyMember(member)
+                        setModalType('family')
+                      }
+                      // 상세 호칭 (성별까지) — main PR 흡수
+                      const detailLabel =
+                        member.relation_type === 'PARENT' ? (member.gender === 'MALE' ? '아버지' : '어머니') :
+                        member.relation_type === 'CHILD' ? (member.gender === 'MALE' ? '아들' : '딸') :
+                        member.relation_type === 'SPOUSE' ? (member.gender === 'MALE' ? '남편' : '아내') :
+                        relationLabels[member.relation_type]
+                      return (
+                        <div
+                          key={member.id}
+                          onClick={handleSwitchProfile}
+                          className={`relative rounded-[32px] p-8 transition-all flex justify-between items-center group cursor-pointer ${
+                            isActive
+                              ? 'bg-white shadow-lg ring-2 ring-blue-500'
+                              : isSelf
+                                ? 'bg-blue-50 hover:bg-blue-100 border border-blue-200'
+                                : 'bg-slate-50 hover:bg-white hover:shadow-md'
+                          }`}
+                        >
+                          {isActive && (
+                            <span className="absolute top-3 right-3 bg-blue-500 text-white text-[10px] font-black px-2.5 py-1 rounded-full flex items-center gap-1">
+                              <Check size={11} />현재 활성
+                            </span>
+                          )}
+                          <div className="flex items-center gap-5">
+                            <div className={`w-16 h-16 rounded-[24px] flex items-center justify-center text-2xl font-black transition-all ${isSelf ? 'bg-blue-500 text-white' : 'bg-white text-gray-700 group-hover:bg-gray-900 group-hover:text-white'}`}>{member.name[0]}</div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <p className="text-lg font-black text-gray-800">{member.name}</p>
+                                {isSelf && <span className="bg-blue-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">본인</span>}
+                              </div>
+                              <p className="text-xs font-bold text-gray-400 uppercase">{detailLabel}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={handleEdit}
+                              aria-label={isSelf ? '본인 정보 수정' : '가족 정보 수정'}
+                              className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-gray-400 hover:text-gray-900 shadow-sm cursor-pointer"
+                            >
+                              <Pencil size={16} />
+                            </button>
+                            {!isSelf && (
+                              <button
+                                onClick={(e) => handleDeleteFamily(member.id, e)}
+                                aria-label="가족 삭제"
+                                className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-gray-300 hover:text-red-500 shadow-sm cursor-pointer"
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                            )}
                           </div>
                         </div>
-                        <button onClick={(e) => handleDeleteFamily(member.id, e)} className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-gray-300 hover:text-red-500 shadow-sm cursor-pointer transition-colors"><Trash2 size={18} /></button>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 ) : (
                   <div className="py-20 bg-slate-50 rounded-[40px] border border-dashed border-slate-200">

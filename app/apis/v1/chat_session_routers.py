@@ -103,7 +103,7 @@ async def list_chat_sessions(
         profile_id: Optional profile ID to filter by.
 
     Returns:
-        List[ChatSessionResponse]: List of chat sessions.
+        list[ChatSessionResponse]: List of chat sessions.
     """
     if profile_id:
         sessions = await service.get_sessions_by_profile_with_owner_check(profile_id, current_account.id)

@@ -185,7 +185,11 @@ async def get_drug_info(
     current_account: CurrentAccount,
     service: MedicationServiceDep,
 ) -> DrugInfoResponse:
-    """LLM 기반 약품 상세 정보(주의사항, 부작용, 상호작용)를 반환합니다. 결과는 30일간 캐시됩니다."""
+    """식약처 마스터 DB(``MedicineInfo``) 검색 기반 약품 상세 정보(주의사항/부작용/상호작용).
+
+    매칭 실패 또는 NULL 컬럼인 경우 빈 배열로 응답한다 (FE 가 "정보 없음" 표시).
+    상호작용은 현재 별도 마스터 미수집 상태라 항상 빈 배열.
+    """
     return await service.get_drug_info_with_owner_check(medication_id, current_account.id)
 
 

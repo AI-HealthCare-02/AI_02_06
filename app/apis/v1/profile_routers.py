@@ -100,7 +100,7 @@ async def list_profiles(
         service: Profile service instance.
 
     Returns:
-        List[ProfileSummaryResponse]: Summary list of profiles for the account.
+        list[ProfileSummaryResponse]: Summary list of profiles for the account.
     """
     # ProfileSummaryResponse(경량 요약 DTO)를 제거하고 ProfileResponse로 통일.
     # 프론트엔드에서 프로필 전환 UI(ProfileSwitcher 컴포넌트, ProfileContext)를 삭제하면서

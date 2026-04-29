@@ -126,9 +126,20 @@ def stub_repo(monkeypatch: pytest.MonkeyPatch, session_id: UUID) -> dict[str, An
         captured["assistant"].append((sid, content, metadata))
         return msg
 
+    # 옵션 D — _fetch_session_summary / count_by_session DB 호출 stub
+    async def fake_count(_self, _sid) -> int:
+        return 0
+
+    async def fake_session_get(_self, _sid) -> None:
+        return None
+
+    from app.repositories.chat_session_repository import ChatSessionRepository
+
     monkeypatch.setattr(MessageRepository, "get_recent_by_session", fake_get_recent)
     monkeypatch.setattr(MessageRepository, "create_user_message", fake_user)
     monkeypatch.setattr(MessageRepository, "create_assistant_message", fake_assistant)
+    monkeypatch.setattr(MessageRepository, "count_by_session", fake_count)
+    monkeypatch.setattr(ChatSessionRepository, "get_by_id", fake_session_get)
     return captured
 
 
@@ -261,11 +272,11 @@ class TestAskLocationPending:
         assert len(stub_repo["assistant"]) == 0
 
 
-class TestAskTextFallback:
-    """Y-8-D/E — Router returns text → RAG fallback on 200."""
+class TestAskTextDirectPersist:
+    """옵션 C — Router returns text → text 가 그대로 assistant turn 으로 200."""
 
     @pytest.mark.asyncio
-    async def test_200_uses_rag_fallback(
+    async def test_200_persists_router_text_directly(
         self,
         monkeypatch: pytest.MonkeyPatch,
         client: AsyncClient,
@@ -274,31 +285,24 @@ class TestAskTextFallback:
         stub_ownership: None,  # noqa: ARG002
         session_id: UUID,
     ) -> None:
-        rag_user = _StubChatMessage(session_id=session_id, content="활명수 효능", sender_type=SenderType.USER)
-        rag_assistant = _StubChatMessage(
-            session_id=session_id,
-            content="활명수는 소화제입니다.",
-            sender_type=SenderType.ASSISTANT,
-        )
-
         async def fake_route(**_: Any) -> RouteResult:
-            return RouteResult(kind="text", text="안녕하세요", assistant_message={"role": "assistant"})
-
-        async def fake_rag(_self, _sid, _content) -> tuple:
-            return rag_user, rag_assistant
+            return RouteResult(
+                kind="text",
+                text="저는 약 정보와 병원/약국 검색만 도와드려요.",
+                assistant_message={"role": "assistant"},
+            )
 
         monkeypatch.setattr("app.services.message_service.route_intent_via_rq", fake_route)
-        monkeypatch.setattr(MessageService, "ask_and_reply", fake_rag)
 
         response = await client.post(
             "/api/v1/messages/ask",
-            json={"session_id": str(session_id), "content": "활명수 효능"},
+            json={"session_id": str(session_id), "content": "대통령이 누구야?"},
         )
 
         assert response.status_code == 200, response.text
         body = response.json()
-        assert body["user_message"]["content"] == "활명수 효능"
-        assert body["assistant_message"]["content"] == "활명수는 소화제입니다."
+        assert body["user_message"]["content"] == "대통령이 누구야?"
+        assert body["assistant_message"]["content"] == "저는 약 정보와 병원/약국 검색만 도와드려요."
 
 
 # ── POST /messages/tool-result ──────────────────────────────────
