@@ -73,18 +73,42 @@ function OcrResultContent() {
     }
 
     if (draftId === 'manual') {
-      setMeds([
-        {
-          medicine_name: '',
-          dose_per_intake: '',
-          daily_intake_count: '',
-          total_intake_days: '',
-          intake_instruction: ''
+      // 수동 추가: 순차 등록 (부분 실패 시 진행 상황 정확 보고)
+      let succeeded = 0
+      for (const med of confirmedMedicines) {
+        const dailyCount = parseInt(med.daily_intake_count, 10) || 1
+        const days = parseInt(med.total_intake_days, 10) || 1
+        const startDate = med.dispensed_date || new Date().toISOString().split('T')[0]
+
+        let intakeTimes = []
+        if (dailyCount === 1) intakeTimes = ["08:00"]
+        else if (dailyCount === 2) intakeTimes = ["08:00", "19:00"]
+        else if (dailyCount === 3) intakeTimes = ["08:00", "13:00", "19:00"]
+        else {
+          // 4회 이상: 08~22시 사이를 균등 분할 (중복 시간 방지)
+          const step = 14 / (dailyCount - 1)
+          intakeTimes = Array.from({ length: dailyCount }, (_, i) => {
+            const hour = Math.round(8 + i * step)
+            return `${String(hour).padStart(2, '0')}:00`
+          })
         }
-      ])
-      setIsLoading(false)
-      return
-    }
+
+        try {
+          await api.post('/api/v1/medications', {
+            ...med,
+            profile_id: profileId,
+            start_date: startDate,
+            total_intake_count: dailyCount * days,
+            intake_times: intakeTimes,
+          })
+          succeeded += 1
+        } catch (err) {
+          const remaining = confirmedMedicines.length - succeeded
+          alert(`${succeeded}개 저장 후 실패했습니다. 남은 ${remaining}개는 저장되지 않았습니다. 복약 목록에서 확인해 주세요.`)
+          throw err
+        }
+      }
+    } else {
 
     // SSE 로 ai-worker 진행 상태를 수신. status='ready' 까지 isLoading=true 유지
     // -> 사용자에게 ResultSkeleton 노출. terminal status 시 안내 + /ocr 복귀.
@@ -171,6 +195,12 @@ function OcrResultContent() {
     const hasEmptyName = meds.some(med => !med.medicine_name || med.medicine_name.trim() === '')
     if (hasEmptyName) {
       alert('약품명을 입력해주세요.')
+      return
+    }
+
+    // 수동 추가 시 프로필 필수 (selectedProfileId 미설정 상태 방어)
+    if (draftId === 'manual' && !profileId) {
+      alert('프로필을 선택한 후 다시 시도해주세요.')
       return
     }
 
