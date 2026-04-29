@@ -1,7 +1,8 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Pill, ChevronRight, Plus, Building2, Pencil, Trash2, CheckCircle2 } from 'lucide-react'
+import api from '@/lib/api'
 import BottomNav from '@/components/layout/BottomNav'
 import { useProfile } from '@/contexts/ProfileContext'
 import { useMedication } from '@/contexts/MedicationContext'
@@ -214,6 +215,7 @@ const TABS = [
 export default function MedicationListPage() {
   const router = useRouter()
   const goToOcrEntry = useOcrEntryNavigator()
+  const { selectedProfileId: profileId } = useProfile()
   const [activeTab, setActiveTab] = useState('복용중')
   const [selectedDate, setSelectedDate] = useState(null)
   const [deleteTargetItems, setDeleteTargetItems] = useState(null)
