@@ -8,12 +8,9 @@ Tests verify:
 All tests are intentionally RED until the models are implemented.
 """
 
-import pytest
-
 from app.models.challenge import Challenge
 from app.models.daily_symptom_log import DailySymptomLog
 from app.models.lifestyle_guide import GuideCategory, LifestyleGuide
-
 
 # ── GuideCategory enum ─────────────────────────────────────────────────────
 

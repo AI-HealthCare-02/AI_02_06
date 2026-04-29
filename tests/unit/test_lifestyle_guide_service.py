@@ -90,12 +90,8 @@ async def test_generate_guide_returns_lifestyle_guide(
 ) -> None:
     """generate_guide는 LifestyleGuide 객체를 반환해야 한다."""
     profile_id = uuid4()
-    service.medication_repo.get_active_by_profile = AsyncMock(
-        return_value=[_make_medication()]
-    )
-    service.llm_client.chat.completions.create = AsyncMock(
-        return_value=_make_llm_response(_VALID_LLM_JSON)
-    )
+    service.medication_repo.get_active_by_profile = AsyncMock(return_value=[_make_medication()])
+    service.llm_client.chat.completions.create = AsyncMock(return_value=_make_llm_response(_VALID_LLM_JSON))
     service.guide_repo.create = AsyncMock(return_value=mock_guide)
     service.challenge_repo.bulk_create_from_guide = AsyncMock(return_value=[])
 
@@ -112,9 +108,7 @@ async def test_generate_guide_calls_guide_repo_create(
     profile_id = uuid4()
     med = _make_medication("암로디핀")
     service.medication_repo.get_active_by_profile = AsyncMock(return_value=[med])
-    service.llm_client.chat.completions.create = AsyncMock(
-        return_value=_make_llm_response(_VALID_LLM_JSON)
-    )
+    service.llm_client.chat.completions.create = AsyncMock(return_value=_make_llm_response(_VALID_LLM_JSON))
     service.guide_repo.create = AsyncMock(return_value=mock_guide)
     service.challenge_repo.bulk_create_from_guide = AsyncMock(return_value=[])
 
@@ -133,12 +127,8 @@ async def test_generate_guide_calls_bulk_create_challenges(
 ) -> None:
     """challenge_repo.bulk_create_from_guide가 guide_id, profile_id, challenges와 함께 호출되어야 한다."""
     profile_id = uuid4()
-    service.medication_repo.get_active_by_profile = AsyncMock(
-        return_value=[_make_medication()]
-    )
-    service.llm_client.chat.completions.create = AsyncMock(
-        return_value=_make_llm_response(_VALID_LLM_JSON)
-    )
+    service.medication_repo.get_active_by_profile = AsyncMock(return_value=[_make_medication()])
+    service.llm_client.chat.completions.create = AsyncMock(return_value=_make_llm_response(_VALID_LLM_JSON))
     service.guide_repo.create = AsyncMock(return_value=mock_guide)
     service.challenge_repo.bulk_create_from_guide = AsyncMock(return_value=[])
 
@@ -157,12 +147,8 @@ async def test_generate_guide_calls_llm_once(
 ) -> None:
     """GPT 클라이언트는 정확히 한 번 호출되어야 한다."""
     profile_id = uuid4()
-    service.medication_repo.get_active_by_profile = AsyncMock(
-        return_value=[_make_medication()]
-    )
-    service.llm_client.chat.completions.create = AsyncMock(
-        return_value=_make_llm_response(_VALID_LLM_JSON)
-    )
+    service.medication_repo.get_active_by_profile = AsyncMock(return_value=[_make_medication()])
+    service.llm_client.chat.completions.create = AsyncMock(return_value=_make_llm_response(_VALID_LLM_JSON))
     service.guide_repo.create = AsyncMock(return_value=mock_guide)
     service.challenge_repo.bulk_create_from_guide = AsyncMock(return_value=[])
 
@@ -179,9 +165,7 @@ async def test_generate_guide_medication_snapshot_contains_all_meds(
     profile_id = uuid4()
     meds = [_make_medication("타이레놀"), _make_medication("암로디핀")]
     service.medication_repo.get_active_by_profile = AsyncMock(return_value=meds)
-    service.llm_client.chat.completions.create = AsyncMock(
-        return_value=_make_llm_response(_VALID_LLM_JSON)
-    )
+    service.llm_client.chat.completions.create = AsyncMock(return_value=_make_llm_response(_VALID_LLM_JSON))
     service.guide_repo.create = AsyncMock(return_value=mock_guide)
     service.challenge_repo.bulk_create_from_guide = AsyncMock(return_value=[])
 
@@ -212,12 +196,8 @@ async def test_generate_guide_raises_on_llm_error(
     from openai import OpenAIError
 
     profile_id = uuid4()
-    service.medication_repo.get_active_by_profile = AsyncMock(
-        return_value=[_make_medication()]
-    )
-    service.llm_client.chat.completions.create = AsyncMock(
-        side_effect=OpenAIError("connection timeout")
-    )
+    service.medication_repo.get_active_by_profile = AsyncMock(return_value=[_make_medication()])
+    service.llm_client.chat.completions.create = AsyncMock(side_effect=OpenAIError("connection timeout"))
 
     with pytest.raises(ValueError, match="가이드 생성"):
         await service.generate_guide(profile_id)
@@ -228,9 +208,7 @@ async def test_generate_guide_raises_on_invalid_llm_json(
 ) -> None:
     """LLM이 잘못된 JSON을 반환하면 ValueError를 발생시켜야 한다."""
     profile_id = uuid4()
-    service.medication_repo.get_active_by_profile = AsyncMock(
-        return_value=[_make_medication()]
-    )
+    service.medication_repo.get_active_by_profile = AsyncMock(return_value=[_make_medication()])
     bad_response = MagicMock()
     bad_response.choices[0].message.content = "not valid json {{"
     service.llm_client.chat.completions.create = AsyncMock(return_value=bad_response)
