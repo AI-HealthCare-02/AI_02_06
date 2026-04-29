@@ -6,6 +6,7 @@ import { Trash2 } from 'lucide-react'
 import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
 import { streamSSE } from '@/lib/sseClient'
+import { useProfile } from '@/contexts/ProfileContext'
 
 const TERMINAL_ERROR_MESSAGES = {
   no_text: '이미지에서 텍스트를 찾지 못했어요.',
@@ -57,16 +58,31 @@ function OcrResultContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const draftId = searchParams.get('draft_id')
+  const { selectedProfileId: profileId } = useProfile()
 
   const [isLoading, setIsLoading] = useState(true)
   const [meds, setMeds] = useState([])
-  const [prescriptionDate, setPrescriptionDate] = useState('')
+  const [prescriptionDate, setPrescriptionDate] = useState(() => new Date().toISOString().split('T')[0])
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
     // [뒤로가기 기능] URL에 draft_id가 없으면 튕겨냅니다.
     if (!draftId) {
       router.push('/ocr')
+      return
+    }
+
+    if (draftId === 'manual') {
+      setMeds([
+        {
+          medicine_name: '',
+          dose_per_intake: '',
+          daily_intake_count: '',
+          total_intake_days: '',
+          intake_instruction: ''
+        }
+      ])
+      setIsLoading(false)
       return
     }
 
@@ -81,7 +97,7 @@ function OcrResultContent() {
           const { status, medicines } = payload
           if (status === 'ready') {
             setMeds(medicines || [])
-            setPrescriptionDate(medicines?.[0]?.dispensed_date || '')
+            setPrescriptionDate(medicines?.[0]?.dispensed_date || new Date().toISOString().split('T')[0])
             setIsLoading(false)
             return
           }
@@ -116,6 +132,20 @@ function OcrResultContent() {
     setMeds(updatedMeds)
   }
 
+  // 약품 직접 추가 기능
+  const handleAddMedicine = () => {
+    setMeds([
+      ...meds,
+      {
+        medicine_name: '',
+        dose_per_intake: '',
+        daily_intake_count: '',
+        total_intake_days: '',
+        intake_instruction: ''
+      }
+    ])
+  }
+
   // 다시 촬영 — 현재 draft 를 백엔드에서 폐기 처리한 뒤 업로드 페이지로 이동.
   // 폐기 실패해도 사용자 흐름은 막지 않음 (UX 우선, 24h 후 자동 정리됨).
   const handleRetake = async () => {
@@ -137,6 +167,19 @@ function OcrResultContent() {
       return
     }
 
+    // 약품명 유효성 검사
+    const hasEmptyName = meds.some(med => !med.medicine_name || med.medicine_name.trim() === '')
+    if (hasEmptyName) {
+      alert('약품명을 입력해주세요.')
+      return
+    }
+
+    // 수동 추가 시 프로필 필수 (selectedProfileId 미설정 상태 방어)
+    if (draftId === 'manual' && !profileId) {
+      alert('프로필을 선택한 후 다시 시도해주세요.')
+      return
+    }
+
     setIsSubmitting(true)
     try {
       // 처방일을 모든 약품에 공통 적용
@@ -144,14 +187,55 @@ function OcrResultContent() {
         ...med,
         dispensed_date: prescriptionDate || null,
       }))
-      await api.post('/api/v1/ocr/confirm', {
-        draft_id: draftId,
-        confirmed_medicines: confirmedMedicines,
-      }, { timeout: 60000 })
 
-      // confirm 직후 main 페이지의 활성 카드에서 즉시 제거되도록 마킹.
-      // (client cache 로 main useEffect 재실행 보장이 안 되므로 단방향 신호)
-      sessionStorage.setItem('ocr_consumed_draft_id', draftId)
+      if (draftId === 'manual') {
+        // 수동 추가: 순차 등록 (부분 실패 시 진행 상황 정확 보고)
+        let succeeded = 0
+        for (const med of confirmedMedicines) {
+          const dailyCount = parseInt(med.daily_intake_count, 10) || 1
+          const days = parseInt(med.total_intake_days, 10) || 1
+          const startDate = med.dispensed_date || new Date().toISOString().split('T')[0]
+
+          let intakeTimes = []
+          if (dailyCount === 1) intakeTimes = ["08:00"]
+          else if (dailyCount === 2) intakeTimes = ["08:00", "19:00"]
+          else if (dailyCount === 3) intakeTimes = ["08:00", "13:00", "19:00"]
+          else {
+            // 4회 이상: 08~22시 사이를 균등 분할 (중복 시간 방지)
+            const step = 14 / (dailyCount - 1)
+            intakeTimes = Array.from({ length: dailyCount }, (_, i) => {
+              const hour = Math.round(8 + i * step)
+              return `${String(hour).padStart(2, '0')}:00`
+            })
+          }
+
+          try {
+            await api.post('/api/v1/medications', {
+              ...med,
+              profile_id: profileId,
+              start_date: startDate,
+              total_intake_count: dailyCount * days,
+              intake_times: intakeTimes,
+            })
+            succeeded += 1
+          } catch (err) {
+            const remaining = confirmedMedicines.length - succeeded
+            alert(`${succeeded}개 저장 후 실패했습니다. 남은 ${remaining}개는 저장되지 않았습니다. 복약 목록에서 확인해 주세요.`)
+            throw err
+          }
+        }
+      } else {
+        // 기존 OCR 로직
+        await api.post('/api/v1/ocr/confirm', {
+          draft_id: draftId,
+          confirmed_medicines: confirmedMedicines,
+        }, { timeout: 60000 })
+
+        // confirm 직후 main 페이지의 활성 카드에서 즉시 제거되도록 마킹.
+        // (client cache 로 main useEffect 재실행 보장이 안 되므로 단방향 신호)
+        sessionStorage.setItem('ocr_consumed_draft_id', draftId)
+      }
+
       alert('저장 완료! 복약 목록에서 확인해보세요.')
       router.push('/medication')
 
@@ -200,7 +284,7 @@ function OcrResultContent() {
             type="date"
             value={prescriptionDate}
             onChange={(e) => setPrescriptionDate(e.target.value)}
-            className="text-sm font-bold text-gray-700 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50"
+            className="text-base font-bold text-gray-700 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50"
           />
         </div>
 
@@ -265,6 +349,14 @@ function OcrResultContent() {
               </div>
             </div>
           ))}
+
+          {/* 약품 추가 버튼 */}
+          <button
+            onClick={handleAddMedicine}
+            className="w-full bg-white rounded-2xl p-4 border-2 border-dashed border-blue-300 text-blue-500 font-bold hover:bg-blue-50 hover:border-blue-400 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+          >
+            <span className="text-xl">+</span> 직접 약품 추가하기
+          </button>
         </div>
 
         {/* 하단 액션 버튼 */}
