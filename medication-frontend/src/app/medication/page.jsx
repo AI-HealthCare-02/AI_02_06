@@ -83,7 +83,8 @@ function getProgressInfo(items) {
   return { currentDay, totalDays: rep.total_intake_days, progress }
 }
 
-function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup, completedMedIds, onCompleteToday, isCompleting }) {
+function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup, onDeleteMed, completedMedIds, onCompleteToday, isCompleting }) {
+  
   const { deptKey, items } = group
   const startDates = items.map(m => m.start_date).filter(Boolean).sort()
   const endDates = items.map(m => m.end_date).filter(Boolean).sort()
@@ -167,27 +168,40 @@ function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup, comp
       </div>
       <div className="divide-y divide-gray-50">
         {items.map((med) => (
-          <button
-            key={med.id}
-            onClick={() => onMedClick(med.id)}
-            className="w-full flex items-center gap-3 px-6 py-3.5 hover:bg-gray-50 transition-colors cursor-pointer text-left"
-          >
-            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${med.is_active ? 'bg-green-400' : 'bg-gray-300'}`} />
-            <div className="flex-1 min-w-0">
-              <span className={`text-base font-bold truncate block ${med.is_active ? 'text-gray-900' : 'text-gray-400'}`}>
-                {med.medicine_name}
-              </span>
-              {med.dose_per_intake && (
-                <span className="text-sm text-gray-400">{med.dose_per_intake}</span>
+
+          <div key={med.id} className="w-full flex items-center px-5 py-3 hover:bg-gray-50 transition-colors group">
+            <div
+              className="flex-1 flex items-center gap-3 cursor-pointer min-w-0"
+              onClick={() => onMedClick(med.id)}
+            >
+              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${med.is_active ? 'bg-green-400' : 'bg-gray-300'}`} />
+              <div className="flex-1 min-w-0">
+                <span className={`text-sm font-bold truncate block ${med.is_active ? 'text-gray-900' : 'text-gray-400'}`}>
+                  {med.medicine_name}
+                </span>
+                {med.dose_per_intake && (
+                  <span className="text-xs text-gray-400">{med.dose_per_intake}</span>
+                )}
+              </div>
+              {med.category && (
+                <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
+                  {med.category}
+                </span>
+
               )}
             </div>
-            {med.category && (
-              <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
-                {med.category}
-              </span>
-            )}
-            <ChevronRight size={13} className="text-gray-300 shrink-0" />
-          </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteMed([med]);
+              }}
+              className="ml-3 p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
+              aria-label="삭제"
+            >
+              <Trash2 size={16} />
+            </button>
+            <ChevronRight size={13} className="text-gray-300 shrink-0 ml-1" />
+          </div>
         ))}
       </div>
     </div>
@@ -406,12 +420,33 @@ export default function MedicationListPage() {
                 <p className="text-xs font-bold text-gray-400 mb-4">
                   {formatDate(selectedDate)} 처방
                 </p>
-              )}
 
-              {groups.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-20 text-center">
-                  <div className="w-14 h-14 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
-                    <Pill size={24} className="text-gray-300" />
+                {activeTab === '복용중' && !selectedDate && (
+                  <button
+                    onClick={() => router.push('/ocr')}
+                    className="px-6 py-3 bg-gray-900 text-white text-sm font-bold rounded-full cursor-pointer hover:bg-gray-800 transition-colors"
+                  >
+                    처방전 등록하기
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {groups.map((group) => (
+                  <div key={`${group.dateKey}__${group.deptKey}`}>
+                    {!selectedDate && (
+                      <p className="text-xs font-bold text-gray-400 mb-2 px-0.5">
+                        {formatDate(group.dateKey)} 처방
+                      </p>
+                    )}
+                    <PrescriptionGroup
+                      group={group}
+                      onMedClick={(id) => router.push(`/medication/${id}`)}
+                      onEditGroup={(items) => router.push(`/medication/edit?ids=${items.map(m => m.id).join(',')}`)}
+                      onDeleteGroup={handleDeleteGroup}
+                      onDeleteMed={handleDeleteGroup}
+                    />
+
                   </div>
                   <p className="text-gray-400 font-bold mb-1">
                     {selectedDate ? `해당 날짜의 처방 내역이 없어요` : emptyMessage.title}
@@ -466,7 +501,9 @@ export default function MedicationListPage() {
               <div className="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-3">
                 <Trash2 size={20} className="text-red-500" />
               </div>
-              <p className="font-bold text-gray-900">처방전을 삭제할까요?</p>
+              <p className="font-bold text-gray-900">
+                {deleteTargetItems.length === 1 ? '약품을 삭제할까요?' : '처방전을 삭제할까요?'}
+              </p>
               <p className="text-sm text-gray-400 leading-relaxed">
                 아래 {deleteTargetItems.length}개 약품의 복용 기록이<br />영구적으로 삭제됩니다.
               </p>
