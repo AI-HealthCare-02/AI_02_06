@@ -6,7 +6,6 @@ from uuid import uuid4
 
 import pytest
 
-from app.dtos.medication import PrescriptionDateItem
 from app.repositories.medication_repository import MedicationRepository
 
 
@@ -75,16 +74,16 @@ async def test_prescription_dates_groups_by_date_and_department(
         _make_med(date2, date2, "정형외과"),
     ]
 
-    with patch("app.repositories.medication_repository.Medication") as MockMed:
-        MockMed.filter.return_value.all = AsyncMock(return_value=medications)
+    with patch("app.repositories.medication_repository.Medication") as mock_med:
+        mock_med.filter.return_value.all = AsyncMock(return_value=medications)
         result = await repository.get_prescription_dates_by_profile(profile_id)
 
     assert len(result) == 2
-    내과_item = next(item for item in result if item.department == "내과")
-    assert 내과_item.count == 2
-    assert 내과_item.prescription_date == date1
-    정형외과_item = next(item for item in result if item.department == "정형외과")
-    assert 정형외과_item.count == 1
+    internal_item = next(item for item in result if item.department == "내과")
+    assert internal_item.count == 2
+    assert internal_item.prescription_date == date1
+    orthopedic_item = next(item for item in result if item.department == "정형외과")
+    assert orthopedic_item.count == 1
 
 
 async def test_prescription_dates_falls_back_to_start_date(
@@ -95,8 +94,8 @@ async def test_prescription_dates_falls_back_to_start_date(
     start = date(2026, 1, 10)
     medications = [_make_med(None, start, "외과")]
 
-    with patch("app.repositories.medication_repository.Medication") as MockMed:
-        MockMed.filter.return_value.all = AsyncMock(return_value=medications)
+    with patch("app.repositories.medication_repository.Medication") as mock_med:
+        mock_med.filter.return_value.all = AsyncMock(return_value=medications)
         result = await repository.get_prescription_dates_by_profile(profile_id)
 
     assert len(result) == 1
@@ -114,8 +113,8 @@ async def test_prescription_dates_sorted_descending(
         _make_med(date(2026, 2, 1), date(2026, 2, 1), "정형외과"),
     ]
 
-    with patch("app.repositories.medication_repository.Medication") as MockMed:
-        MockMed.filter.return_value.all = AsyncMock(return_value=medications)
+    with patch("app.repositories.medication_repository.Medication") as mock_med:
+        mock_med.filter.return_value.all = AsyncMock(return_value=medications)
         result = await repository.get_prescription_dates_by_profile(profile_id)
 
     assert result[0].prescription_date == date(2026, 3, 1)
@@ -129,8 +128,8 @@ async def test_prescription_dates_returns_empty_list_when_no_medications(
     """복약이 없으면 빈 리스트를 반환해야 한다."""
     profile_id = uuid4()
 
-    with patch("app.repositories.medication_repository.Medication") as MockMed:
-        MockMed.filter.return_value.all = AsyncMock(return_value=[])
+    with patch("app.repositories.medication_repository.Medication") as mock_med:
+        mock_med.filter.return_value.all = AsyncMock(return_value=[])
         result = await repository.get_prescription_dates_by_profile(profile_id)
 
     assert result == []
