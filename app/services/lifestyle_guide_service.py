@@ -80,7 +80,10 @@ class LifestyleGuideService:
         """
         meds = await self.medication_repo.get_active_by_profile(profile_id)
         if not meds:
-            raise ValueError("활성 약물 목록이 비어 있습니다. 가이드를 생성하려면 복용 중인 약물이 필요합니다.")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="활성 약물이 없어 가이드를 생성할 수 없습니다. 복용 중인 약물을 먼저 등록해주세요.",
+            )
 
         snapshot = [_med_to_dict(m) for m in meds]
         guide = await self.guide_repo.create_pending(profile_id=profile_id, medication_snapshot=snapshot)

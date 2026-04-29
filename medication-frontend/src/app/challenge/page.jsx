@@ -372,8 +372,8 @@ export default function ChallengePage() {
                         disabled={isProcessing}
                         className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors shrink-0
                           ${isProcessing
-                            ? 'bg-blue-300 text-white cursor-wait'
-                            : 'bg-blue-500 text-white hover:bg-blue-600 cursor-pointer'}`}
+                            ? 'bg-gray-600 text-gray-400 cursor-wait'
+                            : 'bg-gray-50 text-gray-600 hover:bg-gray-100 cursor-pointer'}`}
                       >
                         {isProcessing ? '처리중...' : '시작하기'}
                       </button>

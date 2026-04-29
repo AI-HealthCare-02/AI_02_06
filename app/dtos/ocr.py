@@ -96,7 +96,10 @@ class ConfirmMedicationRequest(BaseModel):
 
     Used when user confirms and potentially modifies
     the extracted medication data before final storage.
+    profile_id: if provided, saves medication under that profile (family profile support).
+                if omitted, falls back to the account's SELF profile.
     """
 
     draft_id: str = Field(description="Target draft ID (DB ocr_drafts.id)")
     confirmed_medicines: list[ExtractedMedicine]
+    profile_id: str | None = Field(None, description="Target profile ID (family profile support)")

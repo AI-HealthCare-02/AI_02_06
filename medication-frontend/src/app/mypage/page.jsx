@@ -9,7 +9,7 @@ import api, { handleApiError } from '@/lib/api'
 import toast from 'react-hot-toast'
 import { useProfile } from '@/contexts/ProfileContext'
 
-// --- 모달 컴포넌트들 (main의 UI 유지, donghoon의 데이터 필드 반영) ---
+// --- 모달 컴포넌트들 ---
 function Modal({ title, children, onClose, onSave }) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
@@ -68,10 +68,10 @@ function HealthInfoModal({ info, onClose, onSave }) {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">나이</label>
-            <input type="number" value={formData.age} min={1} max={120}
+            <input type="text" inputMode="numeric" value={formData.age} placeholder="예: 30"
               onChange={(e) => {
-                const val = e.target.value
-                if (val === '' || (parseInt(val) >= 1 && parseInt(val) <= 120)) setFormData({...formData, age: val})
+                const val = e.target.value.replace(/[^0-9]/g, '');
+                setFormData({...formData, age: val})
               }}
               className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
           </div>
@@ -90,19 +90,21 @@ function HealthInfoModal({ info, onClose, onSave }) {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">키 (cm)</label>
-            <input type="number" value={formData.height} min={50} max={250}
+            <input type="text" inputMode="decimal" value={formData.height} placeholder="예: 170"
               onChange={(e) => {
-                const val = e.target.value
-                if (val === '' || (parseInt(val) >= 50 && parseInt(val) <= 250)) setFormData({...formData, height: val})
+                const val = e.target.value.replace(/[^0-9]/g, '');
+                setFormData({...formData, height: val})
               }}
               className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
           </div>
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">몸무게 (kg)</label>
-            <input type="number" value={formData.weight} min={1} max={300} step={0.1}
+            <input type="text" inputMode="decimal" value={formData.weight} placeholder="예: 65.5"
               onChange={(e) => {
-                const val = e.target.value
-                if (val === '' || (parseFloat(val) >= 1 && parseFloat(val) <= 300)) setFormData({...formData, weight: val})
+                let val = e.target.value.replace(/[^0-9.]/g, '');
+                const parts = val.split('.');
+                if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
+                setFormData({...formData, weight: val})
               }}
               className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
           </div>
@@ -179,23 +181,45 @@ function HealthInfoModal({ info, onClose, onSave }) {
 }
 
 function FamilyModal({ member, onClose, onSave }) {
-  const [formData, setFormData] = useState(member ? { name: member.name, relation_type: member.relation_type } : { name: '', relation_type: 'OTHER' })
+  const [formData, setFormData] = useState(
+    member 
+      ? { name: member.name, relation_type: member.relation_type, gender: member.gender || 'MALE' } 
+      : { name: '', relation_type: 'PARENT', gender: 'MALE' }
+  )
+
   return (
     <Modal title={member ? "가족 정보 수정" : "가족 추가하기"} onClose={onClose} onSave={() => onSave(formData)}>
       <div className="space-y-6">
         <div>
           <label className="text-xs font-black text-gray-400 mb-2 block ml-1">이름</label>
-          <input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+          <input type="text" value={formData.name} placeholder="이름을 입력하세요" onChange={(e) => setFormData({ ...formData, name: e.target.value })}
             className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
         </div>
         <div>
           <label className="text-xs font-black text-gray-400 mb-2 block ml-1">관계</label>
-          <select value={formData.relation_type} onChange={(e) => setFormData({ ...formData, relation_type: e.target.value })}
-            className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 appearance-none">
-            <option value="PARENT">부모</option>
-            <option value="CHILD">자녀</option>
-            <option value="SPOUSE">배우자</option>
-            <option value="OTHER">기타</option>
+          <select 
+            value={`${formData.relation_type}-${formData.gender}`} 
+            onChange={(e) => {
+              const val = e.target.value;
+              let relation = 'OTHER';
+              let gender = 'MALE';
+              if (val === 'PARENT-MALE') { relation = 'PARENT'; gender = 'MALE'; }
+              else if (val === 'PARENT-FEMALE') { relation = 'PARENT'; gender = 'FEMALE'; }
+              else if (val === 'CHILD-MALE') { relation = 'CHILD'; gender = 'MALE'; }
+              else if (val === 'CHILD-FEMALE') { relation = 'CHILD'; gender = 'FEMALE'; }
+              else if (val === 'SPOUSE-MALE') { relation = 'SPOUSE'; gender = 'MALE'; }
+              else if (val === 'SPOUSE-FEMALE') { relation = 'SPOUSE'; gender = 'FEMALE'; }
+              setFormData({ ...formData, relation_type: relation, gender: gender });
+            }}
+            className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 appearance-none"
+          >
+            <option value="PARENT-MALE">아버지</option>
+            <option value="PARENT-FEMALE">어머니</option>
+            <option value="CHILD-MALE">아들</option>
+            <option value="CHILD-FEMALE">딸</option>
+            <option value="SPOUSE-MALE">남편</option>
+            <option value="SPOUSE-FEMALE">아내</option>
+            <option value="OTHER-MALE">기타</option>
           </select>
         </div>
       </div>
@@ -217,7 +241,7 @@ function MyPageSkeleton() {
 
 export default function MyPage() {
   const router = useRouter()
-  const { selectedProfileId: profileId, selectedProfile } = useProfile()
+  const { selectedProfileId: profileId, selectedProfile, refetchProfiles } = useProfile()
   const isInitialLoad = useRef(true)
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -226,6 +250,7 @@ export default function MyPage() {
   const [family, setFamily] = useState([])
   const [ongoingCount, setOngoingCount] = useState(0)
   const [streakDays, setStreakDays] = useState(0)
+  const [todayTakenCount, setTodayTakenCount] = useState(0)
   const [modalType, setModalType] = useState(null)
   const [selectedFamilyMember, setSelectedFamilyMember] = useState(null)
 
@@ -236,30 +261,28 @@ export default function MyPage() {
     fetchData()
   }, [profileId])
 
-  // 프로필이 OTHER로 바뀌었는데 가족관리 탭이 활성화되어 있으면 기본정보로 초기화
   useEffect(() => {
-    if (selectedProfile?.relation_type === 'OTHER' && activeMenu === '가족관리') {
+    if (selectedProfile?.relation_type !== 'SELF' && activeMenu === '가족관리') {
       setActiveMenu('기본정보')
     }
-  }, [selectedProfile?.relation_type])
+  }, [selectedProfile?.relation_type, activeMenu])
 
   const fetchData = async () => {
-    if (isInitialLoad.current) {
-      setIsLoading(true)
-    } else {
-      setIsRefreshing(true)
-    }
+    if (isInitialLoad.current) setIsLoading(true)
+    else setIsRefreshing(true)
     try {
-      const [profileRes, listRes, challengeRes, streakRes] = await Promise.all([
+      const [profileRes, listRes, challengeRes, streakRes, todayLogsRes] = await Promise.all([
         api.get(`/api/v1/profiles/${profileId}`),
         api.get('/api/v1/profiles'),
         api.get(`/api/v1/challenges?profile_id=${profileId}`),
         api.get(`/api/v1/intake-logs/streak?profile_id=${profileId}`),
+        api.get(`/api/v1/intake-logs?profile_id=${profileId}`),
       ])
       setUserProfile(profileRes.data)
       setFamily(listRes.data.filter(p => p.relation_type !== 'SELF'))
-      setOngoingCount(challengeRes.data.length)
+      setOngoingCount(challengeRes.data.filter(c => c.challenge_status === 'IN_PROGRESS').length)
       setStreakDays(streakRes.data.streak_days ?? 0)
+      setTodayTakenCount((todayLogsRes.data || []).filter(l => l.intake_status === 'TAKEN').length)
     } catch (err) { handleApiError(err) } finally {
       setIsLoading(false)
       setIsRefreshing(false)
@@ -271,18 +294,25 @@ export default function MyPage() {
     try {
       await api.patch(`/api/v1/profiles/${userProfile.id}`, { name: newData.nickname })
       toast.success('닉네임이 수정되었습니다.')
+      if (refetchProfiles) await refetchProfiles()
       setModalType(null)
       fetchData()
     } catch (err) { handleApiError(err) }
   }
 
   const handleSaveHealth = async (newData) => {
+    // [추가] 저장 전 최종 범위 검증 로직
+    const h = parseInt(newData.height);
+    const w = parseFloat(newData.weight);
+    if (newData.height && (h < 50 || h > 250)) { toast.error("키는 50~250cm 사이로 입력해주세요."); return; }
+    if (newData.weight && (w < 1 || w > 300)) { toast.error("몸무게는 1~300kg 사이로 입력해주세요."); return; }
+
     try {
       const healthSurvey = {
         age: parseInt(newData.age) || null,
         gender: newData.gender || null,
-        height: parseInt(newData.height) || null,
-        weight: parseFloat(newData.weight) || null,
+        height: h || null,
+        weight: w || null,
         is_smoking: newData.is_smoking,
         is_drinking: newData.is_drinking,
         conditions: newData.conditions.length > 0 ? newData.conditions : null,
@@ -297,13 +327,22 @@ export default function MyPage() {
 
   const handleSaveFamily = async (newData) => {
     try {
+      // [수정] 성별 데이터를 명시적으로 포함하여 전송 (관계 매칭 오류 해결)
+      const payload = {
+        name: newData.name,
+        relation_type: newData.relation_type,
+        gender: newData.gender,
+        account_id: userProfile.account_id,
+        health_survey: { gender: newData.gender }
+      };
       if (selectedFamilyMember) {
-        await api.patch(`/api/v1/profiles/${selectedFamilyMember.id}`, newData)
+        await api.patch(`/api/v1/profiles/${selectedFamilyMember.id}`, payload)
         toast.success('가족 정보가 수정되었습니다.')
       } else {
-        await api.post('/api/v1/profiles', { ...newData, account_id: userProfile.account_id, health_survey: {} })
+        await api.post('/api/v1/profiles', payload)
         toast.success('가족이 추가되었습니다.')
       }
+      if (refetchProfiles) await refetchProfiles()
       setModalType(null)
       setSelectedFamilyMember(null)
       fetchData()
@@ -316,6 +355,7 @@ export default function MyPage() {
     try {
       await api.delete(`/api/v1/profiles/${id}`)
       toast.success('삭제되었습니다.')
+      if (refetchProfiles) await refetchProfiles()
       fetchData()
     } catch (err) { handleApiError(err) }
   }
@@ -328,8 +368,19 @@ export default function MyPage() {
   const menuItems = [
     { id: '기본정보', label: '기본 정보', icon: <User size={18} /> },
     { id: '건강정보', label: '건강 정보', icon: <Activity size={18} /> },
-    ...(selectedProfile?.relation_type !== 'OTHER' ? [{ id: '가족관리', label: '가족 관리', icon: <Users size={18} /> }] : []),
+    ...(selectedProfile?.relation_type === 'SELF' ? [{ id: '가족관리', label: '가족 관리', icon: <Users size={18} /> }] : []),
   ]
+
+  // [추가] 상세 관계 텍스트 변환 함수
+  const getDetailRelation = (profile) => {
+    const rel = profile?.relation_type;
+    const gen = profile?.health_survey?.gender || profile?.gender;
+    if (rel === 'SELF') return '본인 계정';
+    if (rel === 'PARENT') return gen === 'MALE' ? '부모님(아버지)' : '부모님(어머니)';
+    if (rel === 'CHILD') return gen === 'MALE' ? '자녀(아들)' : '자녀(딸)';
+    if (rel === 'SPOUSE') return gen === 'MALE' ? '배우자(남편)' : '배우자(아내)';
+    return '가족';
+  };
 
   return (
     <main className={`max-w-[1400px] mx-auto w-full px-8 py-12 min-h-screen bg-slate-50 relative transition-opacity duration-200 ${isRefreshing ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
@@ -350,11 +401,16 @@ export default function MyPage() {
             <div className="flex flex-col items-center text-center">
               <div className="w-24 h-24 bg-gray-900 rounded-full flex items-center justify-center shadow-lg mb-4 border-4 border-white"><User size={40} className="text-white" /></div>
               <h2 className="text-xl font-black text-gray-900 mb-1">{userProfile?.name.split('(')[0]}님</h2>
-              <p className="text-gray-400 text-xs font-bold mb-6">{userProfile?.relation_type === 'SELF' ? '본인 계정' : '사용자'}</p>
-              <div className="grid grid-cols-2 gap-3 w-full">
+              {/* [수정] 상단 프로필 요약 관계 표시 상세화 */}
+              <p className="text-gray-400 text-xs font-bold mb-6">{getDetailRelation(userProfile)}</p>
+              <div className="grid grid-cols-3 gap-3 w-full">
                 <div className="bg-gray-50 p-4 rounded-[24px] border border-gray-100">
                   <p className="text-[10px] font-black text-gray-500 mb-1">연속 복약</p>
                   <p className="text-lg font-black text-gray-800">{streakDays}일째 🔥</p>
+                </div>
+                <div className={`p-4 rounded-[24px] border ${todayTakenCount > 0 ? 'bg-green-50 border-green-100' : 'bg-gray-50 border-gray-100'}`}>
+                  <p className={`text-[10px] font-black mb-1 ${todayTakenCount > 0 ? 'text-green-600' : 'text-gray-500'}`}>오늘 복약</p>
+                  <p className="text-lg font-black text-gray-800">{todayTakenCount > 0 ? `${todayTakenCount}종 완료` : '-'}</p>
                 </div>
                 <div className="bg-orange-50 p-4 rounded-[24px] border border-orange-100">
                   <p className="text-[10px] font-black text-orange-500 mb-1">진행 챌린지</p>
@@ -390,7 +446,10 @@ export default function MyPage() {
                   </div>
                   <div className="flex justify-between items-center p-6 bg-slate-50 rounded-[28px]">
                     <span className="text-sm text-gray-400 font-black">관계</span>
-                    <div className="bg-blue-500/10 px-3 py-1.5 rounded-full border border-blue-500/20"><span className="text-sm font-black text-blue-700">{relationLabels[userProfile?.relation_type]}</span></div>
+                    <div className="bg-blue-500/10 px-3 py-1.5 rounded-full border border-blue-500/20">
+                      {/* [수정] 기본 정보 탭 관계 표시 상세화 */}
+                      <span className="text-sm font-black text-blue-700">{getDetailRelation(userProfile).replace('부모님', '부모').replace('계정', '')}</span>
+                    </div>
                   </div>
                 </div>
                 <div className="mt-auto pt-10 space-y-6">
@@ -428,17 +487,28 @@ export default function MyPage() {
                 {family.length > 0 ? (
                   <div className="grid sm:grid-cols-2 gap-4">
                     {family.map((member) => (
-                      <div key={member.id} onClick={() => { setSelectedFamilyMember(member); setModalType('family'); }} className="bg-slate-50 rounded-[32px] p-8 hover:bg-white hover:shadow-md transition-all flex justify-between items-center group cursor-pointer">
+                      <div key={member.id} onClick={() => { setSelectedFamilyMember(member); setModalType('family'); }} className="bg-slate-50 rounded-[32px] p-8 hover:bg-white hover:shadow-md transition-all flex justify-between items-center group cursor-pointer border border-transparent hover:border-gray-100">
                         <div className="flex items-center gap-5">
-                          <div className="w-16 h-16 bg-white rounded-[24px] flex items-center justify-center text-2xl font-black text-gray-700 group-hover:bg-gray-900 group-hover:text-white transition-all">{member.name[0]}</div>
-                          <div><p className="text-lg font-black text-gray-800">{member.name}</p><p className="text-xs font-bold text-gray-400 uppercase">{relationLabels[member.relation_type]}</p></div>
+                          <div className="w-16 h-16 bg-white rounded-[24px] flex items-center justify-center text-2xl font-black text-gray-700 group-hover:bg-gray-900 group-hover:text-white transition-all shadow-sm">{member.name[0]}</div>
+                          <div>
+                            <p className="text-lg font-black text-gray-800">{member.name}</p>
+                            {/* [수정] 가족 목록 상세 호칭 표시 */}
+                            <p className="text-xs font-bold text-gray-400 uppercase">
+                              {member.relation_type === 'PARENT' ? (member.gender === 'MALE' ? '아버지' : '어머니') :
+                               member.relation_type === 'CHILD' ? (member.gender === 'MALE' ? '아들' : '딸') :
+                               member.relation_type === 'SPOUSE' ? (member.gender === 'MALE' ? '남편' : '아내') :
+                               relationLabels[member.relation_type]}
+                            </p>
+                          </div>
                         </div>
-                        <button onClick={(e) => handleDeleteFamily(member.id, e)} className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-gray-300 hover:text-red-500 shadow-sm cursor-pointer"><Trash2 size={18} /></button>
+                        <button onClick={(e) => handleDeleteFamily(member.id, e)} className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-gray-300 hover:text-red-500 shadow-sm cursor-pointer transition-colors"><Trash2 size={18} /></button>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="py-20 bg-slate-50 rounded-[40px] border border-dashed border-slate-200"><EmptyState title="등록된 가족이 없어요" message="가족의 복약도 함께 관리해보세요!" actionLabel="가족 추가하기" onAction={() => { setSelectedFamilyMember(null); setModalType('family'); }} /></div>
+                  <div className="py-20 bg-slate-50 rounded-[40px] border border-dashed border-slate-200">
+                    <EmptyState title="등록된 가족이 없어요" message="우측 상단의 버튼을 눌러 가족을 추가해보세요!" />
+                  </div>
                 )}
               </div>
             )}
