@@ -74,6 +74,8 @@ services:
   # FastAPI API 서버 — ML 추론은 ai-worker 에 위임
   fastapi:
     container_name: fastapi
+    image: ghcr.io/ai-healthcare-02/ai_02_06-fastapi:${IMAGE_TAG:-latest}
+    pull_policy: always
     build:
       context: .
       dockerfile: app/Dockerfile.prod
@@ -113,6 +115,8 @@ services:
   # 피크 메모리 약 1.8GB. t3.medium 기준 2GB 한도.
   ai-worker:
     container_name: ai-worker
+    image: ghcr.io/ai-healthcare-02/ai_02_06-ai-worker:${IMAGE_TAG:-latest}
+    pull_policy: always
     build:
       context: .
       dockerfile: ai_worker/Dockerfile.prod
