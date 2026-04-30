@@ -1,36 +1,17 @@
 """Prescription group DTO models module.
 
-처방전 그룹 카드 / 정렬 / 검색 / drill-down 응답 스키마. 단계 2 의 라우터가
-사용한다.
+BE 의 책임 원칙 (사용자 합의): **CRUD + 입력값 검증** 만. 정렬 / 필터 / 탭 같은
+표시 정책은 모두 FE 가 처리. 따라서 본 DTO 는 단순 응답 / 요청 스키마만 정의.
 
-응답 노출 정책: 화면에서 실제 사용하는 필드만 포함. ``MedicationResponse``
-전체 (created_at / updated_at / deleted_at / profile_id 등) 를 drill-down 에
-중복 노출하지 않고 ``MedicationListItem`` 짧은 view 로 분리 — Pydantic 의
-schema-as-contract 원칙에 따라 외부에 새 정보를 흘리지 않는다.
+응답 노출 정책: 화면이 실제로 쓰는 필드만 포함. ``MedicationResponse`` 전체
+를 drill-down 에 중복 노출하지 않고 ``MedicationListItem`` 짧은 view 로
+분리 — Pydantic schema-as-contract 원칙에 따라 외부에 새 정보를 흘리지 않는다.
 """
 
 from datetime import date, datetime
-from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
-
-
-class PrescriptionGroupSort(StrEnum):
-    """``GET /prescription-groups`` 의 정렬 기준 — 날짜 / 병원 이름."""
-
-    DATE_DESC = "date_desc"
-    DATE_ASC = "date_asc"
-    HOSPITAL_ASC = "hospital_asc"
-    HOSPITAL_DESC = "hospital_desc"
-
-
-class PrescriptionGroupStatus(StrEnum):
-    """탭 필터 — 그룹 안 medication 의 활성 상태에 따라 분류."""
-
-    ALL = "all"
-    ACTIVE = "active"  # 그룹 안 1개 이상 medication 이 is_active=True
-    COMPLETED = "completed"  # 그룹의 모든 medication 이 is_active=False (or end_date 지남)
 
 
 class MedicationListItem(BaseModel):

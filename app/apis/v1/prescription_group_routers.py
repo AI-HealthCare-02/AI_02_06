@@ -15,8 +15,6 @@ from app.dependencies.security import get_current_account
 from app.dtos.prescription_group import (
     PrescriptionGroupCard,
     PrescriptionGroupDetail,
-    PrescriptionGroupSort,
-    PrescriptionGroupStatus,
     PrescriptionGroupUpdate,
 )
 from app.models.accounts import Account
@@ -37,35 +35,32 @@ CurrentAccount = Annotated[Account, Depends(get_current_account)]
 @router.get(
     "",
     response_model=list[PrescriptionGroupCard],
-    summary="처방전 그룹 카드 list (정렬 + 검색 + 탭)",
+    summary="처방전 그룹 카드 list (선택 약품 검색)",
 )
 async def list_prescription_groups(
     profile_id: UUID,
     current_account: CurrentAccount,
     service: PrescriptionGroupServiceDep,
-    sort: PrescriptionGroupSort = PrescriptionGroupSort.DATE_DESC,
     search: str | None = None,
-    status_filter: PrescriptionGroupStatus = PrescriptionGroupStatus.ALL,
 ) -> list[PrescriptionGroupCard]:
-    """처방전 카드 list — 정렬 / 검색 / 탭 결합.
+    """처방전 카드 list — (선택) 약품 이름 검색.
+
+    정렬 / 탭 필터는 BE 가 처리하지 않는다. FE 가 응답을 받아 사용자 의도에
+    따라 derived 로 표시. BE 책임은 CRUD + 검색만 (사용자 합의 원칙).
 
     Args:
         profile_id: 조회 대상 프로필 UUID.
         current_account: 인증된 계정.
         service: PrescriptionGroupService 인스턴스.
-        sort: ``date_desc`` (default) / ``date_asc`` / ``department_asc`` / ``department_desc``.
         search: 약품 이름 검색 — 이 약을 포함하는 그룹만 반환.
-        status_filter: ``all`` (default) / ``active`` (복용 중) / ``completed`` (복용 완료).
 
     Returns:
-        정렬·검색·필터된 처방전 카드 list.
+        검색 적용된 처방전 카드 list (created_at desc).
     """
     return await service.list_groups_with_owner_check(
         profile_id,
         current_account.id,
-        sort=sort,
         search=search,
-        status_filter=status_filter,
     )
 
 

@@ -1,8 +1,9 @@
-"""Prescription group service — list / detail / update / delete / 정렬 / 검색.
+"""Prescription group service — CRUD + 입력값 검증.
 
-단계 2 의 ``/medication`` 페이지 (= 복용 가이드) 가 처방전 카드 단위로 노출
-되도록 그룹 list + drill-down + 편집 + 삭제를 제공한다. 정렬 / 검색 / 탭(status)
-은 서로 독립적으로 결합 가능 (사용자 합의).
+BE 책임 원칙 (사용자 합의): 정렬 / 필터 / 탭 같은 표시 정책은 모두 FE 가
+처리. 본 service 는 단순 list / detail / update / complete / delete + 약품 검색만 담당.
+
+검색은 medication 테이블 join 이 필요해 BE 가 처리 (FE 가 약품 list 를 들고 있지 않음).
 """
 
 from datetime import datetime
@@ -16,8 +17,6 @@ from app.dtos.prescription_group import (
     MedicationListItem,
     PrescriptionGroupCard,
     PrescriptionGroupDetail,
-    PrescriptionGroupSort,
-    PrescriptionGroupStatus,
     PrescriptionGroupUpdate,
 )
 from app.models.medication import Medication
@@ -28,7 +27,7 @@ from app.services.lifestyle_guide_service import LifestyleGuideService
 
 
 class PrescriptionGroupService:
-    """처방전 그룹 list / drill-down 서비스."""
+    """처방전 그룹 list / drill-down / mutation 서비스."""
 
     def __init__(self) -> None:
         self.repository = PrescriptionGroupRepository()
@@ -43,57 +42,45 @@ class PrescriptionGroupService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this profile.")
 
     # ── 처방전 카드 list ─────────────────────────────────────────────────
-    # 흐름: ownership 검증 -> 정렬/검색 query 빌드 -> 약 수 + active 여부 집계
-    #       -> PrescriptionGroupCard list 반환
+    # 흐름: ownership 검증 -> 약품 검색 (선택) -> 약 수 + active 여부 집계
+    #       -> PrescriptionGroupCard list 반환 (정렬 / 탭 필터는 FE 책임)
     async def list_groups_with_owner_check(
         self,
         profile_id: UUID,
         account_id: UUID,
         *,
-        sort: PrescriptionGroupSort = PrescriptionGroupSort.DATE_DESC,
         search: str | None = None,
-        status_filter: PrescriptionGroupStatus = PrescriptionGroupStatus.ALL,
     ) -> list[PrescriptionGroupCard]:
-        """처방전 카드 list — ownership 검증 + 정렬 + 검색 + 상태 필터.
+        """처방전 카드 list — ownership 검증 + (선택) 약품 검색.
 
         Args:
             profile_id: 조회 대상 프로필 UUID.
             account_id: 요청 계정 UUID (ownership 검증).
-            sort: 날짜/진료과 asc/desc.
             search: 약품 이름 검색 — 이 약을 포함하는 그룹만 반환.
-            status_filter: ALL / ACTIVE / COMPLETED 탭.
 
         Returns:
-            정렬·검색·필터된 처방전 카드 list.
+            검색 적용된 처방전 카드 list. 정렬 / 탭 필터는 FE derived 로 처리.
         """
         await self._verify_profile_ownership(profile_id, account_id)
-        groups = await self._fetch_filtered_groups(profile_id, sort, search)
-        cards: list[PrescriptionGroupCard] = []
-        for group in groups:
-            if not await self._matches_status(group, status_filter):
-                continue
-            cards.append(await self._build_card(group, status_filter))
-        return cards
+        groups = await self._fetch_groups(profile_id, search)
+        return [await self._build_card(g) for g in groups]
 
-    async def _fetch_filtered_groups(
+    async def _fetch_groups(
         self,
         profile_id: UUID,
-        sort: PrescriptionGroupSort,
         search: str | None,
     ) -> list[PrescriptionGroup]:
-        """정렬 + 검색이 적용된 그룹 query 결과.
+        """약품 검색이 적용된 그룹 query 결과 (created_at desc 단일 default).
 
-        병원 정렬 시 ``hospital_name IS NULL`` (= '병원 미상') 그룹은 정렬 방향과
-        무관하게 list 맨 위로 partition — 사용자가 입력해야 할 action item 으로
-        시선 유도. 날짜 정렬엔 적용 안 함 (날짜 미상은 드물고 시간순 의도 보존).
+        BE 는 응답을 단순 created_at 내림차순으로만 반환. FE 가 사용자 의도에
+        따라 정렬 / 탭 필터를 derived 로 적용한다.
         """
-        order_by = _ORDER_BY_MAP[sort]
         query = PrescriptionGroup.filter(
             profile_id=profile_id,
             deleted_at__isnull=True,
         )
         if search:
-            # 약품 이름 검색 — 그 약을 포함하는 group 만 필터.
+            # 약품 이름 검색 — 그 약을 포함하는 group 만 필터 (medication join 필요).
             # ILIKE 부분일치 (대소문자 무시), 한글도 정상 매칭.
             matching_group_ids = (
                 await Medication
@@ -109,20 +96,9 @@ class PrescriptionGroupService:
             if not matching_ids:
                 return []
             query = query.filter(id__in=matching_ids)
-        groups = await query.order_by(*order_by).all()
+        return await query.order_by("-created_at").all()
 
-        # 병원 정렬일 때만 hospital_name NULL 그룹을 partition 으로 앞으로 이동.
-        if sort in (PrescriptionGroupSort.HOSPITAL_ASC, PrescriptionGroupSort.HOSPITAL_DESC):
-            null_groups = [g for g in groups if not g.hospital_name]
-            valued_groups = [g for g in groups if g.hospital_name]
-            return null_groups + valued_groups
-        return groups
-
-    async def _build_card(
-        self,
-        group: PrescriptionGroup,
-        _status_filter: PrescriptionGroupStatus,
-    ) -> PrescriptionGroupCard:
+    async def _build_card(self, group: PrescriptionGroup) -> PrescriptionGroupCard:
         """그룹 한 개의 카드 view 빌드 — medication 수 + active 여부 집계."""
         meds_count = await Medication.filter(
             prescription_group_id=group.id,
@@ -143,23 +119,6 @@ class PrescriptionGroupService:
             medications_count=meds_count,
             has_active_medication=has_active,
         )
-
-    async def _matches_status(
-        self,
-        group: PrescriptionGroup,
-        status_filter: PrescriptionGroupStatus,
-    ) -> bool:
-        """탭 필터 매칭 — ACTIVE: 1개 이상 active 약 / COMPLETED: 전부 비활성."""
-        if status_filter == PrescriptionGroupStatus.ALL:
-            return True
-        has_active = await Medication.filter(
-            prescription_group_id=group.id,
-            deleted_at__isnull=True,
-            is_active=True,
-        ).exists()
-        if status_filter == PrescriptionGroupStatus.ACTIVE:
-            return has_active
-        return not has_active
 
     # ── drill-down: 단일 그룹 + 약 list ──────────────────────────────────
     async def get_group_with_owner_check(
@@ -202,20 +161,22 @@ class PrescriptionGroupService:
             medications=[MedicationListItem.model_validate(m) for m in meds],
         )
 
-    # ── 그룹 메타 update (department 등) ───────────────────────────────
+    # ── 그룹 메타 update (department / hospital_name) ───────────────────
     async def update_group_with_owner_check(
         self,
         group_id: UUID,
         account_id: UUID,
         data: PrescriptionGroupUpdate,
     ) -> PrescriptionGroupDetail:
-        """그룹 메타 부분 수정 (현재는 department 만)."""
+        """그룹 메타 부분 수정 (department / hospital_name).
+
+        Pydantic ``model_fields_set`` 으로 사용자가 명시한 필드만 sentinel
+        ``...`` 가 아닌 실제 값으로 repository 에 전달 → 부분 수정 보장.
+        """
         group = await self.repository.get_by_id(group_id)
         if not group:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prescription group not found.")
         await self._verify_profile_ownership(group.profile_id, account_id)
-        # PrescriptionGroupUpdate 의 부분 수정: 명시 안 된 필드 (model_fields_set 미포함)
-        # 는 sentinel `...` 로 전달 → repository 가 변경 안함.
         kwargs: dict = {}
         kwargs["department"] = data.department if "department" in data.model_fields_set else ...
         kwargs["hospital_name"] = data.hospital_name if "hospital_name" in data.model_fields_set else ...
@@ -263,11 +224,3 @@ class PrescriptionGroupService:
             ).update(deleted_at=now, is_active=False)
             await self.repository.soft_delete(group)
             await self.lifestyle_guide_service.cascade_delete_active_guides_by_profile(group.profile_id)
-
-
-_ORDER_BY_MAP: dict[PrescriptionGroupSort, tuple[str, ...]] = {
-    PrescriptionGroupSort.DATE_DESC: ("-dispensed_date", "-created_at"),
-    PrescriptionGroupSort.DATE_ASC: ("dispensed_date", "created_at"),
-    PrescriptionGroupSort.HOSPITAL_ASC: ("hospital_name", "-dispensed_date"),
-    PrescriptionGroupSort.HOSPITAL_DESC: ("-hospital_name", "-dispensed_date"),
-}
