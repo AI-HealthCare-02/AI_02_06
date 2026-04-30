@@ -99,6 +99,7 @@ export default function MedicationPage() {
     setSort,
     setSearch,
     setStatusFilter,
+    refetchGroups,
   } = usePrescriptionGroup()
 
   // 검색 input toggle + 입력 버퍼 (즉시 적용보다 사용자 경험 위해 enter 또는 blur 시 적용)
@@ -108,6 +109,14 @@ export default function MedicationPage() {
   useEffect(() => {
     setSearchDraft(search)
   }, [search])
+
+  // 페이지 진입마다 최신 list 보장 — 다른 화면 (OCR confirm 등) 에서 새 처방전이
+  // 등록된 직후 /medication 으로 이동 시 stale 방지. Context 의 useEffect 는
+  // selectedProfileId/sort/search 변경 시만 fetch 라 mount 자체에 trigger 없음.
+  useEffect(() => {
+    if (selectedProfileId) refetchGroups()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const applySearch = () => setSearch(searchDraft.trim())
   const clearSearch = () => {

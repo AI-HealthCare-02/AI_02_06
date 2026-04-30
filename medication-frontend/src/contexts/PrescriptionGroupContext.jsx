@@ -14,6 +14,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
 import api from '@/lib/api'
+import { useMedication } from '@/contexts/MedicationContext'
 import { useProfile } from '@/contexts/ProfileContext'
 
 export const PRESCRIPTION_SORT = Object.freeze({
@@ -33,6 +34,9 @@ const PrescriptionGroupContext = createContext(null)
 
 export function PrescriptionGroupProvider({ children }) {
   const { selectedProfileId } = useProfile()
+  // MedicationContext 의 active 약 수 변화를 listen — 약 복용 처리/마감 시
+  // 그룹의 has_active_medication 이 stale 해지므로 list refetch trigger.
+  const { medications } = useMedication()
   // _groupsRaw: BE 응답 그대로. 외부엔 statusFilter 필터된 ``groups`` 만 노출.
   const [_groupsRaw, setGroupsRaw] = useState([])
   const [groupsById, setGroupsById] = useState({})
@@ -94,6 +98,26 @@ export function PrescriptionGroupProvider({ children }) {
     () => fetchGroups(selectedProfileId),
     [fetchGroups, selectedProfileId],
   )
+
+  // medication active count 변화 감지 — 약 복용 mark / deactivate 시 자동 refetch.
+  // 그룹의 has_active_medication 라벨이 즉시 따라가게 한다.
+  const activeCountRef = useRef(-1)
+  useEffect(() => {
+    if (!selectedProfileId) {
+      activeCountRef.current = -1
+      return
+    }
+    const activeCount = medications.filter((m) => m.is_active).length
+    if (activeCountRef.current === -1) {
+      // 초기 mount — 비교 baseline 만 기록, refetch 트리거 X
+      activeCountRef.current = activeCount
+      return
+    }
+    if (activeCount !== activeCountRef.current) {
+      activeCountRef.current = activeCount
+      refetchGroups()
+    }
+  }, [medications, selectedProfileId, refetchGroups])
 
   // ── detail fetch / cache ────────────────────────────────────────
   // drill-down 페이지가 자체 useState 로 fetch 하지 않도록 cache 보유.
