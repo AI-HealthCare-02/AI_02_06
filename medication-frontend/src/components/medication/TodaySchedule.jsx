@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { Sunrise, Sun, Sunset, Moon, Clock, CheckCircle2, Circle } from 'lucide-react'
+import { Sunrise, Sun, Sunset, Moon, Clock, CheckCircle2, Circle, XCircle } from 'lucide-react'
 import api from '@/lib/api'
 
 // ── 시간대 블록 정의 ─────────────────────────────────────────────────────────
@@ -84,6 +84,81 @@ export default function TodaySchedule({ medications, profileId }) {
     [todayLogs],
   )
 
+  // TAKEN 로그의 id 반환 — 취소(DELETE) 시 사용
+  const getLogId = useCallback(
+    (medId, time) =>
+      todayLogs.find(
+        (l) =>
+          l.medication_id === medId &&
+          l.intake_status === 'TAKEN' &&
+          l.scheduled_time?.startsWith(time.substring(0, 5)),
+      )?.id ?? null,
+    [todayLogs],
+  )
+
+  // ── 체크 취소 처리 ─────────────────────────────────────────────────────────
+  // 흐름: 로그 id 조회 → DELETE intake-log → 오늘 기록 재조회
+  const handleUncheck = useCallback(
+    async (med, time) => {
+      const logId = getLogId(med.id, time)
+      if (!logId) return
+
+      const key = `${med.id}__${time}`
+      setTakingKeys((prev) => new Set([...prev, key]))
+      try {
+        await api.delete(`/api/v1/intake-logs/${logId}`)
+        await fetchTodayLogs()
+      } catch {
+        // silent
+      } finally {
+        setTakingKeys((prev) => {
+          const s = new Set(prev)
+          s.delete(key)
+          return s
+        })
+      }
+    },
+    [getLogId, fetchTodayLogs],
+  )
+
+  // ── 시간대 전체 완료 처리 ─────────────────────────────────────────────────
+  // 흐름: 미완료 항목 필터링 → Promise.all 병렬 POST intake-log + take → 재조회
+  const handleCheckAll = useCallback(
+    async (items) => {
+      const pending = items.filter(({ med, time }) => !isTaken(med.id, time))
+      if (pending.length === 0) return
+
+      const keys = pending.map(({ med, time }) => `${med.id}__${time}`)
+      setTakingKeys((prev) => new Set([...prev, ...keys]))
+
+      try {
+        const today = new Date().toISOString().split('T')[0]
+        await Promise.all(
+          pending.map(async ({ med, time }) => {
+            const scheduledTime = time.split(':').length === 2 ? `${time}:00` : time
+            const logRes = await api.post('/api/v1/intake-logs', {
+              medication_id: med.id,
+              profile_id: profileId,
+              scheduled_date: today,
+              scheduled_time: scheduledTime,
+            })
+            await api.post(`/api/v1/intake-logs/${logRes.data.id}/take`)
+          }),
+        )
+        await fetchTodayLogs()
+      } catch {
+        // silent
+      } finally {
+        setTakingKeys((prev) => {
+          const s = new Set(prev)
+          keys.forEach((k) => s.delete(k))
+          return s
+        })
+      }
+    },
+    [isTaken, profileId, fetchTodayLogs],
+  )
+
   // ── 체크오프 처리 ─────────────────────────────────────────────────────────
   // 흐름: POST intake-log 생성 (scheduled_time 포함) → POST take → 오늘 기록 재조회
   const handleCheck = useCallback(
@@ -137,10 +212,10 @@ export default function TodaySchedule({ medications, profileId }) {
           <div className="w-10 h-10 bg-gray-100 rounded-2xl flex items-center justify-center">
             <Clock size={20} className="text-gray-900" />
           </div>
-          <h2 className="text-xl font-bold text-gray-900">오늘의 복약</h2>
+          <h2 className="text-2xl font-bold text-gray-900">오늘의 복약</h2>
         </div>
         {totalItems > 0 && (
-          <span className="text-sm font-bold text-gray-400">
+          <span className="text-base font-bold text-gray-400">
             {takenItems}/{totalItems} 완료
           </span>
         )}
@@ -174,23 +249,38 @@ export default function TodaySchedule({ medications, profileId }) {
               }`}
             >
               {/* 블록 헤더 */}
-              <div className="flex items-center gap-2 mb-3">
-                <Icon
-                  size={14}
-                  className={isActive ? 'text-gray-900' : 'text-gray-400'}
-                />
-                <span
-                  className={`text-xs font-bold ${
-                    isActive ? 'text-gray-900' : 'text-gray-400'
-                  }`}
-                >
-                  {label}
-                </span>
-              </div>
+              {(() => {
+                const allTaken = items.length > 0 && items.every(({ med, time }) => isTaken(med.id, time))
+                const blockLoading = items.some(({ med, time }) => takingKeys.has(`${med.id}__${time}`))
+                return (
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Icon size={16} className={isActive ? 'text-gray-900' : 'text-gray-400'} />
+                      <span className={`text-sm font-bold ${isActive ? 'text-gray-900' : 'text-gray-400'}`}>
+                        {label}
+                      </span>
+                    </div>
+                    {items.length > 0 && (
+                      <button
+                        onClick={() => handleCheckAll(items)}
+                        disabled={allTaken || blockLoading}
+                        aria-label={`${label} 전체 완료`}
+                        className={`text-xs font-bold transition-colors cursor-pointer disabled:cursor-default ${
+                          allTaken
+                            ? 'text-gray-300'
+                            : 'text-gray-400 hover:text-gray-700'
+                        }`}
+                      >
+                        {allTaken ? '완료' : blockLoading ? '처리중...' : '전체 완료'}
+                      </button>
+                    )}
+                  </div>
+                )
+              })()}
 
               {/* 약품 목록 */}
               {items.length === 0 ? (
-                <p className="text-xs text-gray-300 font-bold">-</p>
+                <p className="text-sm text-gray-300 font-bold">-</p>
               ) : (
                 <ul className="space-y-2.5">
                   {items.map(({ med, time }) => {
@@ -199,24 +289,27 @@ export default function TodaySchedule({ medications, profileId }) {
                     return (
                       <li key={`${med.id}__${time}`} className="flex items-start gap-2">
                         <button
-                          onClick={() => handleCheck(med, time)}
-                          disabled={taken || loading}
-                          aria-label={taken ? '복약 완료' : '복약 확인'}
-                          className={`mt-0.5 shrink-0 transition-all cursor-pointer disabled:cursor-default ${
+                          onClick={() => taken ? handleUncheck(med, time) : handleCheck(med, time)}
+                          disabled={loading}
+                          aria-label={taken ? '복약 취소' : '복약 확인'}
+                          className={`mt-0.5 shrink-0 transition-all cursor-pointer disabled:cursor-not-allowed group/btn ${
                             taken
-                              ? 'text-gray-900'
+                              ? 'text-gray-900 hover:text-red-400'
                               : 'text-gray-300 hover:text-gray-600'
                           }`}
                         >
                           {taken ? (
-                            <CheckCircle2 size={16} />
+                            <>
+                              <CheckCircle2 size={16} className="group-hover/btn:hidden" />
+                              <XCircle size={16} className="hidden group-hover/btn:block" />
+                            </>
                           ) : (
                             <Circle size={16} />
                           )}
                         </button>
                         <div className="min-w-0">
                           <p
-                            className={`text-xs font-bold leading-snug truncate transition-all ${
+                            className={`text-sm font-bold leading-snug truncate transition-all ${
                               taken
                                 ? 'text-gray-400 line-through'
                                 : 'text-gray-900'
@@ -225,7 +318,7 @@ export default function TodaySchedule({ medications, profileId }) {
                             {med.medicine_name}
                           </p>
                           {(med.dose_per_intake || med.intake_instruction) && (
-                            <p className="text-[10px] text-gray-400 mt-0.5">
+                            <p className="text-xs text-gray-400 mt-0.5">
                               {[
                                 med.dose_per_intake && `1회 ${med.dose_per_intake}`,
                                 med.intake_instruction,
@@ -248,14 +341,14 @@ export default function TodaySchedule({ medications, profileId }) {
         <div className="mt-4 rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-5 py-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <Clock size={13} className="text-gray-400" />
-              <span className="text-xs font-bold text-gray-400">
+              <Clock size={15} className="text-gray-400" />
+              <span className="text-sm font-bold text-gray-400">
                 복약 시간 미설정
               </span>
             </div>
             <button
               onClick={() => router.push('/medication')}
-              className="text-[10px] font-bold text-gray-400 hover:text-gray-700 transition-colors cursor-pointer"
+              className="text-xs font-bold text-gray-400 hover:text-gray-700 transition-colors cursor-pointer"
             >
               설정하기 →
             </button>
@@ -264,7 +357,7 @@ export default function TodaySchedule({ medications, profileId }) {
             {unset.map((med) => (
               <span
                 key={med.id}
-                className="text-xs text-gray-500 bg-white border border-gray-200 px-3 py-1.5 rounded-xl font-bold"
+                className="text-sm text-gray-500 bg-white border border-gray-200 px-3 py-1.5 rounded-xl font-bold"
               >
                 {med.medicine_name}
               </span>

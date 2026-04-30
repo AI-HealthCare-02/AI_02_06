@@ -218,7 +218,7 @@ function MainPageContent() {
       <section className="relative w-full min-h-[540px] flex items-center justify-center overflow-hidden bg-black">
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle, #ffffff 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
         <div className="relative z-10 text-center px-6 max-w-3xl mx-auto py-24">
-          <p className="text-gray-500 text-xs font-bold mb-5 tracking-[0.2em] uppercase">{greeting.sub}</p>
+          <p className="text-gray-500 text-sm font-bold mb-5 tracking-[0.2em] uppercase">{greeting.sub}</p>
           <h1 className="text-5xl md:text-7xl font-black text-white leading-tight mb-8">
             {greeting.msg},<br /><span className="text-gray-600">{userName} 님</span>
           </h1>
@@ -242,9 +242,9 @@ function MainPageContent() {
             <div className="flex justify-between items-center mb-8">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-gray-100 rounded-2xl flex items-center justify-center"><Pill size={20} className="text-gray-900" /></div>
-                <h2 className="text-xl font-bold text-gray-900">복용 중인 약</h2>
+                <h2 className="text-2xl font-bold text-gray-900">복용 중인 약</h2>
               </div>
-              <button onClick={() => router.push('/medication')} className="text-sm font-bold text-gray-400 hover:text-gray-900 transition-colors cursor-pointer">
+              <button onClick={() => router.push('/medication')} className="text-base font-bold text-gray-400 hover:text-gray-900 transition-colors cursor-pointer">
                 전체보기 →
               </button>
             </div>
@@ -253,9 +253,9 @@ function MainPageContent() {
                 <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
                   <Pill size={28} className="text-gray-300" />
                 </div>
-                <p className="text-gray-400 font-bold mb-1">등록된 약이 없어요</p>
-                <p className="text-gray-300 text-sm mb-6">처방전을 촬영해서 약을 등록해보세요</p>
-                <button onClick={goToOcrFlow} className="px-6 py-3 bg-gray-900 text-white text-sm font-bold rounded-full cursor-pointer hover:bg-gray-800 transition-colors">
+                <p className="text-gray-400 font-bold text-base mb-1">등록된 약이 없어요</p>
+                <p className="text-gray-300 text-base mb-6">처방전을 촬영해서 약을 등록해보세요</p>
+                <button onClick={goToOcrFlow} className="px-6 py-3 bg-gray-900 text-white text-base font-bold rounded-full cursor-pointer hover:bg-gray-800 transition-colors">
                   처방전 등록하기
                 </button>
               </div>
@@ -269,21 +269,21 @@ function MainPageContent() {
                   >
                     <div className="flex justify-between items-start mb-3">
                       {med.category && (
-                        <span className="text-[10px] font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded-full">{med.category}</span>
+                        <span className="text-xs font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded-full">{med.category}</span>
                       )}
                       <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center ml-auto">
                         <Plus size={12} className="text-gray-400" />
                       </div>
                     </div>
-                    <h3 className="font-bold text-gray-900 text-sm mb-1 leading-snug">{med.medicine_name}</h3>
-                    <p className="text-xs text-gray-500 mb-0.5">
+                    <h3 className="font-bold text-gray-900 text-base mb-1 leading-snug">{med.medicine_name}</h3>
+                    <p className="text-sm text-gray-500 mb-0.5">
                       {[
                         med.daily_intake_count && `1일 ${med.daily_intake_count}회`,
                         med.intake_instruction,
                       ].filter(Boolean).join(' · ') || med.dose_per_intake || '복용 정보 없음'}
                     </p>
                     {getRemainingDays(med) && (
-                      <p className="text-xs text-blue-500 font-semibold">{getRemainingDays(med)}</p>
+                      <p className="text-sm text-blue-500 font-semibold">{getRemainingDays(med)}</p>
                     )}
                   </div>
                 ))}
@@ -295,18 +295,18 @@ function MainPageContent() {
           <div className="md:col-span-4 space-y-6">
             <div onClick={() => router.push('/challenge')} className="bg-gray-900 rounded-[32px] p-8 text-white cursor-pointer hover:-translate-y-1 transition-all min-h-[220px] flex flex-col justify-end relative overflow-hidden group">
               <Flame size={120} className="absolute -right-4 -top-4 opacity-[0.05] group-hover:scale-110 transition-transform" />
-              <p className="text-gray-500 font-bold text-xs mb-2 tracking-widest">CHALLENGE</p>
+              <p className="text-gray-500 font-bold text-sm mb-2 tracking-widest">CHALLENGE</p>
               {activeChallenge ? (
                 <>
-                  <h2 className="text-2xl font-black mb-3">{activeChallenge.title}</h2>
-                  <p className="text-orange-500 text-sm font-bold">
+                  <h2 className="text-3xl font-black mb-3">{activeChallenge.title}</h2>
+                  <p className="text-orange-500 text-base font-bold">
                     {activeChallenge.completed_dates?.length || 0}일째 성공 중! →
                   </p>
                 </>
               ) : (
                 <>
-                  <h2 className="text-2xl font-black mb-3">챌린지 시작하기</h2>
-                  <p className="text-gray-400 text-sm font-bold">건강한 습관을 만들어보세요 →</p>
+                  <h2 className="text-3xl font-black mb-3">챌린지 시작하기</h2>
+                  <p className="text-gray-400 text-base font-bold">건강한 습관을 만들어보세요 →</p>
                 </>
               )}
             </div>
