@@ -69,13 +69,29 @@ class TestEnqueueGuideHappyPath:
     async def test_returns_pending_response_on_success(self) -> None:
         guide_id = uuid4()
         service = MagicMock()
-        guide = MagicMock(id=guide_id)
+        # status 는 LifestyleGuidePendingResponse 의 enum 검증을 통과해야 한다.
+        guide = MagicMock(id=guide_id, status="pending")
         service.enqueue_guide_with_owner_check = AsyncMock(return_value=guide)
         account = MagicMock(id=uuid4())
 
         result: Any = await enqueue_guide(profile_id=uuid4(), current_account=account, service=service)
 
         assert result.id == guide_id
+        assert result.status == "pending"
+
+    @pytest.mark.asyncio
+    async def test_returns_ready_status_on_dedupe_hit(self) -> None:
+        """Phase B dedupe — service 가 ready 가이드 반환 시 status='ready' 응답."""
+        guide_id = uuid4()
+        service = MagicMock()
+        guide = MagicMock(id=guide_id, status="ready")
+        service.enqueue_guide_with_owner_check = AsyncMock(return_value=guide)
+        account = MagicMock(id=uuid4())
+
+        result: Any = await enqueue_guide(profile_id=uuid4(), current_account=account, service=service)
+
+        assert result.id == guide_id
+        assert result.status == "ready"
 
     @pytest.mark.asyncio
     async def test_propagates_service_http_exception(self) -> None:
