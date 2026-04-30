@@ -98,6 +98,33 @@ function MainSkeleton() {
   )
 }
 
+// ── 복약 잔여 일수 계산 ────────────────────────────────────────────────────────
+// 흐름: end_date 우선 → 없으면 start_date + total_intake_days 로 추정
+function getRemainingDays(med) {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  if (med.end_date) {
+    const end = new Date(med.end_date)
+    end.setHours(0, 0, 0, 0)
+    const diff = Math.ceil((end - today) / (1000 * 60 * 60 * 24))
+    if (diff > 0) return `${diff}일 남음`
+    if (diff === 0) return '오늘 종료'
+    return null
+  }
+
+  if (med.total_intake_days && med.start_date) {
+    const start = new Date(med.start_date)
+    start.setHours(0, 0, 0, 0)
+    const elapsed = Math.ceil((today - start) / (1000 * 60 * 60 * 24))
+    const remaining = med.total_intake_days - elapsed
+    if (remaining > 0) return `${remaining}일 남음`
+    return null
+  }
+
+  return null
+}
+
 function MainPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -248,10 +275,16 @@ function MainPageContent() {
                         <Plus size={12} className="text-gray-400" />
                       </div>
                     </div>
-                    <h3 className="font-bold text-gray-900 text-sm mb-2 leading-snug">{med.medicine_name}</h3>
-                    <p className="text-xs text-gray-400">
-                      {[med.dose_per_intake, med.intake_instruction].filter(Boolean).join(' · ') || '복용 정보 없음'}
+                    <h3 className="font-bold text-gray-900 text-sm mb-1 leading-snug">{med.medicine_name}</h3>
+                    <p className="text-xs text-gray-500 mb-0.5">
+                      {[
+                        med.daily_intake_count && `1일 ${med.daily_intake_count}회`,
+                        med.intake_instruction,
+                      ].filter(Boolean).join(' · ') || med.dose_per_intake || '복용 정보 없음'}
                     </p>
+                    {getRemainingDays(med) && (
+                      <p className="text-xs text-blue-500 font-semibold">{getRemainingDays(med)}</p>
+                    )}
                   </div>
                 ))}
               </div>

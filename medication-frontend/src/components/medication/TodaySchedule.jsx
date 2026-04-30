@@ -224,9 +224,12 @@ export default function TodaySchedule({ medications, profileId }) {
                           >
                             {med.medicine_name}
                           </p>
-                          {med.dose_per_intake && (
+                          {(med.dose_per_intake || med.intake_instruction) && (
                             <p className="text-[10px] text-gray-400 mt-0.5">
-                              {med.dose_per_intake}
+                              {[
+                                med.dose_per_intake && `1회 ${med.dose_per_intake}`,
+                                med.intake_instruction,
+                              ].filter(Boolean).join(' · ')}
                             </p>
                           )}
                         </div>

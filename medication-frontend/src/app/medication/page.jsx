@@ -182,8 +182,14 @@ function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup, onDe
                   <span className={`text-sm font-bold truncate block ${med.is_active ? 'text-gray-900' : 'text-gray-400'}`}>
                     {med.medicine_name}
                   </span>
-                  {med.dose_per_intake && (
-                    <span className="text-xs text-gray-400">{med.dose_per_intake}</span>
+                  {(med.daily_intake_count || med.dose_per_intake || med.intake_instruction) && (
+                    <span className="text-xs text-gray-400">
+                      {[
+                        med.daily_intake_count && `1일 ${med.daily_intake_count}회`,
+                        med.dose_per_intake && `1회 ${med.dose_per_intake}`,
+                        med.intake_instruction,
+                      ].filter(Boolean).join(' · ')}
+                    </span>
                   )}
                 </div>
                 {med.category && (
