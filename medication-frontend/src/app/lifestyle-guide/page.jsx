@@ -330,10 +330,13 @@ export default function LifestyleGuidePage() {
         return
       }
     }
+    // pending placeholder 는 selectedGuide 로 잡지 않는다 — 생성 중에도
+    // 직전 ready 가이드를 그대로 보이도록 유지하기 위함.
     if (latestGuide) {
       setSelectedGuide(latestGuide)
     } else if (guides.length > 0) {
-      setSelectedGuide(guides[0])
+      const firstReady = guides.find(g => g.status === 'ready')
+      setSelectedGuide(firstReady || null)
     } else {
       setSelectedGuide(null)
     }
@@ -472,12 +475,11 @@ export default function LifestyleGuidePage() {
           </>
         )}
 
-        {/* ── 가이드 생성 중 스켈레톤 ── */}
-        {isGenerating && (
+        {/* ── 첫 가이드 생성 중 (이력 없음) — 큰 스켈레톤 ── */}
+        {isGenerating && guides.filter(g => g.status === 'ready').length === 0 && (
           <div className="animate-pulse space-y-4">
             <div className="flex gap-2">
               <div className="h-7 bg-gray-200 rounded-full w-20" />
-              {guides.length > 0 && <div className="h-7 bg-gray-200 rounded-full w-14" />}
             </div>
             <div className="bg-white rounded-2xl px-4 py-3 shadow-sm border border-gray-50">
               <div className="h-3 bg-gray-200 rounded w-32 mb-3" />
@@ -505,6 +507,21 @@ export default function LifestyleGuidePage() {
           </div>
         )}
 
+        {/* ── 기존 가이드 보유 + 생성 중 — 작은 inline placeholder ── */}
+        {/*    기존 selectedGuide 본문은 그대로 유지하고, 새 가이드는            */}
+        {/*    이력 칩에서 "생성중" 표시 + 상단 알림 카드로만 안내한다.            */}
+        {isGenerating && guides.filter(g => g.status === 'ready').length > 0 && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center gap-3">
+            <div className="h-4 w-4 rounded-full border-2 border-blue-300 border-t-blue-600 animate-spin shrink-0" />
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-blue-700">새 가이드 생성 중</p>
+              <p className="text-[11px] text-blue-500 mt-0.5">
+                완료되면 자동으로 새 칩으로 추가됩니다. 기존 가이드는 계속 열람 가능.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* ── 이력 날짜 칩 (가이드 있을 때만) ── */}
         {guides.length > 0 && (
           <div ref={chipScrollRef} className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
@@ -520,10 +537,15 @@ export default function LifestyleGuidePage() {
                   }`}
                 >
                   <button
-                    onClick={() => setSelectedGuide(guide)}
-                    className="cursor-pointer"
+                    onClick={() => guide.status === 'ready' && setSelectedGuide(guide)}
+                    disabled={guide.status !== 'ready'}
+                    className={guide.status === 'ready' ? 'cursor-pointer' : 'cursor-wait'}
                   >
-                    {idx === 0 ? `${formatDate(guide.created_at)} 최신` : formatDate(guide.created_at)}
+                    {guide.status !== 'ready'
+                      ? '생성중...'
+                      : idx === 0
+                        ? `${formatDate(guide.created_at)} 최신`
+                        : formatDate(guide.created_at)}
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDeleteGuide(guide) }}
@@ -550,8 +572,8 @@ export default function LifestyleGuidePage() {
           </div>
         )}
 
-        {/* ── 가이드 내용 (가이드 선택된 경우, 생성 중에는 스켈레톤으로 대체) ── */}
-        {selectedGuide && !isGenerating && (
+        {/* ── 가이드 내용 (가이드 선택된 경우) — 생성 중에도 기존 ready 가이드는 그대로 보인다 ── */}
+        {selectedGuide && (
           <>
             {/* 복용 약 스냅샷 */}
             {selectedGuide.medication_snapshot?.length > 0 && (

@@ -108,7 +108,8 @@ export function LifestyleGuideProvider({ children }) {
       processed_at: null,
     }
     setGuides(prev => [pendingGuide, ...prev])
-    setLatestGuide(pendingGuide)
+    // latestGuide 는 ready 일 때만 갱신 — 생성 중에도 페이지가 직전 ready
+    // 가이드를 selectedGuide 로 유지할 수 있게 하기 위함.
 
     for await (const payload of watchGuideStatus(pendingId, signal)) {
       if (payload.status === 'ready') {
