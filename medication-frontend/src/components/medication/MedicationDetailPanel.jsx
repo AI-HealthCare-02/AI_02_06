@@ -204,7 +204,9 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
                 {med.category}
               </span>
             )}
-            <h2 className="text-xl font-black leading-snug mt-1">{med.medicine_name}</h2>
+            <h2 className="text-xl font-black leading-snug mt-1 break-keep [overflow-wrap:anywhere]">
+              {med.medicine_name}
+            </h2>
             <p className="text-gray-400 text-sm mt-2 flex items-center flex-wrap gap-x-3">
               <span>
                 남은 복용 {med.remaining_intake_count} / {med.total_intake_count}회
