@@ -7,9 +7,11 @@ including creation, updates, and ownership verification.
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from tortoise.transactions import in_transaction
 
 from app.models.chat_sessions import ChatSession
 from app.repositories.chat_session_repository import ChatSessionRepository
+from app.repositories.message_repository import MessageRepository
 from app.repositories.profile_repository import ProfileRepository
 
 
@@ -19,6 +21,7 @@ class ChatSessionService:
     def __init__(self):
         self.repository = ChatSessionRepository()
         self.profile_repository = ProfileRepository()
+        self.message_repository = MessageRepository()
 
     async def _verify_profile_ownership(self, profile_id: UUID, account_id: UUID) -> None:
         """Verify profile ownership.
@@ -208,21 +211,31 @@ class ChatSessionService:
         session = await self.get_session_with_owner_check(session_id, account_id)
         return await self.repository.update(session, title=title)
 
+    # ── 세션 삭제 (cascade soft-delete) ────────────────────────────────
+    # 흐름: 세션 soft-delete -> 자식 ChatMessage 도 soft-delete (트랜잭션)
+
     async def delete_session(self, session_id: UUID) -> None:
-        """Delete chat session (soft delete).
+        """Delete chat session (soft delete) — 자식 메시지 cascade.
+
+        세션 soft-delete 와 그 세션의 모든 ChatMessage soft-delete 를 단일
+        트랜잭션으로 처리한다.
 
         Args:
             session_id: Session UUID to delete.
         """
         session = await self.get_session(session_id)
-        await self.repository.soft_delete(session)
+        async with in_transaction():
+            await self.repository.soft_delete(session)
+            await self.message_repository.bulk_soft_delete_by_session(session_id)
 
     async def delete_session_with_owner_check(self, session_id: UUID, account_id: UUID) -> None:
-        """Delete chat session with ownership verification (soft delete).
+        """Delete chat session with ownership verification — 자식 메시지 cascade.
 
         Args:
             session_id: Session UUID to delete.
             account_id: Account UUID for ownership check.
         """
         session = await self.get_session_with_owner_check(session_id, account_id)
-        await self.repository.soft_delete(session)
+        async with in_transaction():
+            await self.repository.soft_delete(session)
+            await self.message_repository.bulk_soft_delete_by_session(session_id)

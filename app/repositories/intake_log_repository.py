@@ -177,3 +177,17 @@ class IntakeLogRepository:
             intake_log: Intake log to delete.
         """
         await intake_log.delete()
+
+    async def bulk_delete_by_profile(self, profile_id: UUID) -> int:
+        """프로필의 모든 intake log 일괄 hard-delete.
+
+        IntakeLog 는 deleted_at 컬럼이 없는 캐시성 로그라 hard-delete 정책.
+        Profile cascade soft-delete 흐름의 일부로 호출.
+
+        Args:
+            profile_id: 대상 프로필 UUID.
+
+        Returns:
+            삭제된 row 수.
+        """
+        return await IntakeLog.filter(profile_id=profile_id).delete()

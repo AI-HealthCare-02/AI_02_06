@@ -63,6 +63,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Also sync medicine_ingredient table (Mcpn07 endpoint)",
     )
+    parser.add_argument(
+        "--ingredients-only",
+        action="store_true",
+        help="Skip medicine_info sync, run ONLY medicine_ingredient sync (Mcpn07).",
+    )
     return parser.parse_args()
 
 
@@ -70,29 +75,37 @@ def parse_args() -> argparse.Namespace:
 # 흐름: DB 연결 -> MedicineDataService.sync() -> 결과 로그 -> DB 종료
 
 
-async def run_sync(full_sync: bool, api_key: str, include_ingredients: bool) -> None:
+async def run_sync(
+    full_sync: bool,
+    api_key: str,
+    include_ingredients: bool,
+    ingredients_only: bool,
+) -> None:
     """Initialize DB connection and run sync operation.
 
     Args:
         full_sync: Whether to perform full or incremental sync.
         api_key: Public data API key for authentication.
         include_ingredients: If True, also sync medicine_ingredient (Mcpn07).
+        ingredients_only: If True, skip medicine_info sync entirely and run
+            ONLY medicine_ingredient sync. Implies include_ingredients=True.
     """
     await Tortoise.init(config=TORTOISE_ORM)
     logger.info("Database connection established")
 
     try:
         service = MedicineDataService(api_key=api_key)
-        stats = await service.sync(full_sync=full_sync)
 
-        logger.info(
-            "Sync result: fetched=%d, inserted=%d, updated=%d",
-            stats["fetched"],
-            stats["inserted"],
-            stats["updated"],
-        )
+        if not ingredients_only:
+            stats = await service.sync(full_sync=full_sync)
+            logger.info(
+                "Sync result: fetched=%d, inserted=%d, updated=%d",
+                stats["fetched"],
+                stats["inserted"],
+                stats["updated"],
+            )
 
-        if include_ingredients:
+        if include_ingredients or ingredients_only:
             ing_stats = await service.sync_ingredients()
             logger.info(
                 "Ingredient sync: fetched=%d, inserted=%d, updated=%d, skipped=%d",
@@ -118,10 +131,20 @@ def main() -> None:
         logger.error("API key is required. Set DATA_GO_KR_API_KEY in .env or pass --api-key argument.")
         sys.exit(1)
 
-    sync_type = "full" if args.full else "incremental"
-    logger.info("Starting %s medicine data sync", sync_type)
+    if args.ingredients_only:
+        logger.info("Starting ingredient-only sync (skipping medicine_info)")
+    else:
+        sync_type = "full" if args.full else "incremental"
+        logger.info("Starting %s medicine data sync", sync_type)
 
-    asyncio.run(run_sync(full_sync=args.full, api_key=api_key, include_ingredients=args.include_ingredients))
+    asyncio.run(
+        run_sync(
+            full_sync=args.full,
+            api_key=api_key,
+            include_ingredients=args.include_ingredients,
+            ingredients_only=args.ingredients_only,
+        )
+    )
 
 
 if __name__ == "__main__":

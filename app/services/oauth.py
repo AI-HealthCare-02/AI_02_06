@@ -6,18 +6,24 @@ environments with actual provider servers. Follows modern async patterns.
 """
 
 import logging
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
 from fastapi import HTTPException, status
 import httpx
+from tortoise.transactions import in_transaction
 
 from app.core import config
 from app.core.config import Env
 from app.models.accounts import Account, AuthProvider
 from app.models.profiles import Profile, RelationType
 from app.repositories.account_repository import AccountRepository
+from app.repositories.chat_session_repository import ChatSessionRepository
+from app.repositories.message_repository import MessageRepository
+from app.repositories.profile_repository import ProfileRepository
 from app.repositories.refresh_token_repository import RefreshTokenRepository
+from app.services.profile_service import ProfileService
 from app.services.rate_limiter import RateLimiter
 from app.utils.jwt.tokens import AccessToken, RefreshToken
 
@@ -48,6 +54,11 @@ class OAuthService:
         self.account_repo = account_repo or AccountRepository()
         self.refresh_token_repo = refresh_token_repo or RefreshTokenRepository()
         self.rate_limiter = rate_limiter
+        # 회원탈퇴 cascade 의존
+        self.profile_repo = ProfileRepository()
+        self.profile_service = ProfileService()
+        self.chat_session_repo = ChatSessionRepository()
+        self.message_repo = MessageRepository()
 
         if config.ENV == Env.LOCAL:
             # Local: Use mock server (for development convenience)
@@ -395,28 +406,51 @@ class OAuthService:
         """Refresh Token 무효화 (로그아웃)"""
         return await self.refresh_token_repo.revoke(token)
 
+    # ── 회원탈퇴 (cascade soft-delete) ────────────────────────────────
+    # 흐름: refresh_tokens hard -> profiles cascade (medication/challenge/session/...)
+    #       -> account 의 직접 chat_sessions soft + messages soft
+    #       -> account 비활성화 + deleted_at = now() (단일 트랜잭션)
+    # SELF guard 우회: profile_service._cascade_delete_profile 직접 호출.
+
     async def delete_account(self, account: Account) -> bool:
-        """회원 탈퇴 처리
-        1. 해당 계정의 모든 Refresh Token 무효화 (보안 상 필수)
-        2. 계정 비활성화 처리
+        """회원 탈퇴 — 자식 모두 cascade.
+
+        Args:
+            account: 탈퇴 대상 Account.
+
+        Returns:
+            True (성공 시).
+
+        Raises:
+            HTTPException: 500 — cascade 도중 예외.
         """
         try:
-            # [수정] Repository의 실제 메서드명인 revoke_all_for_account 사용
-            await self.refresh_token_repo.revoke_all_for_account(account.id)
+            # 회원의 chat_sessions 미리 수집 (messages cascade 용)
+            account_sessions = await self.chat_session_repo.get_all_by_account(account.id)
+            profiles = await self.profile_repo.get_all_by_account(account.id)
 
-            # 계정 비활성화 (보여주신 AccountRepository의 deactivate 메서드 활용)
-            await self.account_repo.deactivate(account)
+            async with in_transaction():
+                # 1) refresh_tokens hard-delete (보안 우선)
+                await self.refresh_token_repo.revoke_all_for_account(account.id)
 
-            # 모델에 deleted_at 필드가 있다면 삭제 시점 기록
-            if hasattr(account, "deleted_at"):
-                from datetime import datetime
+                # 2) profiles cascade — SELF 포함 모두 (회원탈퇴는 SELF guard 우회)
+                for profile in profiles:
+                    await self.profile_service.cascade_delete_profile(profile)
 
-                account.deleted_at = datetime.now(config.TIMEZONE)
-                await account.save()
+                # 3) account 의 직접 chat_sessions soft + 그 messages soft
+                #    profile_id 만 가진 세션은 이미 위 cascade 에서 처리됨.
+                await self.chat_session_repo.bulk_soft_delete_by_account(account.id)
+                for session in account_sessions:
+                    await self.message_repo.bulk_soft_delete_by_session(session.id)
+
+                # 4) 계정 비활성화 + deleted_at
+                await self.account_repo.deactivate(account)
+                if hasattr(account, "deleted_at"):
+                    account.deleted_at = datetime.now(config.TIMEZONE)
+                    await account.save()
 
             return True
         except Exception as e:
-            # 에러 발생 시 로그를 남기거나 상세 에러를 던집니다.
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={"error": "delete_failed", "error_description": "회원 탈퇴 처리 중 오류가 발생했습니다."},

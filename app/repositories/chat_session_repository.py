@@ -4,8 +4,10 @@ This module provides data access layer for the chat_sessions table,
 handling conversation session management operations.
 """
 
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+from app.core import config
 from app.models.chat_sessions import ChatSession
 
 
@@ -110,8 +112,6 @@ class ChatSessionRepository:
         Returns:
             UPDATE 된 row 수 (정상이면 1, 세션 없으면 0).
         """
-        from datetime import UTC, datetime
-
         return await ChatSession.filter(id=session_id, deleted_at__isnull=True).update(
             summary=summary,
             summary_updated_at=datetime.now(UTC),
@@ -126,10 +126,37 @@ class ChatSessionRepository:
         Returns:
             ChatSession: Soft deleted session.
         """
-        from datetime import datetime
-
-        from app.core import config
-
         session.deleted_at = datetime.now(tz=config.TIMEZONE)
         await session.save()
         return session
+
+    async def bulk_soft_delete_by_account(self, account_id: UUID) -> int:
+        """계정 소유의 모든 active chat session 을 일괄 soft delete.
+
+        회원탈퇴 흐름의 일부. account_id 컬럼을 직접 갖는 세션만 처리하며,
+        profile_id 만 가진 세션은 별도로 ``bulk_soft_delete_by_profile`` 호출.
+
+        Args:
+            account_id: 대상 계정 UUID.
+
+        Returns:
+            새로 deleted_at 이 채워진 row 수.
+        """
+        return await ChatSession.filter(
+            account_id=account_id,
+            deleted_at__isnull=True,
+        ).update(deleted_at=datetime.now(tz=config.TIMEZONE))
+
+    async def bulk_soft_delete_by_profile(self, profile_id: UUID) -> int:
+        """프로필 단위 chat session 일괄 soft delete (Profile cascade 흐름).
+
+        Args:
+            profile_id: 대상 프로필 UUID.
+
+        Returns:
+            새로 deleted_at 이 채워진 row 수.
+        """
+        return await ChatSession.filter(
+            profile_id=profile_id,
+            deleted_at__isnull=True,
+        ).update(deleted_at=datetime.now(tz=config.TIMEZONE))

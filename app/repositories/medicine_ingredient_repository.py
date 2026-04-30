@@ -5,9 +5,12 @@
 """
 
 from collections.abc import Iterable
+import logging
 
 from app.models.medicine_info import MedicineInfo
 from app.models.medicine_ingredient import MedicineIngredient
+
+logger = logging.getLogger(__name__)
 
 
 class MedicineIngredientRepository:
@@ -27,6 +30,9 @@ class MedicineIngredientRepository:
     async def bulk_upsert(self, ingredients: list[dict]) -> dict[str, int]:
         """성분 row 일괄 UPSERT — (medicine_info_id, mtral_sn) 기준.
 
+        한 row 가 ValidationError / IntegrityError 등으로 실패해도 다음 row 진행.
+        실패 사유는 로그로만 남기고 카운트는 정상 처리분만 반영.
+
         Args:
             ingredients: medicine_info_id, mtral_sn, mtral_code, mtral_name,
                 main_ingr_eng, quantity, unit 키를 가진 dict list.
@@ -37,17 +43,25 @@ class MedicineIngredientRepository:
         inserted = 0
         updated = 0
         for row in ingredients:
-            _, created = await MedicineIngredient.update_or_create(
-                medicine_info_id=row["medicine_info_id"],
-                mtral_sn=row["mtral_sn"],
-                defaults={
-                    "mtral_code": row.get("mtral_code"),
-                    "mtral_name": row["mtral_name"],
-                    "main_ingr_eng": row.get("main_ingr_eng"),
-                    "quantity": row.get("quantity"),
-                    "unit": row.get("unit"),
-                },
-            )
+            try:
+                _, created = await MedicineIngredient.update_or_create(
+                    medicine_info_id=row["medicine_info_id"],
+                    mtral_sn=row["mtral_sn"],
+                    defaults={
+                        "mtral_code": row.get("mtral_code"),
+                        "mtral_name": row["mtral_name"],
+                        "main_ingr_eng": row.get("main_ingr_eng"),
+                        "quantity": row.get("quantity"),
+                        "unit": row.get("unit"),
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to upsert ingredient (medicine_info_id=%s, mtral_sn=%s)",
+                    row.get("medicine_info_id", "unknown"),
+                    row.get("mtral_sn", "unknown"),
+                )
+                continue
             if created:
                 inserted += 1
             else:
