@@ -103,16 +103,24 @@ class LifestyleGuideService:
 
     # ── 가이드 생성 (RQ producer + Phase B dedupe) ─────────────────────────
     # 흐름: 활성 약물 조회 -> snapshot 직렬화 -> input fingerprint 계산
-    #       -> 동일 fingerprint ready 가이드 존재 시 즉시 그것 반환 (LLM 호출 X)
-    #       -> 없으면 pending row INSERT + RQ enqueue -> pending guide 반환
-    async def enqueue_guide_generation(self, profile_id: UUID) -> LifestyleGuide:
+    #       -> (force=False 일 때) 동일 fingerprint ready 가이드 즉시 반환
+    #       -> 없거나 force=True 면 pending row INSERT + RQ enqueue
+    async def enqueue_guide_generation(
+        self,
+        profile_id: UUID,
+        *,
+        force: bool = False,
+    ) -> LifestyleGuide:
         """활성 약물을 snapshot 으로 묶어 pending guide + RQ task 를 등록.
 
         같은 입력 fingerprint 의 ready 가이드가 이미 있으면 그것을 그대로
         반환하여 LLM 호출 없이 즉시 동일 가이드를 응답한다 (Phase B dedupe).
+        ``force=True`` 면 dedupe 를 건너뛰고 항상 새 LLM 호출 — 사용자가
+        다른 추천을 명시적으로 요청한 경우.
 
         Args:
             profile_id: 가이드 받을 프로필 UUID.
+            force: True 면 dedupe 무시 + 새 LLM 호출 강제.
 
         Returns:
             ``LifestyleGuide``. 신규 enqueue 시 status='pending', dedupe hit
@@ -135,16 +143,18 @@ class LifestyleGuideService:
         snapshot = [_med_to_dict(m) for m in meds]
         fingerprint = _compute_input_fingerprint(snapshot)
 
-        # Phase B dedupe — 같은 입력의 ready 가이드가 있으면 그것을 즉시 반환
-        existing = await self.guide_repo.get_ready_by_fingerprint(profile_id, fingerprint)
-        if existing is not None:
-            logger.info(
-                "[GUIDE] dedupe hit guide_id=%s profile_id=%s fingerprint=%s",
-                existing.id,
-                profile_id,
-                fingerprint[:12],
-            )
-            return existing
+        # Phase B dedupe — 같은 입력의 ready 가이드가 있으면 즉시 반환.
+        # force=True 일 때는 무시하고 새 LLM 호출 (사용자가 "다른 추천" 요청).
+        if not force:
+            existing = await self.guide_repo.get_ready_by_fingerprint(profile_id, fingerprint)
+            if existing is not None:
+                logger.info(
+                    "[GUIDE] dedupe hit guide_id=%s profile_id=%s fingerprint=%s",
+                    existing.id,
+                    profile_id,
+                    fingerprint[:12],
+                )
+                return existing
 
         guide = await self.guide_repo.create_pending(
             profile_id=profile_id,
@@ -153,11 +163,12 @@ class LifestyleGuideService:
         )
         self._queue.enqueue(_GUIDE_JOB_REF, str(guide.id), str(profile_id))
         logger.info(
-            "[GUIDE] enqueued guide_id=%s profile_id=%s meds=%d fingerprint=%s",
+            "[GUIDE] enqueued guide_id=%s profile_id=%s meds=%d fingerprint=%s force=%s",
             guide.id,
             profile_id,
             len(meds),
             fingerprint[:12],
+            force,
         )
         return guide
 
@@ -232,10 +243,12 @@ class LifestyleGuideService:
         self,
         profile_id: UUID,
         account_id: UUID,
+        *,
+        force: bool = False,
     ) -> LifestyleGuide:
         """생성 요청 — ownership 검증 후 enqueue. pending guide 반환."""
         await self._verify_profile_ownership(profile_id, account_id)
-        return await self.enqueue_guide_generation(profile_id)
+        return await self.enqueue_guide_generation(profile_id, force=force)
 
     async def get_guide_with_owner_check(self, guide_id: UUID, account_id: UUID) -> LifestyleGuide:
         """Fetch one guide with ownership check.

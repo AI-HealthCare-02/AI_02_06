@@ -102,8 +102,9 @@ export function LifestyleGuideProvider({ children }) {
    *
    * 페이지는 promise 의 ready guide 를 받거나 throw 를 catch 하면 됨.
    */
-  const generateGuide = useCallback(async (profileId, signal) => {
-    const enqueueRes = await api.post(`/api/v1/lifestyle-guides/generate?profile_id=${profileId}`, null)
+  const generateGuide = useCallback(async (profileId, signal, { force = false } = {}) => {
+    const url = `/api/v1/lifestyle-guides/generate?profile_id=${profileId}${force ? '&force=true' : ''}`
+    const enqueueRes = await api.post(url, null)
     const pendingId = enqueueRes.data.id
 
     // Phase B dedupe hit — BE 가 같은 입력 fingerprint 의 ready 가이드를
