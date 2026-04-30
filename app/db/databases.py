@@ -18,6 +18,7 @@ TORTOISE_APP_MODELS: list[str] = [
     "app.models.accounts",
     "app.models.refresh_tokens",
     "app.models.profiles",
+    "app.models.prescription_group",
     "app.models.medication",
     "app.models.medicine_info",
     "app.models.medicine_chunk",

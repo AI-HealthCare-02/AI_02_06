@@ -13,13 +13,24 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Any, Self
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 _HELPER = "app.services.medication_service.check_and_alert_on_medication_save"
+_TRANSACTION = "app.services.medication_service.in_transaction"
+
+
+class _NoopTransaction:
+    """Tortoise init 없이 ``async with in_transaction()`` 을 통과시키는 더미."""
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
 
 
 def _build_medication() -> Any:
@@ -28,6 +39,12 @@ def _build_medication() -> Any:
     med.profile_id = uuid4()
     med.medicine_name = "마데카솔케어연고"
     return med
+
+
+def _build_group() -> Any:
+    group = MagicMock()
+    group.id = uuid4()
+    return group
 
 
 def _build_create_dto() -> Any:
@@ -54,8 +71,14 @@ async def test_f3_1_create_medication_invokes_helper_once() -> None:
     service = MedicationService()
     medication = _build_medication()
     service.repository = MagicMock(create=AsyncMock(return_value=medication))
+    service.prescription_group_repository = MagicMock(
+        create=AsyncMock(return_value=_build_group()),
+    )
 
-    with patch(_HELPER, new=AsyncMock(return_value=None)) as helper:
+    with (
+        patch(_HELPER, new=AsyncMock(return_value=None)) as helper,
+        patch(_TRANSACTION, return_value=_NoopTransaction()),
+    ):
         result = await service.create_medication(profile_id=uuid4(), data=_build_create_dto())
 
     assert result is medication
@@ -73,12 +96,18 @@ async def test_f3_2_helper_exception_does_not_break_create() -> None:
     service = MedicationService()
     medication = _build_medication()
     service.repository = MagicMock(create=AsyncMock(return_value=medication))
+    service.prescription_group_repository = MagicMock(
+        create=AsyncMock(return_value=_build_group()),
+    )
 
     async def boom(*_args: Any, **_kwargs: Any) -> Any:
         msg = "boom"
         raise RuntimeError(msg)
 
-    with patch(_HELPER, new=AsyncMock(side_effect=boom)):
+    with (
+        patch(_HELPER, new=AsyncMock(side_effect=boom)),
+        patch(_TRANSACTION, return_value=_NoopTransaction()),
+    ):
         result = await service.create_medication(profile_id=uuid4(), data=_build_create_dto())
 
     # 예외가 위로 새지 않고 medication 객체가 그대로 반환됨

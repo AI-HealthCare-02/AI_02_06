@@ -37,6 +37,15 @@ class Medication(models.Model):
     # Connected to profiles table
     profile = fields.ForeignKeyField("models.Profile", related_name="medications")
 
+    # 처방전 그룹 — OCR confirm / 수동 등록 시점에 set. 마이그레이션 후 NOT NULL
+    # 로 강제하지 않는 이유: 외부 이관 / 임시 row 등의 예외 케이스 대비.
+    prescription_group = fields.ForeignKeyField(
+        "models.PrescriptionGroup",
+        related_name="medications",
+        null=True,
+        description="소속 처방전 그룹 (한 번의 진료/처방 단위)",
+    )
+
     medicine_name = fields.CharField(max_length=128, description="약품명")
     department = fields.CharField(max_length=64, null=True, description="처방 진료과 (예: 내과)")
     category = fields.CharField(max_length=64, null=True, description="약품 분류 (예: 해열진통제)")

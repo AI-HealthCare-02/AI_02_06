@@ -68,6 +68,8 @@ function OcrResultContent() {
   const [isLoading, setIsLoading] = useState(true)
   const [meds, setMeds] = useState([])
   const [prescriptionDate, setPrescriptionDate] = useState(() => new Date().toISOString().split('T')[0])
+  const [prescriptionDepartment, setPrescriptionDepartment] = useState('')
+  const [prescriptionHospital, setPrescriptionHospital] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
@@ -103,6 +105,9 @@ function OcrResultContent() {
           if (status === 'ready') {
             setMeds(medicines || [])
             setPrescriptionDate(medicines?.[0]?.dispensed_date || new Date().toISOString().split('T')[0])
+            // OCR 응답이 진료과를 추출했으면 첫 비어있지 않은 값을 처방전 단위로 채택
+            const firstDept = medicines?.find?.((m) => m?.department)?.department
+            if (firstDept) setPrescriptionDepartment(firstDept)
             setIsLoading(false)
             return
           }
@@ -205,7 +210,8 @@ function OcrResultContent() {
         total_intake_days: toIntOrNull(med.total_intake_days),
         intake_instruction: toStrOrNull(med.intake_instruction),
         category: toStrOrNull(med.category),
-        department: toStrOrNull(med.department),
+        // 처방전 단위 진료과 — 사용자 입력값을 모든 약품에 일괄 적용 (없으면 NULL = 미상)
+        department: toStrOrNull(prescriptionDepartment),
         dispensed_date: prescriptionDate || null,
       }))
       if (draftId === 'manual') {
@@ -246,9 +252,12 @@ function OcrResultContent() {
         }
       } else {
         // OCR 흐름: confirm — selectedProfileId 미전달 시 BE 가 SELF default
+        // hospital_name / department 는 처방전 그룹 메타로 한 번만 전달 (그룹 단위 적용)
         await api.post('/api/v1/ocr/confirm', {
           draft_id: draftId,
           confirmed_medicines: confirmedMedicines,
+          hospital_name: prescriptionHospital.trim() || null,
+          department: prescriptionDepartment.trim() || null,
         }, {
           timeout: 60000,
           params: selectedProfileId ? { profile_id: selectedProfileId } : undefined,
@@ -311,6 +320,38 @@ function OcrResultContent() {
             value={prescriptionDate}
             onChange={(e) => setPrescriptionDate(e.target.value)}
             className="text-base font-bold text-gray-700 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50"
+          />
+        </div>
+
+        {/* 병원 (처방전 전체 공통) */}
+        <div className="bg-white rounded-2xl p-5 border border-gray-200 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-bold text-gray-900">병원</p>
+            <p className="text-xs text-gray-400 mt-0.5">비워두면 &lsquo;미상&rsquo; 으로 등록됩니다 (나중에 수정 가능)</p>
+          </div>
+          <input
+            type="text"
+            value={prescriptionHospital}
+            onChange={(e) => setPrescriptionHospital(e.target.value)}
+            placeholder="예: 서울내과의원"
+            maxLength={128}
+            className="text-base font-bold text-gray-700 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50 w-56"
+          />
+        </div>
+
+        {/* 진료과 (처방전 전체 공통) — OCR 미인식 시 미상 가능, 사용자가 직접 입력 */}
+        <div className="bg-white rounded-2xl p-5 border border-gray-200 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-bold text-gray-900">진료과</p>
+            <p className="text-xs text-gray-400 mt-0.5">비워두면 &lsquo;미상&rsquo; 으로 등록됩니다 (나중에 수정 가능)</p>
+          </div>
+          <input
+            type="text"
+            value={prescriptionDepartment}
+            onChange={(e) => setPrescriptionDepartment(e.target.value)}
+            placeholder="예: 내과"
+            maxLength={64}
+            className="text-base font-bold text-gray-700 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50 w-40"
           />
         </div>
 
