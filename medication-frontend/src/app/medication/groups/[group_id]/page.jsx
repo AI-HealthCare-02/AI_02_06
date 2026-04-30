@@ -2,8 +2,8 @@
 
 // /medication/groups/[group_id] — 처방전 그룹 drill-down
 //
-// 사용자가 /medication 의 처방전 카드를 누르면 본 페이지로. 그룹 메타 + 약 list 표시.
-// 약품 카드를 누르면 기존 /medication/[id] 약품 상세 페이지로 이동.
+// 모든 fetch / mutation 은 PrescriptionGroupContext 의 hook 으로 위임.
+// 페이지는 화면 정책 (편집 모드 / confirm / 토스트) 만 책임.
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-import api, { showError } from '@/lib/api'
+import { showError } from '@/lib/api'
 import BottomNav from '@/components/layout/BottomNav'
 import { usePrescriptionGroup } from '@/contexts/PrescriptionGroupContext'
 
@@ -44,8 +44,6 @@ function EditableMetaRow({
   isSaving,
   maxLength,
 }) {
-  // 편집 진입 후 onBlur 가 onSave 와 cancel 버튼 클릭 둘 다 잡아 race 가 생기지
-  // 않도록 mousedown 으로 cancel 처리. 다만 cancel 버튼이 사라졌으니 단순.
   return (
     <div className="flex items-center gap-2 text-xs text-gray-700">
       {icon}
@@ -65,8 +63,6 @@ function EditableMetaRow({
             }
           }}
           onBlur={() => {
-            // blur 로도 저장 — 사용자가 다른 곳 클릭 시 자동 commit.
-            // 단, 저장 진행 중이면 race 방지.
             if (!isSaving) onSave()
           }}
           placeholder={placeholder}
@@ -132,14 +128,19 @@ export default function PrescriptionGroupDetailPage() {
   const router = useRouter()
   const params = useParams()
   const groupId = params?.group_id
-  // /medication 카드 list 의 stale 방지 — drill-down 에서 mutation 후 호출.
-  const { refetchGroups } = usePrescriptionGroup()
-  const [group, setGroup] = useState(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const {
+    groupsById,
+    fetchGroupDetail,
+    updateGroup,
+    markGroupCompleted,
+    deleteGroup,
+  } = usePrescriptionGroup()
 
-  // 편집 모드 + draft. 진료과/병원은 free-text. NULL 도 허용 (= 미상).
-  const [editingField, setEditingField] = useState(null) // 'department' | 'hospital_name' | null
+  // detail 은 Context cache 로부터 derive — fetch 가 끝나면 cache 가 채워지며 자동 렌더.
+  const group = groupId ? groupsById[groupId] || null : null
+  const [isLoading, setIsLoading] = useState(!group)
+  const [error, setError] = useState(null)
+  const [editingField, setEditingField] = useState(null)
   const [draft, setDraft] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [isCompleting, setIsCompleting] = useState(false)
@@ -148,24 +149,20 @@ export default function PrescriptionGroupDetailPage() {
   useEffect(() => {
     if (!groupId) return
     let cancelled = false
-    ;(async () => {
-      setIsLoading(true)
-      setError(null)
-      try {
-        const { data } = await api.get(`/api/v1/prescription-groups/${groupId}`)
-        if (!cancelled) setGroup(data)
-      } catch (err) {
-        if (!cancelled) {
-          setError(err?.response?.status === 404 ? '처방전을 찾을 수 없어요.' : '처방전을 불러오지 못했어요.')
-        }
-      } finally {
+    setIsLoading(true)
+    setError(null)
+    fetchGroupDetail(groupId, { forceRefresh: true })
+      .catch((err) => {
+        if (cancelled) return
+        setError(err?.response?.status === 404 ? '처방전을 찾을 수 없어요.' : '처방전을 불러오지 못했어요.')
+      })
+      .finally(() => {
         if (!cancelled) setIsLoading(false)
-      }
-    })()
+      })
     return () => {
       cancelled = true
     }
-  }, [groupId])
+  }, [groupId, fetchGroupDetail])
 
   const startEdit = (field) => {
     setDraft(group?.[field] || '')
@@ -179,21 +176,15 @@ export default function PrescriptionGroupDetailPage() {
     if (!groupId || !editingField) return
     const next = draft.trim() || null
     const currentField = editingField
-    // 변경 없음 — silent close
     if ((group?.[currentField] || null) === next) {
       setEditingField(null)
       return
     }
     setIsSaving(true)
     try {
-      const { data } = await api.patch(`/api/v1/prescription-groups/${groupId}`, {
-        [currentField]: next,
-      })
-      setGroup(data)
+      await updateGroup(groupId, { [currentField]: next })
       setEditingField(null)
       toast.success(currentField === 'hospital_name' ? '병원을 수정했어요.' : '진료과를 수정했어요.')
-      // /medication 카드 list 의 stale 즉시 해소
-      refetchGroups()
     } catch {
       showError('수정에 실패했어요.')
     } finally {
@@ -206,10 +197,8 @@ export default function PrescriptionGroupDetailPage() {
     if (!confirm('이 처방전을 복용 완료로 처리할까요? 그룹 안 모든 약이 비활성으로 변경됩니다.')) return
     setIsCompleting(true)
     try {
-      const { data } = await api.patch(`/api/v1/prescription-groups/${groupId}/complete`)
-      setGroup(data)
+      await markGroupCompleted(groupId)
       toast.success('복용 완료 처리됐어요.')
-      refetchGroups()
     } catch {
       showError('복용 완료 처리에 실패했어요.')
     } finally {
@@ -222,9 +211,8 @@ export default function PrescriptionGroupDetailPage() {
     if (!confirm('이 처방전을 삭제할까요? 안 약품과 관련 가이드도 함께 정리됩니다.')) return
     setIsDeleting(true)
     try {
-      await api.delete(`/api/v1/prescription-groups/${groupId}`)
+      await deleteGroup(groupId)
       toast.success('처방전을 삭제했어요.')
-      refetchGroups()
       router.push('/medication')
     } catch {
       showError('삭제에 실패했어요.')
@@ -276,7 +264,7 @@ export default function PrescriptionGroupDetailPage() {
       </header>
 
       <div className="max-w-4xl mx-auto px-4 py-4 space-y-4">
-        {isLoading ? (
+        {isLoading && !group ? (
           <div className="bg-white rounded-2xl border border-gray-100 p-4 animate-pulse space-y-3">
             <div className="h-4 bg-gray-200 rounded w-32" />
             <div className="h-3 bg-gray-200 rounded w-24" />
@@ -285,7 +273,6 @@ export default function PrescriptionGroupDetailPage() {
           <p className="text-sm text-red-500 text-center py-10">{error}</p>
         ) : group ? (
           <>
-            {/* 그룹 메타 카드 — 병원 / 진료과 inline 편집 가능 */}
             <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-2">
               <div className="flex items-center gap-2 text-sm font-bold text-gray-900">
                 <Calendar size={16} className="text-gray-400" />
@@ -327,7 +314,6 @@ export default function PrescriptionGroupDetailPage() {
               </p>
             </div>
 
-            {/* 약 list */}
             {(group.medications || []).length === 0 ? (
               <p className="text-sm text-gray-400 text-center py-8">이 처방전엔 등록된 약이 없어요.</p>
             ) : (
