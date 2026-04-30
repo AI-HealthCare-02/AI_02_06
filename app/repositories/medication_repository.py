@@ -65,11 +65,17 @@ class MedicationRepository:
     async def get_active_by_profile(self, profile_id: UUID) -> list[Medication]:
         """Get currently active medications for a profile.
 
+        Returned order is stable (medicine_name -> id tiebreak) so downstream
+        consumers (특히 lifestyle-guide LLM 프롬프트) 가 같은 약 set 에 대해
+        매번 같은 입력 텍스트를 받는다. ORDER BY 없는 쿼리는 PostgreSQL 에서
+        결과 순서가 undefined 라 동일 입력에 대한 LLM 결정성을 깨뜨린다.
+
         Args:
             profile_id: Profile UUID.
 
         Returns:
-            list[Medication]: List of active medications.
+            list[Medication]: List of active medications, ordered by
+                medicine_name then id.
         """
         today = datetime.now(tz=config.TIMEZONE).date()
         return (
@@ -80,6 +86,7 @@ class MedicationRepository:
                 deleted_at__isnull=True,
             )
             .filter(Q(end_date__isnull=True) | Q(end_date__gte=today))
+            .order_by("medicine_name", "id")
             .all()
         )
 
