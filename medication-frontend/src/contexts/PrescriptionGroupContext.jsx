@@ -11,7 +11,7 @@
  * - mutation (update/markCompleted/delete) 은 응답으로 cache + list 직접 갱신.
  */
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
 import api from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
@@ -36,6 +36,13 @@ export function PrescriptionGroupProvider({ children }) {
   // _groupsRaw: BE 응답 그대로. 외부엔 statusFilter 필터된 ``groups`` 만 노출.
   const [_groupsRaw, setGroupsRaw] = useState([])
   const [groupsById, setGroupsById] = useState({})
+  // fetchGroupDetail 이 stable callback 이 되도록 cache 는 ref 로 접근.
+  // (deps 에 groupsById 두면 cache 갱신마다 callback reference 가 변해
+  //  소비 페이지의 useEffect 가 무한 재실행 → 무한 GET 호출.)
+  const groupsByIdRef = useRef(groupsById)
+  useEffect(() => {
+    groupsByIdRef.current = groupsById
+  }, [groupsById])
   const [isLoading, setIsLoading] = useState(false)
   const [sort, setSort] = useState(PRESCRIPTION_SORT.DATE_DESC)
   const [search, setSearch] = useState('')
@@ -91,23 +98,21 @@ export function PrescriptionGroupProvider({ children }) {
   // ── detail fetch / cache ────────────────────────────────────────
   // drill-down 페이지가 자체 useState 로 fetch 하지 않도록 cache 보유.
   // 같은 id 를 두 번째로 열 때는 cache hit + 백그라운드 refresh.
-  const fetchGroupDetail = useCallback(
-    async (groupId, { forceRefresh = false } = {}) => {
-      if (!groupId) return null
-      if (!forceRefresh && groupsById[groupId]) {
-        // 백그라운드 refresh (응답 도달 시 cache 갱신)
-        api
-          .get(`/api/v1/prescription-groups/${groupId}`)
-          .then(({ data }) => setGroupsById((prev) => ({ ...prev, [groupId]: data })))
-          .catch(() => undefined)
-        return groupsById[groupId]
-      }
-      const { data } = await api.get(`/api/v1/prescription-groups/${groupId}`)
-      setGroupsById((prev) => ({ ...prev, [groupId]: data }))
-      return data
-    },
-    [groupsById],
-  )
+  const fetchGroupDetail = useCallback(async (groupId, { forceRefresh = false } = {}) => {
+    if (!groupId) return null
+    const cached = groupsByIdRef.current[groupId]
+    if (!forceRefresh && cached) {
+      // 백그라운드 refresh — cache 즉시 반환 + 응답 도달 시 store 갱신.
+      api
+        .get(`/api/v1/prescription-groups/${groupId}`)
+        .then(({ data }) => setGroupsById((prev) => ({ ...prev, [groupId]: data })))
+        .catch(() => undefined)
+      return cached
+    }
+    const { data } = await api.get(`/api/v1/prescription-groups/${groupId}`)
+    setGroupsById((prev) => ({ ...prev, [groupId]: data }))
+    return data
+  }, [])
 
   // ── mutation (응답 기반) ────────────────────────────────────────
   // 카드 list 의 stale 을 막기 위해 응답으로 list row 도 동기 갱신.
