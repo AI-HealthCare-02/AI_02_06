@@ -15,7 +15,6 @@ import {
   Pill,
   Trash2,
   Pencil,
-  Check,
   CircleCheck,
   Hospital,
 } from 'lucide-react'
@@ -23,6 +22,7 @@ import toast from 'react-hot-toast'
 
 import api, { showError } from '@/lib/api'
 import BottomNav from '@/components/layout/BottomNav'
+import { usePrescriptionGroup } from '@/contexts/PrescriptionGroupContext'
 
 function formatDate(isoStr) {
   if (!isoStr) return '날짜 미상'
@@ -44,45 +44,43 @@ function EditableMetaRow({
   isSaving,
   maxLength,
 }) {
+  // 편집 진입 후 onBlur 가 onSave 와 cancel 버튼 클릭 둘 다 잡아 race 가 생기지
+  // 않도록 mousedown 으로 cancel 처리. 다만 cancel 버튼이 사라졌으니 단순.
   return (
     <div className="flex items-center gap-2 text-xs text-gray-700">
       {icon}
       {isEditing ? (
-        <>
-          <input
-            type="text"
-            value={draft}
-            onChange={(e) => onDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') onSave()
-              if (e.key === 'Escape') onCancel()
-            }}
-            placeholder={placeholder}
-            maxLength={maxLength}
-            className="flex-1 bg-gray-50 border border-gray-200 rounded px-2 py-1 outline-none focus:border-gray-400"
-            autoFocus
-          />
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={isSaving}
-            className="p-1 rounded hover:bg-green-50 text-green-600 cursor-pointer"
-            aria-label="저장"
-          >
-            <Check size={14} />
-          </button>
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={isSaving}
-            className="text-[11px] text-gray-400 px-1 cursor-pointer"
-          >
-            취소
-          </button>
-        </>
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => onDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              onSave()
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              onCancel()
+            }
+          }}
+          onBlur={() => {
+            // blur 로도 저장 — 사용자가 다른 곳 클릭 시 자동 commit.
+            // 단, 저장 진행 중이면 race 방지.
+            if (!isSaving) onSave()
+          }}
+          placeholder={placeholder}
+          maxLength={maxLength}
+          className="flex-1 bg-gray-50 border border-gray-200 rounded px-2 py-1 outline-none focus:border-gray-400"
+          autoFocus
+        />
       ) : (
         <>
-          <span className={value ? 'font-bold' : 'text-gray-400'}>
+          <span
+            className={`${value ? 'font-bold' : 'text-gray-400'} cursor-text select-none`}
+            onDoubleClick={onStart}
+            title="더블클릭하거나 연필 아이콘으로 수정"
+          >
             {value || emptyLabel}
           </span>
           <button
@@ -134,6 +132,8 @@ export default function PrescriptionGroupDetailPage() {
   const router = useRouter()
   const params = useParams()
   const groupId = params?.group_id
+  // /medication 카드 list 의 stale 방지 — drill-down 에서 mutation 후 호출.
+  const { refetchGroups } = usePrescriptionGroup()
   const [group, setGroup] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -177,15 +177,23 @@ export default function PrescriptionGroupDetailPage() {
   }
   const saveEdit = async () => {
     if (!groupId || !editingField) return
+    const next = draft.trim() || null
+    const currentField = editingField
+    // 변경 없음 — silent close
+    if ((group?.[currentField] || null) === next) {
+      setEditingField(null)
+      return
+    }
     setIsSaving(true)
     try {
-      const next = draft.trim() || null
       const { data } = await api.patch(`/api/v1/prescription-groups/${groupId}`, {
-        [editingField]: next,
+        [currentField]: next,
       })
       setGroup(data)
       setEditingField(null)
-      toast.success(editingField === 'hospital_name' ? '병원을 수정했어요.' : '진료과를 수정했어요.')
+      toast.success(currentField === 'hospital_name' ? '병원을 수정했어요.' : '진료과를 수정했어요.')
+      // /medication 카드 list 의 stale 즉시 해소
+      refetchGroups()
     } catch {
       showError('수정에 실패했어요.')
     } finally {
@@ -201,6 +209,7 @@ export default function PrescriptionGroupDetailPage() {
       const { data } = await api.patch(`/api/v1/prescription-groups/${groupId}/complete`)
       setGroup(data)
       toast.success('복용 완료 처리됐어요.')
+      refetchGroups()
     } catch {
       showError('복용 완료 처리에 실패했어요.')
     } finally {
@@ -215,6 +224,7 @@ export default function PrescriptionGroupDetailPage() {
     try {
       await api.delete(`/api/v1/prescription-groups/${groupId}`)
       toast.success('처방전을 삭제했어요.')
+      refetchGroups()
       router.push('/medication')
     } catch {
       showError('삭제에 실패했어요.')
