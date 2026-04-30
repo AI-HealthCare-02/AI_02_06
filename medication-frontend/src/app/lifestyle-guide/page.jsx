@@ -88,6 +88,17 @@ function formatFullDate(isoStr) {
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`
 }
 
+// formatFullDateTime: 과거 가이드 안내/삭제 confirm 등에 표시 — 시간까지 (예: "2026.04.30 18:23")
+function formatFullDateTime(isoStr) {
+  const d = new Date(isoStr)
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const HH = String(d.getHours()).padStart(2, '0')
+  const MM = String(d.getMinutes()).padStart(2, '0')
+  return `${yyyy}.${mm}.${dd} ${HH}:${MM}`
+}
+
 // ── 증상 로그 폼 컴포넌트 ──────────────────────────────────────────────────────
 // '증상 트래킹' 탭에서만 렌더링되는 일일 증상 기록 입력 폼
 // - POST /api/v1/daily-logs 로 {profile_id, log_date, symptoms[], note} 전송
@@ -299,7 +310,11 @@ export default function LifestyleGuidePage() {
   const { checkingId, checkToday } = useChallengeCheck()
 
   const [isGenerating, setIsGenerating] = useState(false)
-  const [selectedGuide, setSelectedGuide] = useState(null)   // 현재 날짜 칩으로 선택된 가이드
+  const [selectedGuide, setSelectedGuide] = useState(null)   // 현재 본문에 표시되는 가이드
+  // 사용자가 칩으로 명시 선택한 가이드 id — set 되어 있으면 sticky.
+  // null 일 때만 자동으로 latestGuide 를 따라간다 (auto-follow).
+  // 새 가이드 생성 또는 picked 가이드 삭제 시 null 로 리셋.
+  const [userPickedGuideId, setUserPickedGuideId] = useState(null)
   const [activeTab, setActiveTab] = useState('interaction')  // 현재 선택된 탭 키
 
 
@@ -310,37 +325,48 @@ export default function LifestyleGuidePage() {
   const guideChallenges = selectedGuide ? challengesByGuide(selectedGuide.id) : []
   const isLoadingChallenges = false  // store 에서 derived 라 별도 로딩 없음
 
-  // 선택된 가이드가 최신(guides[0])이 아닌 경우 과거 열람 모드
-  // → 과거 열람 모드에서는 챌린지 시작/체크 버튼이 모두 비활성화됨
-  // selectedGuide 가 null 인 상태 (generation 중 transient 등) 에서 배너 렌더되어
-  // null.created_at 접근하는 것을 방지하려 selectedGuide 존재 여부도 명시 가드.
-  const isViewingHistory = !!selectedGuide && guides.length > 0 && selectedGuide.id !== guides[0]?.id
+  // 과거 열람 = ready 가이드 중 가장 최신과 selectedGuide 가 다를 때.
+  // placeholder (status='pending') 는 비교에 끼지 않는다 — 그래야 "+ 새 가이드"
+  // 직후 placeholder 가 guides[0] 로 prepend 되어도 isViewingHistory 가
+  // 갑자기 true 로 바뀌지 않는다 (사용자 우려).
+  const firstReadyGuide = guides.find(g => g.status === 'ready') || null
+  const isViewingHistory =
+    !!selectedGuide && !!firstReadyGuide && selectedGuide.id !== firstReadyGuide.id
 
   // 가이드 store 변동 시 selectedGuide 자동 보정.
   //
-  // 단순 id 비교만으로는 부족 — Context 의 generateGuide 가 SSE ready 시점에
-  // store 의 placeholder 를 같은 id 로 in-place 교체하므로 (setGuides(prev.map))
-  // page-local selectedGuide 객체가 stale placeholder 를 가리키고 있을 수 있다.
-  // 따라서 store 의 fresh 객체로 reference 도 동기화한다.
+  // 정책:
+  //  1) userPickedGuideId 가 set 되어 있으면 그 가이드를 sticky 로 유지
+  //     (단, 그 가이드가 사라졌으면 auto-follow 로 회귀)
+  //  2) auto-follow: 항상 latestGuide (= 가장 최근 ready) 를 selectedGuide 로
+  //     → "+ 새 가이드" → ready 도달 시 자동으로 새 가이드로 본문 전환
+  //  3) latestGuide 가 없으면 guides 안의 ready 가이드 중 첫 번째
   useEffect(() => {
-    if (selectedGuide) {
-      const fresh = guides.find(g => g.id === selectedGuide.id)
-      if (fresh) {
-        if (fresh !== selectedGuide) setSelectedGuide(fresh)
+    if (userPickedGuideId) {
+      const picked = guides.find(g => g.id === userPickedGuideId && g.status === 'ready')
+      if (picked) {
+        if (picked !== selectedGuide) setSelectedGuide(picked)
         return
       }
+      // picked 가이드가 사라짐 (삭제됨) → auto-follow 로 회귀
+      setUserPickedGuideId(null)
+      return
     }
-    // pending placeholder 는 selectedGuide 로 잡지 않는다 — 생성 중에도
-    // 직전 ready 가이드를 그대로 보이도록 유지하기 위함.
-    if (latestGuide) {
-      setSelectedGuide(latestGuide)
-    } else if (guides.length > 0) {
+
+    if (latestGuide && latestGuide.status === 'ready') {
+      if (selectedGuide?.id !== latestGuide.id || selectedGuide !== latestGuide) {
+        setSelectedGuide(latestGuide)
+      }
+      return
+    }
+
+    if (guides.length > 0) {
       const firstReady = guides.find(g => g.status === 'ready')
       setSelectedGuide(firstReady || null)
     } else {
       setSelectedGuide(null)
     }
-  }, [latestGuide, guides, selectedGuide])
+  }, [latestGuide, guides, selectedGuide, userPickedGuideId])
 
   // ── 현재 탭에 해당하는 챌린지 1개 ──
   // 하단 배너에 표시할 챌린지: 현재 탭의 category와 일치하는 것 중 DELETED 제외
@@ -361,10 +387,14 @@ export default function LifestyleGuidePage() {
     }
     if (isGenerating) return
     setIsGenerating(true)
+    // 새 가이드 생성 시 auto-follow 모드로 회귀 — ready 도달 시 자동 본문 전환
+    setUserPickedGuideId(null)
     const abortController = new AbortController()
     try {
-      // Context 의 generateGuide 가 placeholder 삽입 + SSE update + ready 자동 처리
-      await generateGuide(profileId, abortController.signal)
+      // Context 의 generateGuide 가 placeholder 삽입 + SSE update + ready 자동 처리.
+      // 사용자가 생성 중 placeholder 를 직접 삭제한 경우 result === null 로 silent.
+      const result = await generateGuide(profileId, abortController.signal)
+      if (!result) return
       toast.success('새 가이드가 생성되었습니다!')
     } catch (err) {
       // BE 409 + detail.code=NO_ACTIVE_MEDICATIONS → 토스트 + 처방전 등록 페이지 자동 이동
@@ -382,8 +412,10 @@ export default function LifestyleGuidePage() {
   }
 
   const handleDeleteGuide = async (guide) => {
-    if (!confirm(`${formatFullDate(guide.created_at)} 가이드를 삭제하시겠습니까?`)) return
+    if (!confirm(`${formatFullDateTime(guide.created_at)} 가이드를 삭제하시겠습니까?`)) return
     try {
+      // sticky picked 가 삭제 대상이면 auto-follow 로 회귀
+      if (userPickedGuideId === guide.id) setUserPickedGuideId(null)
       await deleteGuide(guide.id)
       toast.success('가이드가 삭제되었습니다.')
     } catch {
@@ -537,13 +569,13 @@ export default function LifestyleGuidePage() {
                   }`}
                 >
                   <button
-                    onClick={() => guide.status === 'ready' && setSelectedGuide(guide)}
+                    onClick={() => guide.status === 'ready' && setUserPickedGuideId(guide.id)}
                     disabled={guide.status !== 'ready'}
                     className={guide.status === 'ready' ? 'cursor-pointer' : 'cursor-wait'}
                   >
                     {guide.status !== 'ready'
                       ? '생성중...'
-                      : idx === 0
+                      : firstReadyGuide?.id === guide.id
                         ? `${formatDate(guide.created_at)} 최신`
                         : formatDate(guide.created_at)}
                   </button>
@@ -562,12 +594,14 @@ export default function LifestyleGuidePage() {
           </div>
         )}
 
-        {/* ── 과거 가이드 열람 배너 ── */}
+        {/* ── 과거 가이드 열람 배너 ──
+            처방일이 아니라 "가이드 생성 시점" 기준임을 명확히 함.
+            이후 처방 / 설문 변경이 있을 수 있어 새 가이드 생성을 권장.   */}
         {isViewingHistory && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 flex items-center gap-2">
             <span className="text-amber-500 text-sm">⚠️</span>
             <p className="text-xs text-amber-700 font-bold">
-              이 가이드는 {formatFullDate(selectedGuide.created_at)} 기준 과거 처방 기준입니다
+              {formatFullDateTime(selectedGuide.created_at)} 시점에 만든 가이드예요. 이후 변경사항은 반영되지 않아요.
             </p>
           </div>
         )}
