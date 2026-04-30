@@ -177,15 +177,16 @@ class ProfileService:
     #       -> intake_log/lifestyle_guide/ocr_draft/daily_symptom_log hard
     # 단일 트랜잭션. 회원탈퇴(account_service) 도 이 helper 를 호출.
 
-    async def _cascade_delete_profile(self, profile: Profile) -> None:
-        """Profile soft-delete 시 모든 자식 row 도 함께 정리.
+    async def cascade_delete_profile(self, profile: Profile) -> None:
+        """Profile soft-delete 시 모든 자식 row 도 함께 정리 (service 간 호출 허용).
 
         - deleted_at 보유 자식: medication / challenge / chat_session / messages → soft
         - deleted_at 미보유 자식: intake_log / daily_symptom_log / lifestyle_guide
           / ocr_draft → hard
 
         SELF guard 는 호출자(public delete_*)가 책임. 본 helper 는 가드 통과
-        가정. account 회원탈퇴 흐름은 SELF 도 통과시켜야 하므로 본 helper 직접 호출.
+        가정 — 회원탈뒤(account_service)는 SELF 도 통과시켜야 하므로 본 메서드를
+        직접 호출한다 (router 에서는 호출 금지).
 
         Args:
             profile: 삭제 대상 Profile 인스턴스.
@@ -213,7 +214,7 @@ class ProfileService:
             profile_id: Profile UUID to delete.
         """
         profile = await self.get_profile(profile_id)
-        await self._cascade_delete_profile(profile)
+        await self.cascade_delete_profile(profile)
 
     async def delete_profile_with_owner_check(self, profile_id: UUID, account_id: UUID) -> None:
         """Delete profile with ownership verification — 자식 cascade.
@@ -233,4 +234,4 @@ class ProfileService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot delete SELF profile. Use account withdrawal instead.",
             )
-        await self._cascade_delete_profile(profile)
+        await self.cascade_delete_profile(profile)
