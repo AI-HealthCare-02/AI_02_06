@@ -45,6 +45,18 @@
 server_log.txt
 
 # =========================================
+# 3-1. Secret / 인증 파일 (안전망)
+# =========================================
+**/*.pem
+**/*.key
+**/id_rsa
+**/id_rsa.*
+**/credentials
+**/.docker/
+**/.aws/
+**/.ssh/
+
+# =========================================
 # 4. Git 및 Docker 설정
 # =========================================
 .git/
@@ -59,6 +71,7 @@ server_log.txt
 README.md
 **/README.md
 docs/
+docs-private/
 csv/
 nginx/
 **/tests/
