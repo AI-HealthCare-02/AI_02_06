@@ -11,6 +11,14 @@ import { useChallenge } from '@/contexts/ChallengeContext'
 import { useOcrDraft, useOcrEntryNavigator } from '@/contexts/OcrDraftContext'
 import TodaySchedule from '@/components/medication/TodaySchedule'
 
+// ── 히어로 배경 이미지 슬라이드쇼 ────────────────────────────────────────────
+// 흐름: 3초 타이머 → 다음 이미지 인덱스로 순환 → CSS transition으로 페이드
+const HERO_BG_IMAGES = [
+  '/hero_bg_1.png',
+  '/hero_bg_2.png',
+  '/hero_bg_3.png',
+]
+
 // 활성 OCR draft 카드 — main 우측하단 floating (챗봇 아이콘 위)
 // 사용자가 X 로 카드 전체를 숨길 수 있고 (새로고침 시 다시 표시),
 // 각 항목 좌측의 휴지통으로 개별 draft 를 폐기할 수도 있다.
@@ -143,6 +151,17 @@ function MainPageContent() {
   const userName = selectedProfile?.name?.split('(')[0] || '사용자'
   const isInitialLoad = useRef(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [currentBgIndex, setCurrentBgIndex] = useState(0)
+  const bgTimerRef = useRef(null)
+
+  // ── 히어로 배경 이미지 슬라이드쇼 ──────────────────────────────────────────
+  // 흐름: mount → 3초 타이머 → 인덱스 순환 → 이전 타이머 클린업
+  useEffect(() => {
+    bgTimerRef.current = setTimeout(() => {
+      setCurrentBgIndex((prev) => (prev + 1) % HERO_BG_IMAGES.length)
+    }, 3000)
+    return () => clearTimeout(bgTimerRef.current)
+  }, [currentBgIndex])
 
   // 설문 팝업 쿼리 파라미터 감지
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -214,19 +233,45 @@ function MainPageContent() {
       {showSurvey && <SurveyModal onClose={() => setShowSurvey(false)} userName={userName} profileId={selectedProfileId} />}
       {showChat && <ChatModal onClose={() => setShowChat(false)} profileId={selectedProfileId} />}
 
-      {/* ── 히어로 섹션 (main의 다크 테마 + donghoon의 이름 데이터) ── */}
-      <section className="relative w-full min-h-[540px] flex items-center justify-center overflow-hidden bg-black">
+      {/* ── 히어로 섹션 (배경 이미지 슬라이드쇼 + 다크 오버레이) ── */}
+      <section
+        className="relative w-full min-h-[540px] flex items-center justify-center overflow-hidden bg-black"
+        style={{
+          backgroundImage: `url('${HERO_BG_IMAGES[currentBgIndex]}')`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          transition: 'background-image 1s ease-in-out',
+        }}
+      >
+        {/* 다크 오버레이 — 텍스트 가독성 확보 */}
+        <div className="absolute inset-0 bg-black/50" />
+        {/* 그리드 패턴 */}
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle, #ffffff 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+
         <div className="relative z-10 text-center px-6 max-w-3xl mx-auto py-24">
-          <p className="text-gray-500 text-sm font-bold mb-5 tracking-[0.2em] uppercase">{greeting.sub}</p>
+          <p className="text-gray-400 text-sm font-bold mb-5 tracking-[0.2em] uppercase">{greeting.sub}</p>
           <h1 className="text-5xl md:text-7xl font-black text-white leading-tight mb-8">
-            {greeting.msg},<br /><span className="text-gray-600">{userName} 님</span>
+            {greeting.msg},<br /><span className="text-gray-400">{userName} 님</span>
           </h1>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <button onClick={goToOcrFlow} className="px-8 py-4 bg-white text-black font-bold rounded-full hover:bg-gray-100 transition-all cursor-pointer">처방전 등록하기</button>
-            <button onClick={() => setShowChat(true)} className="px-8 py-4 bg-gray-900 text-white font-bold rounded-full border border-gray-800 hover:bg-gray-800 transition-all cursor-pointer flex items-center gap-2 justify-center">
+            <button onClick={() => setShowChat(true)} className="px-8 py-4 bg-gray-900/80 text-white font-bold rounded-full border border-gray-700 hover:bg-gray-800 transition-all cursor-pointer flex items-center gap-2 justify-center">
               <MessageCircle size={20}/> AI 상담하기
             </button>
+          </div>
+
+          {/* 이미지 인디케이터 — 클릭으로 수동 전환 가능 */}
+          <div className="flex gap-2 justify-center mt-10">
+            {HERO_BG_IMAGES.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => setCurrentBgIndex(i)}
+                aria-label={`배경 이미지 ${i + 1}`}
+                className={`h-2 rounded-full transition-all cursor-pointer ${
+                  i === currentBgIndex ? 'bg-white w-8' : 'bg-white/40 w-2'
+                }`}
+              />
+            ))}
           </div>
         </div>
       </section>
