@@ -12,8 +12,8 @@ from fastapi import HTTPException, status
 from tortoise.transactions import in_transaction
 
 from app.core import config
-from app.dtos.medication import MedicationResponse
 from app.dtos.prescription_group import (
+    MedicationListItem,
     PrescriptionGroupCard,
     PrescriptionGroupDetail,
     PrescriptionGroupSort,
@@ -123,7 +123,6 @@ class PrescriptionGroupService:
         ).exists()
         return PrescriptionGroupCard(
             id=group.id,
-            profile_id=group.profile_id,
             hospital_name=group.hospital_name,
             department=group.department,
             dispensed_date=group.dispensed_date,
@@ -183,13 +182,12 @@ class PrescriptionGroupService:
         )
         return PrescriptionGroupDetail(
             id=group.id,
-            profile_id=group.profile_id,
             hospital_name=group.hospital_name,
             department=group.department,
             dispensed_date=group.dispensed_date,
             source=group.source,
             created_at=group.created_at,
-            medications=[MedicationResponse.model_validate(m) for m in meds],
+            medications=[MedicationListItem.model_validate(m) for m in meds],
         )
 
     # ── 그룹 메타 update (department 등) ───────────────────────────────
