@@ -175,3 +175,17 @@ class OcrDraftRepository:
         """
         cutoff = datetime.now(tz=config.TIMEZONE) - timedelta(hours=max_age_hours)
         return await OcrDraft.filter(created_at__lt=cutoff).delete()
+
+    async def bulk_delete_by_profile(self, profile_id: UUID) -> int:
+        """프로필의 모든 OCR draft 일괄 hard-delete.
+
+        OcrDraft 는 deleted_at 컬럼이 없는 임시 저장소라 hard-delete 정책.
+        Profile cascade soft-delete 흐름의 일부로 호출.
+
+        Args:
+            profile_id: 대상 프로필 UUID.
+
+        Returns:
+            삭제된 row 수.
+        """
+        return await OcrDraft.filter(profile_id=str(profile_id)).delete()
