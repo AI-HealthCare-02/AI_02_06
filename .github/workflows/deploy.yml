@@ -127,8 +127,14 @@ jobs:
             echo "=== [2/6] Pull pre-built images from ghcr.io ==="
             docker compose -f docker-compose.prod.yml pull fastapi ai-worker
 
-            echo "=== [3/6] Prune dangling images (디스크 회복) ==="
-            docker image prune -af || true
+            echo "=== [3/6] Prune unused docker resources (디스크 회복 강화) ==="
+            # docker system prune -af --volumes:
+            #   - 미사용 image (dangling + 옛 ghcr.io tag) 제거
+            #   - 정지된 컨테이너 + 그에 묶인 anonymous volume 제거
+            #   - 미사용 network + builder cache 제거
+            # named volume (postgres / redis 데이터) 은 보존 — running 또는 referenced 라 안전.
+            # ai-worker 가 압축 1GB / 해제 ~3GB 라 매 deploy 마다 정리 필수.
+            docker system prune -af --volumes || true
 
             echo "=== [4/6] Stop + Start (no build) ==="
             docker compose -f docker-compose.prod.yml down || true
