@@ -119,15 +119,26 @@ jobs:
             set -e
             cd ~/AI_02_06
 
-            echo "=== [1/6] Pull latest code ==="
+            echo "=== [1/7] Pull latest code ==="
             git fetch origin main
             git reset --hard origin/main
             echo "Commit: $(git log -1 --oneline)"
 
-            echo "=== [2/6] Pull pre-built images from ghcr.io ==="
+            echo "=== [2/7] Rotate logs (한 세대 백업 + 새 라이프사이클) ==="
+            # 직전 빌드 logs 는 logs.prev/ 로 한 세대 보존 (사후 분석).
+            # 그 이전 prev 는 삭제 — 항상 두 세대 (현재 + prev) 만 유지.
+            # 새 빌드 시작 시점에 logs/ 가 비워져 다음 컨테이너 up 직후부터
+            # 깨끗한 상태로 RotatingFileHandler 가 기록을 시작한다.
+            sudo rm -rf ~/AI_02_06/logs.prev
+            if [ -d ~/AI_02_06/logs ]; then
+              sudo mv ~/AI_02_06/logs ~/AI_02_06/logs.prev
+            fi
+            mkdir -p ~/AI_02_06/logs/fastapi ~/AI_02_06/logs/ai-worker
+
+            echo "=== [3/7] Pull pre-built images from ghcr.io ==="
             docker compose -f docker-compose.prod.yml pull fastapi ai-worker
 
-            echo "=== [3/6] Prune unused docker resources (디스크 회복 강화) ==="
+            echo "=== [4/7] Prune unused docker resources (디스크 회복 강화) ==="
             # docker system prune -af --volumes:
             #   - 미사용 image (dangling + 옛 ghcr.io tag) 제거
             #   - 정지된 컨테이너 + 그에 묶인 anonymous volume 제거
@@ -136,14 +147,14 @@ jobs:
             # ai-worker 가 압축 1GB / 해제 ~3GB 라 매 deploy 마다 정리 필수.
             docker system prune -af --volumes || true
 
-            echo "=== [4/6] Stop + Start (no build) ==="
+            echo "=== [5/7] Stop + Start (no build) ==="
             docker compose -f docker-compose.prod.yml down || true
             docker compose -f docker-compose.prod.yml up -d --no-build
 
-            echo "=== [4.5/6] Wait for DB ready ==="
+            echo "=== [5.5/7] Wait for DB ready ==="
             sleep 30
 
-            echo "=== [5/6] Run migrations ==="
+            echo "=== [6/7] Run migrations ==="
             docker compose -f docker-compose.prod.yml exec -T fastapi aerich upgrade || {
               echo "Migration failed, checking status..."
               docker compose -f docker-compose.prod.yml exec -T fastapi aerich status
@@ -151,7 +162,7 @@ jobs:
             }
             echo "Migrations completed successfully"
 
-            echo "=== [6/6] Status ==="
+            echo "=== [7/7] Status ==="
             docker compose -f docker-compose.prod.yml ps
             echo "--- FastAPI Logs ---"
             docker compose -f docker-compose.prod.yml logs fastapi --tail=15 || true
