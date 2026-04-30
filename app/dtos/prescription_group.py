@@ -14,12 +14,12 @@ from app.dtos.medication import MedicationResponse
 
 
 class PrescriptionGroupSort(StrEnum):
-    """``GET /prescription-groups`` 의 정렬 기준."""
+    """``GET /prescription-groups`` 의 정렬 기준 — 날짜 / 병원 이름."""
 
     DATE_DESC = "date_desc"
     DATE_ASC = "date_asc"
-    DEPARTMENT_ASC = "department_asc"
-    DEPARTMENT_DESC = "department_desc"
+    HOSPITAL_ASC = "hospital_asc"
+    HOSPITAL_DESC = "hospital_desc"
 
 
 class PrescriptionGroupStatus(StrEnum):
@@ -41,6 +41,7 @@ class PrescriptionGroupCard(BaseModel):
 
     id: UUID = Field(..., description="처방전 그룹 ID")
     profile_id: UUID = Field(..., description="소유 프로필 ID")
+    hospital_name: str | None = Field(None, description="처방전 발행 병원 이름")
     department: str | None = Field(None, description="처방 진료과")
     dispensed_date: date | None = Field(None, description="처방 조제일")
     source: str = Field(..., description="생성 경로 (OCR/MANUAL/MIGRATED)")
@@ -52,6 +53,17 @@ class PrescriptionGroupCard(BaseModel):
     )
 
 
+class PrescriptionGroupUpdate(BaseModel):
+    """처방전 그룹 부분 수정 요청 — hospital_name / department.
+
+    dispensed_date 는 처방 사실의 핵심 메타라 수정을 막는다 (잘못 등록되었으면
+    삭제 후 재등록 권장).
+    """
+
+    hospital_name: str | None = Field(None, max_length=128, description="처방전 발행 병원 이름")
+    department: str | None = Field(None, max_length=64, description="처방 진료과 (예: 내과)")
+
+
 class PrescriptionGroupDetail(BaseModel):
     """처방전 drill-down 응답 — 그룹 메타 + medication list."""
 
@@ -59,6 +71,7 @@ class PrescriptionGroupDetail(BaseModel):
 
     id: UUID = Field(..., description="처방전 그룹 ID")
     profile_id: UUID = Field(..., description="소유 프로필 ID")
+    hospital_name: str | None = Field(None, description="처방전 발행 병원 이름")
     department: str | None = Field(None, description="처방 진료과")
     dispensed_date: date | None = Field(None, description="처방 조제일")
     source: str = Field(..., description="생성 경로 (OCR/MANUAL/MIGRATED)")

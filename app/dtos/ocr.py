@@ -103,3 +103,13 @@ class ConfirmMedicationRequest(BaseModel):
     draft_id: str = Field(description="Target draft ID (DB ocr_drafts.id)")
     confirmed_medicines: list[ExtractedMedicine]
     profile_id: str | None = Field(None, description="Target profile ID (family profile support)")
+    hospital_name: str | None = Field(
+        None,
+        max_length=128,
+        description="처방전 발행 병원 이름 (그룹 메타). 미입력 시 NULL = '미상'",
+    )
+    department: str | None = Field(
+        None,
+        max_length=64,
+        description="처방 진료과 (그룹 메타). 미입력 시 NULL = '미상'",
+    )

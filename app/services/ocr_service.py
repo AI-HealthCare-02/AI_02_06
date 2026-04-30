@@ -283,12 +283,18 @@ class OCRService:
 
         # 처방전 그룹 + medication bulk insert 트랜잭션 — OCR 한 호출 = 한 처방전
         # 이라는 도메인 의미를 모델 단에서 일관되게 보장.
+        # 그룹 메타 (hospital_name / department / dispensed_date) 는 사용자가
+        # OCR result 화면에서 입력한 값을 우선 사용 (request.hospital_name 등),
+        # 미입력 시 medication list 의 첫 non-null 값으로 fallback.
         async with in_transaction():
             confirmed = list(request.confirmed_medicines)
+            group_department = request.department or _first_department(confirmed)
+            group_dispensed = _first_dispensed_date(confirmed)
             group = await self._prescription_group_repository.create(
                 profile_id=profile_id,
-                dispensed_date=_first_dispensed_date(confirmed),
-                department=_first_department(confirmed),
+                dispensed_date=group_dispensed,
+                department=group_department,
+                hospital_name=request.hospital_name,
                 source=PrescriptionGroupSource.OCR,
             )
             saved = [await self._save_one_medication(med, profile_id, group_id=group.id) for med in confirmed]

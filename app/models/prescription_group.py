@@ -48,6 +48,7 @@ class PrescriptionGroup(models.Model):
         related_name="prescription_groups",
         description="처방전 소유 프로필",
     )
+    hospital_name = fields.CharField(max_length=128, null=True, description="처방전 발행 병원 이름")
     department = fields.CharField(max_length=64, null=True, description="처방 진료과 (내과/소아과 등)")
     dispensed_date = fields.DateField(null=True, description="처방 조제일 — 그룹 매핑 키")
     source = fields.CharField(

@@ -22,6 +22,7 @@ class PrescriptionGroupRepository:
         *,
         dispensed_date: date | None,
         department: str | None,
+        hospital_name: str | None = None,
         source: PrescriptionGroupSource = PrescriptionGroupSource.OCR,
     ) -> PrescriptionGroup:
         """Create a new prescription group.
@@ -30,6 +31,7 @@ class PrescriptionGroupRepository:
             profile_id: 그룹 소유 프로필 UUID.
             dispensed_date: 처방 조제일 (없으면 NULL).
             department: 진료과 (없으면 NULL).
+            hospital_name: 처방전 발행 병원 이름 (없으면 NULL).
             source: 생성 경로 — OCR / MANUAL / MIGRATED.
 
         Returns:
@@ -40,6 +42,7 @@ class PrescriptionGroupRepository:
             profile_id=str(profile_id),
             dispensed_date=dispensed_date,
             department=department,
+            hospital_name=hospital_name,
             source=source.value,
         )
 
@@ -64,6 +67,31 @@ class PrescriptionGroupRepository:
             .order_by("-dispensed_date", "-created_at")
             .all()
         )
+
+    async def update(
+        self,
+        group: PrescriptionGroup,
+        *,
+        department: str | None | type(...) = ...,
+        hospital_name: str | None | type(...) = ...,
+    ) -> PrescriptionGroup:
+        """그룹 메타 부분 수정. ``...`` 인자는 미설정 (변경 안함).
+
+        Args:
+            group: 대상 그룹 인스턴스 (이미 로드됨).
+            department: 새 진료과 값. ``None`` 으로 명시하면 NULL 로 set,
+                생략(기본값 ``...``) 하면 변경 안함.
+            hospital_name: 새 병원 이름. None=NULL, ... = 변경 안함.
+
+        Returns:
+            업데이트된 그룹.
+        """
+        if department is not ...:
+            group.department = department  # type: ignore[assignment]
+        if hospital_name is not ...:
+            group.hospital_name = hospital_name  # type: ignore[assignment]
+        await group.save()
+        return group
 
     async def soft_delete(self, group: PrescriptionGroup) -> PrescriptionGroup:
         """Soft delete prescription group (cascade FK 정리는 호출 측 책임)."""

@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Search, X, ChevronRight, Plus, Building2, Calendar } from 'lucide-react'
+import { Search, X, ChevronRight, Plus, Building2, Calendar, Hospital } from 'lucide-react'
 
 import BottomNav from '@/components/layout/BottomNav'
 import EmptyState from '@/components/common/EmptyState'
@@ -24,8 +24,8 @@ import { useProfile } from '@/contexts/ProfileContext'
 const SORT_LABELS = {
   [PRESCRIPTION_SORT.DATE_DESC]: '날짜 ↓ (최신)',
   [PRESCRIPTION_SORT.DATE_ASC]: '날짜 ↑',
-  [PRESCRIPTION_SORT.DEPARTMENT_ASC]: '진료과 ㄱ-ㅎ',
-  [PRESCRIPTION_SORT.DEPARTMENT_DESC]: '진료과 ㅎ-ㄱ',
+  [PRESCRIPTION_SORT.HOSPITAL_ASC]: '병원 ㄱ-ㅎ',
+  [PRESCRIPTION_SORT.HOSPITAL_DESC]: '병원 ㅎ-ㄱ',
 }
 
 const STATUS_TABS = [
@@ -52,6 +52,7 @@ function GroupCardSkeleton() {
 
 function PrescriptionCard({ group, onClick }) {
   const dateLabel = formatDate(group.dispensed_date)
+  const hospital = group.hospital_name || '병원 미상'
   const dept = group.department || '진료과 미상'
   const statusLabel = group.has_active_medication ? '복용 중' : '복용 완료'
   const statusStyle = group.has_active_medication
@@ -67,6 +68,10 @@ function PrescriptionCard({ group, onClick }) {
         <div className="flex items-center gap-2 text-xs">
           <Calendar size={14} className="text-gray-400 shrink-0" />
           <span className="font-bold text-gray-900">{dateLabel}</span>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-gray-700">
+          <Hospital size={14} className="shrink-0 text-gray-400" />
+          <span className={group.hospital_name ? 'font-bold' : 'text-gray-400'}>{hospital}</span>
         </div>
         <div className="flex items-center gap-2 text-xs text-gray-500">
           <Building2 size={14} className="shrink-0" />

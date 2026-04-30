@@ -16,8 +16,8 @@ import { useProfile } from '@/contexts/ProfileContext'
 export const PRESCRIPTION_SORT = Object.freeze({
   DATE_DESC: 'date_desc',
   DATE_ASC: 'date_asc',
-  DEPARTMENT_ASC: 'department_asc',
-  DEPARTMENT_DESC: 'department_desc',
+  HOSPITAL_ASC: 'hospital_asc',
+  HOSPITAL_DESC: 'hospital_desc',
 })
 
 export const PRESCRIPTION_STATUS = Object.freeze({
