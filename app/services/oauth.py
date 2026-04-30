@@ -5,8 +5,10 @@ Supports both development/test environments with mock servers and production
 environments with actual provider servers. Follows modern async patterns.
 """
 
+import logging
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 from fastapi import HTTPException, status
 import httpx
@@ -15,6 +17,7 @@ from tortoise.transactions import in_transaction
 from app.core import config
 from app.core.config import Env
 from app.models.accounts import Account, AuthProvider
+from app.models.profiles import Profile, RelationType
 from app.repositories.account_repository import AccountRepository
 from app.repositories.chat_session_repository import ChatSessionRepository
 from app.repositories.message_repository import MessageRepository
@@ -23,6 +26,8 @@ from app.repositories.refresh_token_repository import RefreshTokenRepository
 from app.services.profile_service import ProfileService
 from app.services.rate_limiter import RateLimiter
 from app.utils.jwt.tokens import AccessToken, RefreshToken
+
+logger = logging.getLogger(__name__)
 
 
 class OAuthService:
@@ -180,23 +185,12 @@ class OAuthService:
             )
             is_new_user = True
 
-        # 2. 본인(SELF) 프로필 자동 생성 체크 (모델 직접 사용)
-        from app.models.profiles import Profile, RelationType
-
-        self_profile = await Profile.filter(
-            account_id=account.id, relation_type=RelationType.SELF, deleted_at__isnull=True
-        ).first()
-
-        if not self_profile:
-            from uuid import uuid4
-
-            await Profile.create(
-                id=uuid4(),
-                account_id=account.id,
-                name=f"{nickname}(Self)",
-                relation_type=RelationType.SELF,
-                health_survey={"age": 25, "gender": "MALE", "conditions": ["Test"], "allergies": ["None"]},
-            )
+        # 2. 본인(SELF) 프로필 자동 생성 (idempotent)
+        await self._ensure_self_profile(
+            account,
+            nickname=nickname,
+            health_survey={"age": 25, "gender": "MALE", "conditions": ["Test"], "allergies": ["None"]},
+        )
 
         return account, is_new_user
 
@@ -268,7 +262,48 @@ class OAuthService:
             )
             is_new_user = True
 
+        # SELF 프로필 자동 생성 (idempotent — 신규 가입 + 기존 사용자 누락분 backfill)
+        await self._ensure_self_profile(account, nickname=nickname)
+
         return account, is_new_user
+
+    # ── SELF 프로필 자동 생성 (회원가입 흐름 공용) ─────────────────────
+    # 흐름: 기존 SELF 조회 -> 없으면 INSERT (idempotent)
+    # 회원가입 직후 main 페이지 진입 시 ProfileContext 가 빈 배열을 받지
+    # 않도록 보장. 기존 사용자가 어떤 사유로든 SELF 가 없는 경우에도 다음
+    # 로그인 시 자동 backfill.
+
+    async def _ensure_self_profile(
+        self,
+        account: Account,
+        *,
+        nickname: str,
+        health_survey: dict[str, Any] | None = None,
+    ) -> None:
+        """계정에 SELF 프로필이 없으면 생성. 이미 있으면 no-op.
+
+        Args:
+            account: 대상 Account.
+            nickname: SELF 프로필 이름 베이스 (카카오 닉네임 또는 dev nickname).
+            health_survey: 초기 health_survey JSON (dev 한정 — 운영 카카오는 None).
+        """
+        existing = await Profile.filter(
+            account_id=account.id,
+            relation_type=RelationType.SELF,
+            deleted_at__isnull=True,
+        ).first()
+        if existing:
+            return
+
+        # name max_length=32 — 카카오 닉네임이 그보다 길 수도 있어 truncate 가드
+        await Profile.create(
+            id=uuid4(),
+            account_id=account.id,
+            name=(nickname or "사용자")[:32],
+            relation_type=RelationType.SELF,
+            health_survey=health_survey,
+        )
+        logger.info("[OAUTH] SELF profile auto-created account_id=%s nickname=%s", account.id, nickname)
 
     async def issue_tokens(self, account: Account) -> dict[str, str]:
         """Issue JWT tokens and store refresh token in database.
