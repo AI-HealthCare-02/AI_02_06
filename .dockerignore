@@ -73,3 +73,12 @@ nginx/
 **/.ruff_cache/
 **/.pytest_cache/
 **/.coverage
+
+# =========================================
+# 7. DB dump / 식약처 sync 백업 (이미지에 포함되면 layer 폭증)
+# =========================================
+medicine_data*.sql
+medicine_data*.sql.gz
+*.sql.gz
+ai_worker/data/medicines_*.ndjson
+ai_worker/data/medicines_*.json
