@@ -51,7 +51,6 @@ async def enqueue_guide(
     profile_id: UUID,
     current_account: CurrentAccount,
     service: LifestyleGuideServiceDep,
-    force: bool = False,
 ) -> LifestyleGuidePendingResponse:
     """라이프스타일 가이드 생성을 비동기로 시작한다.
 
@@ -62,8 +61,6 @@ async def enqueue_guide(
         profile_id: 가이드 받을 프로필 UUID.
         current_account: 인증된 계정.
         service: 라이프스타일 가이드 서비스.
-        force: True 면 입력 fingerprint dedupe 를 건너뛰고 항상 새 LLM
-            호출. 사용자가 토스트의 "다른 추천 받아보기" 를 누르는 흐름.
 
     Returns:
         ``LifestyleGuidePendingResponse`` — pending guide id + status.
@@ -74,11 +71,7 @@ async def enqueue_guide(
             ``message`` (사용자 안내) / ``redirect_to=/ocr`` 가 포함되어
             FE 가 토스트 표시 + 처방전 등록 페이지 라우팅을 한 번에 처리한다.
     """
-    guide = await service.enqueue_guide_with_owner_check(
-        profile_id,
-        current_account.id,
-        force=force,
-    )
+    guide = await service.enqueue_guide_with_owner_check(profile_id, current_account.id)
     # Phase B dedupe hit 이면 service 가 이미 ready 가이드를 반환 — status 도
     # 함께 응답해 FE 가 SSE 를 건너뛰고 즉시 GET 으로 fetch 할 수 있게 한다.
     return LifestyleGuidePendingResponse(id=guide.id, status=guide.status)

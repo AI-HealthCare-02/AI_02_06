@@ -407,7 +407,7 @@ export default function LifestyleGuidePage() {
   // 3) GET /lifestyle-guides/{id}/stream SSE 로 status 변화 수신
   // 4) ready 도달 시 받은 payload 로 guides/selectedGuide 교체
   // 5) terminal error 시 안내 + placeholder 제거
-  const handleGenerate = async ({ force = false } = {}) => {
+  const handleGenerate = async () => {
     if (!profileId) {
       showError('프로필을 먼저 선택해주세요.')
       return
@@ -420,26 +420,12 @@ export default function LifestyleGuidePage() {
     try {
       // Context 의 generateGuide 가 placeholder 삽입 + SSE update + ready 자동 처리.
       // 사용자가 생성 중 placeholder 를 직접 삭제한 경우 result === null 로 silent.
-      const result = await generateGuide(profileId, abortController.signal, { force })
+      const result = await generateGuide(profileId, abortController.signal)
       if (!result) return
       if (result.deduped) {
-        // dedupe hit 시 사용자에게 "다른 추천 받기" 옵션 제공 — force regenerate.
-        toast(
-          (t) => (
-            <div className="flex items-center gap-3">
-              <span className="text-sm">동일 처방전 가이드가 이미 있어 그대로 보여드려요.</span>
-              <button
-                onClick={() => { toast.dismiss(t.id); handleGenerate({ force: true }) }}
-                className="text-blue-500 font-bold text-sm shrink-0 cursor-pointer whitespace-nowrap"
-              >
-                다른 추천 받기 ↻
-              </button>
-            </div>
-          ),
-          { duration: 6000 },
-        )
+        toast.success('동일 처방전 가이드가 이미 있어 그대로 보여드려요.')
       } else {
-        toast.success(force ? '다른 가이드를 생성했어요!' : '새 가이드가 생성되었습니다!')
+        toast.success('새 가이드가 생성되었습니다!')
       }
     } catch (err) {
       // BE 409 + detail.code=NO_ACTIVE_MEDICATIONS → 토스트 + 처방전 등록 페이지 자동 이동
@@ -527,7 +513,7 @@ export default function LifestyleGuidePage() {
             {isGenerating ? '🤖 AI가 분석 중입니다...' : ''}
           </p>
           <button
-            onClick={() => handleGenerate()}
+            onClick={handleGenerate}
             disabled={isGenerating || !profileId}
             className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
               isGenerating || !profileId
