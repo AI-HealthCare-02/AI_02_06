@@ -62,16 +62,26 @@ class ChallengeRepository:
     async def get_by_guide_id(self, guide_id: UUID) -> list[Challenge]:
         """Get all challenges linked to a specific lifestyle guide.
 
+        Returned order: target_days asc -> id (작은 챌린지부터). 같은 가이드의
+        챌린지들이 클라이언트에 항상 동일한 순서로 노출되어, 화면 흐름과
+        list 의 일관성을 깨지 않도록 한다 (ORDER BY 없는 쿼리는 PostgreSQL
+        에서 row 순서가 undefined).
+
         Args:
             guide_id: LifestyleGuide UUID.
 
         Returns:
-            list[Challenge]: List of challenges for the guide.
+            list[Challenge]: List of challenges, ordered by target_days asc.
         """
-        return await Challenge.filter(
-            guide_id=guide_id,
-            deleted_at__isnull=True,
-        ).all()
+        return (
+            await Challenge
+            .filter(
+                guide_id=guide_id,
+                deleted_at__isnull=True,
+            )
+            .order_by("target_days", "id")
+            .all()
+        )
 
     async def get_active_by_profile(self, profile_id: UUID) -> list[Challenge]:
         """Get active challenges for a profile.
