@@ -81,7 +81,12 @@ class PrescriptionGroupService:
         sort: PrescriptionGroupSort,
         search: str | None,
     ) -> list[PrescriptionGroup]:
-        """정렬 + 검색이 적용된 그룹 query 결과."""
+        """정렬 + 검색이 적용된 그룹 query 결과.
+
+        병원 정렬 시 ``hospital_name IS NULL`` (= '병원 미상') 그룹은 정렬 방향과
+        무관하게 list 맨 위로 partition — 사용자가 입력해야 할 action item 으로
+        시선 유도. 날짜 정렬엔 적용 안 함 (날짜 미상은 드물고 시간순 의도 보존).
+        """
         order_by = _ORDER_BY_MAP[sort]
         query = PrescriptionGroup.filter(
             profile_id=profile_id,
@@ -104,7 +109,14 @@ class PrescriptionGroupService:
             if not matching_ids:
                 return []
             query = query.filter(id__in=matching_ids)
-        return await query.order_by(*order_by).all()
+        groups = await query.order_by(*order_by).all()
+
+        # 병원 정렬일 때만 hospital_name NULL 그룹을 partition 으로 앞으로 이동.
+        if sort in (PrescriptionGroupSort.HOSPITAL_ASC, PrescriptionGroupSort.HOSPITAL_DESC):
+            null_groups = [g for g in groups if not g.hospital_name]
+            valued_groups = [g for g in groups if g.hospital_name]
+            return null_groups + valued_groups
+        return groups
 
     async def _build_card(
         self,
