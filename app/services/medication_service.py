@@ -8,6 +8,7 @@ import logging
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from tortoise.transactions import in_transaction
 
 from app.dtos.drug_info import DrugInfoResponse, PrecautionSection
 from app.dtos.medication import MedicationBulkDeleteResponse, MedicationCreate, MedicationUpdate, PrescriptionDateItem
@@ -15,6 +16,7 @@ from app.models.medication import Medication
 from app.repositories.medication_repository import MedicationRepository
 from app.repositories.medicine_info_repository import MedicineInfoRepository
 from app.repositories.profile_repository import ProfileRepository
+from app.services.lifestyle_guide_service import LifestyleGuideService
 from app.services.recall_notification_service import check_and_alert_on_medication_save
 
 logger = logging.getLogger(__name__)
@@ -26,6 +28,7 @@ class MedicationService:
     def __init__(self) -> None:
         self.repository = MedicationRepository()
         self.profile_repository = ProfileRepository()
+        self.lifestyle_guide_service = LifestyleGuideService()
 
     async def _verify_profile_ownership(self, profile_id: UUID, account_id: UUID) -> None:
         """Verify profile ownership.
@@ -356,6 +359,39 @@ class MedicationService:
         profile_ids = [p.id for p in profiles]
         deleted_count = await self.repository.bulk_soft_delete(ids, profile_ids)
         skipped = await self._collect_skipped_ids(ids, profile_ids) if deleted_count < len(ids) else []
+        return MedicationBulkDeleteResponse(deleted_count=deleted_count, skipped_ids=skipped)
+
+    # ── 처방전 그룹 단위 삭제 (cascade — 가이드 + 챌린지) ──────────────
+    # 흐름: medication 그룹 soft -> 그 프로필의 active lifestyle_guide cascade
+    #       (가이드 cascade 안에서 챌린지 정책 — 미시작 soft, 활성 보존 — 적용)
+    # 단건 삭제는 ``bulk_delete_with_owner_check`` 그대로 (cascade 없음).
+
+    async def delete_prescription_group_with_owner_check(
+        self,
+        ids: list[UUID],
+        profile_id: UUID,
+        account_id: UUID,
+    ) -> MedicationBulkDeleteResponse:
+        """처방전 그룹 삭제 — medication 그룹 + 그 프로필의 가이드/챌린지 cascade.
+
+        Args:
+            ids: 처방전 그룹에 속한 medication ID 목록 (1~100건).
+            profile_id: 그룹 소유 프로필 — owner check + 가이드 cascade scope.
+            account_id: 요청 계정 — 프로필이 이 계정 소속인지 검증.
+
+        Returns:
+            ``MedicationBulkDeleteResponse`` — 삭제된 medication 수 + 건너뛴 ids.
+
+        Raises:
+            HTTPException: 404/403 if profile not found / not owned.
+        """
+        await self._verify_profile_ownership(profile_id, account_id)
+
+        async with in_transaction():
+            deleted_count = await self.repository.bulk_soft_delete(ids, [profile_id])
+            skipped = await self._collect_skipped_ids(ids, [profile_id]) if deleted_count < len(ids) else []
+            await self.lifestyle_guide_service.cascade_delete_active_guides_by_profile(profile_id)
+
         return MedicationBulkDeleteResponse(deleted_count=deleted_count, skipped_ids=skipped)
 
     async def _collect_skipped_ids(
