@@ -156,8 +156,8 @@ const handleTestLogin = async () => {
         <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
           <Pill size={32} className="text-blue-500" />
         </div>
-        <h1 className="text-2xl font-bold mb-1">복약 안내</h1>
-        <p className="text-gray-400 text-sm mb-8">내 약을 안전하게 관리하세요</p>
+        <h1 className="text-3xl font-bold mb-2">복약 안내</h1>
+        <p className="text-gray-500 text-base mb-8">내 약을 안전하게 관리하세요</p>
 
         {/* 카카오 버튼 */}
         <button
@@ -192,7 +192,7 @@ const handleTestLogin = async () => {
         </button>
 
         {/* 하단 약관 */}
-        <p className="text-gray-300 text-xs mt-8">
+        <p className="text-gray-400 text-sm mt-8">
           로그인 시 서비스 이용약관에 동의하게 됩니다
         </p>
 
