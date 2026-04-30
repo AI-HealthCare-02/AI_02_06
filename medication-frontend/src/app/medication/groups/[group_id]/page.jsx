@@ -301,51 +301,53 @@ export default function PrescriptionGroupDetailPage() {
         ) : error ? (
           <p className="text-sm text-red-500 text-center py-10">{error}</p>
         ) : group ? (
-          <>
-            <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-2">
-              <div className="flex items-center gap-2 text-sm font-bold text-gray-900">
-                <Calendar size={16} className="text-gray-400" />
-                <span>{formatDate(group.dispensed_date)}</span>
+          // 데스크탑 (lg+) : 왼쪽 (그룹 메타 + 약 list) + 오른쪽 (약품 상세).
+          // 모바일: 같은 column 안에 그룹 메타 → 약 list 가 세로로 흐른다 (오른쪽 패널 hidden).
+          <div className="lg:grid lg:grid-cols-[minmax(280px,360px)_1fr] lg:gap-4">
+            <div className="space-y-4">
+              {/* 그룹 메타 카드 */}
+              <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-2">
+                <div className="flex items-center gap-2 text-sm font-bold text-gray-900">
+                  <Calendar size={16} className="text-gray-400" />
+                  <span>{formatDate(group.dispensed_date)}</span>
+                </div>
+                <EditableMetaRow
+                  icon={<Hospital size={14} className="shrink-0 text-gray-400" />}
+                  fieldKey="hospital_name"
+                  value={group.hospital_name}
+                  placeholder="병원 (예: 서울내과의원)"
+                  emptyLabel="병원 미상"
+                  isEditing={editingField === 'hospital_name'}
+                  draft={draft}
+                  onDraft={setDraft}
+                  onStart={() => startEdit('hospital_name')}
+                  onCancel={cancelEdit}
+                  onSave={saveEdit}
+                  isSaving={isSaving}
+                  maxLength={128}
+                />
+                <EditableMetaRow
+                  icon={<Building2 size={14} className="shrink-0 text-gray-400" />}
+                  fieldKey="department"
+                  value={group.department}
+                  placeholder="진료과 (예: 내과)"
+                  emptyLabel="진료과 미상"
+                  isEditing={editingField === 'department'}
+                  draft={draft}
+                  onDraft={setDraft}
+                  onStart={() => startEdit('department')}
+                  onCancel={cancelEdit}
+                  onSave={saveEdit}
+                  isSaving={isSaving}
+                  maxLength={64}
+                />
+                <p className="text-[11px] text-gray-400 pt-1">
+                  약 {group.medications?.length || 0}개 · 등록 경로 {SOURCE_LABEL[group.source] || group.source}
+                  {allInactive && <span className="ml-2 text-green-500 font-bold">· 복용 완료</span>}
+                </p>
               </div>
-              <EditableMetaRow
-                icon={<Hospital size={14} className="shrink-0 text-gray-400" />}
-                fieldKey="hospital_name"
-                value={group.hospital_name}
-                placeholder="병원 (예: 서울내과의원)"
-                emptyLabel="병원 미상"
-                isEditing={editingField === 'hospital_name'}
-                draft={draft}
-                onDraft={setDraft}
-                onStart={() => startEdit('hospital_name')}
-                onCancel={cancelEdit}
-                onSave={saveEdit}
-                isSaving={isSaving}
-                maxLength={128}
-              />
-              <EditableMetaRow
-                icon={<Building2 size={14} className="shrink-0 text-gray-400" />}
-                fieldKey="department"
-                value={group.department}
-                placeholder="진료과 (예: 내과)"
-                emptyLabel="진료과 미상"
-                isEditing={editingField === 'department'}
-                draft={draft}
-                onDraft={setDraft}
-                onStart={() => startEdit('department')}
-                onCancel={cancelEdit}
-                onSave={saveEdit}
-                isSaving={isSaving}
-                maxLength={64}
-              />
-              <p className="text-[11px] text-gray-400 pt-1">
-                약 {group.medications?.length || 0}개 · 등록 경로 {SOURCE_LABEL[group.source] || group.source}
-                {allInactive && <span className="ml-2 text-green-500 font-bold">· 복용 완료</span>}
-              </p>
-            </div>
 
-            {/* 데스크탑: 약 list (왼쪽) + 약품 상세 (오른쪽) split-pane */}
-            {/* 모바일: list 만 표시, 약 클릭 시 별 페이지로 이동 */}
-            <div className="lg:grid lg:grid-cols-[minmax(280px,360px)_1fr] lg:gap-4">
+              {/* 약 list */}
               <div className="space-y-2">
                 {(group.medications || []).length === 0 ? (
                   <p className="text-sm text-gray-400 text-center py-8">이 처방전엔 등록된 약이 없어요.</p>
@@ -360,14 +362,16 @@ export default function PrescriptionGroupDetailPage() {
                   ))
                 )}
               </div>
-              <div className="hidden lg:block bg-white rounded-2xl border border-gray-100 p-5">
-                <MedicationDetailPanel
-                  medicationId={selectedMedicationId}
-                  onDeleted={() => setSelectedMedicationId(null)}
-                />
-              </div>
             </div>
-          </>
+
+            {/* 우측 — 약품 상세 panel (lg+ 에서만 표시, 모바일은 별 페이지로 push) */}
+            <div className="hidden lg:block bg-white rounded-2xl border border-gray-100 p-5">
+              <MedicationDetailPanel
+                medicationId={selectedMedicationId}
+                onDeleted={() => setSelectedMedicationId(null)}
+              />
+            </div>
+          </div>
         ) : null}
       </div>
 

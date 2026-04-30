@@ -297,14 +297,6 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
                   선택한 시간대는 홈 화면의 시간대별 복용 알림에 표시됩니다.
                 </p>
               </div>
-
-              <div className="mt-4 p-4 bg-gray-50 rounded-xl">
-                <p className="text-xs text-gray-400 mb-1">처방 기간</p>
-                <p className="font-bold text-sm text-gray-900">
-                  {med.start_date}
-                  {med.end_date ? ` ~ ${med.end_date}` : ''}
-                </p>
-              </div>
               {drugInfo?.dosage && (
                 <div className="mt-4 p-4 bg-blue-50 rounded-xl">
                   <p className="text-xs font-black text-blue-600 mb-2 uppercase tracking-wide">
