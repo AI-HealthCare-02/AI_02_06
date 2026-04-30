@@ -164,8 +164,10 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
     )
   }
 
-  const dosageItems = [
-    { icon: Pill, label: '1회 복용량', value: med.dose_per_intake },
+  // 짧은 숫자형 값 (1일 복용 횟수 / 총 복용 일수) 은 grid 2-col 로 한 행에 좌우 배치 —
+  // 사용자 피드백: 단독 row 일 때 오른쪽 여백 낭비.
+  // 자유 텍스트 (1회 복용량 / 복용 방법) 은 full row 로 유지 — 한 줄에 가둘 수 없는 길이 가능성.
+  const compactItems = [
     {
       icon: Clock,
       label: '1일 복용 횟수',
@@ -176,6 +178,9 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
       label: '총 복용 일수',
       value: med.total_intake_days ? `${med.total_intake_days}일` : null,
     },
+  ].filter((item) => item.value)
+  const fullRowItems = [
+    { icon: Pill, label: '1회 복용량', value: med.dose_per_intake },
     { icon: Utensils, label: '복용 방법', value: med.intake_instruction },
   ].filter((item) => item.value)
 
@@ -241,20 +246,42 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
         <div className="p-5">
           {activeTab === '용법' && (
             <div className="space-y-3 animate-in fade-in duration-200">
-              {dosageItems.length > 0 ? (
-                dosageItems.map(({ icon: Icon, label, value }) => (
-                  <div key={label} className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                    <div className="w-9 h-9 bg-white rounded-xl flex items-center justify-center border border-gray-100 shrink-0">
-                      <Icon size={16} className="text-gray-500" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-400">{label}</p>
-                      <p className="font-bold text-sm text-gray-900">{value}</p>
-                    </div>
-                  </div>
-                ))
-              ) : (
+              {compactItems.length === 0 && fullRowItems.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-6">복용 정보가 없습니다.</p>
+              ) : (
+                <>
+                  {/* 1회 복용량 / 복용 방법 — 자유 텍스트라 full row */}
+                  {fullRowItems.map(({ icon: Icon, label, value }) => (
+                    <div key={label} className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
+                      <div className="w-9 h-9 bg-white rounded-xl flex items-center justify-center border border-gray-100 shrink-0">
+                        <Icon size={16} className="text-gray-500" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400">{label}</p>
+                        <p className="font-bold text-sm text-gray-900">{value}</p>
+                      </div>
+                    </div>
+                  ))}
+                  {/* 1일 복용 횟수 + 총 복용 일수 — 한 행에 좌우 grid 2-col */}
+                  {compactItems.length > 0 && (
+                    <div className="grid grid-cols-2 gap-3">
+                      {compactItems.map(({ icon: Icon, label, value }) => (
+                        <div
+                          key={label}
+                          className="flex items-center gap-3 p-4 bg-gray-50 rounded-xl"
+                        >
+                          <div className="w-9 h-9 bg-white rounded-xl flex items-center justify-center border border-gray-100 shrink-0">
+                            <Icon size={16} className="text-gray-500" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs text-gray-400">{label}</p>
+                            <p className="font-bold text-sm text-gray-900 truncate">{value}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
 
               {/* 복용 시간대 — 토글 시 PATCH /medications/{id} + 홈 TodaySchedule 즉시 반영 */}
