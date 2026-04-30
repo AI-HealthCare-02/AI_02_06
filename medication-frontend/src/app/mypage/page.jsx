@@ -180,12 +180,39 @@ function HealthInfoModal({ info, onClose, onSave }) {
   )
 }
 
+// 가족 관계 선택지 — 7종 (SELF 제외, OTHER 포함). 라벨 = ProfileContext 의 RELATION_LABELS 와 일치.
+const FAMILY_RELATION_OPTIONS = [
+  { value: 'FATHER', label: '아버지' },
+  { value: 'MOTHER', label: '어머니' },
+  { value: 'SON', label: '아들' },
+  { value: 'DAUGHTER', label: '딸' },
+  { value: 'HUSBAND', label: '남편' },
+  { value: 'WIFE', label: '아내' },
+  { value: 'OTHER', label: '기타' },
+]
+
+// relation_type → 기본 gender 매핑 (BE 의 RELATION_DEFAULT_GENDER 와 동기화)
+const RELATION_GENDER_DEFAULT = {
+  FATHER: 'MALE',
+  MOTHER: 'FEMALE',
+  SON: 'MALE',
+  DAUGHTER: 'FEMALE',
+  HUSBAND: 'MALE',
+  WIFE: 'FEMALE',
+}
+
 function FamilyModal({ member, onClose, onSave }) {
   const [formData, setFormData] = useState(
     member
-      ? { name: member.name, relation_type: member.relation_type, gender: member.gender || 'MALE' }
-      : { name: '', relation_type: 'PARENT', gender: 'MALE' }
+      ? { name: member.name, relation_type: member.relation_type, gender: member.gender || null }
+      : { name: '', relation_type: 'FATHER', gender: 'MALE' }
   )
+
+  // 관계 변경 시 gender 자동 default — 사용자가 별도로 다른 성별을 선택했으면 그 값 유지
+  const handleRelationChange = (newRelation) => {
+    const defaultGender = RELATION_GENDER_DEFAULT[newRelation] ?? null
+    setFormData({ ...formData, relation_type: newRelation, gender: defaultGender })
+  }
 
   return (
     <Modal title={member ? "가족 정보 수정" : "가족 추가하기"} onClose={onClose} onSave={() => onSave(formData)}>
@@ -198,29 +225,33 @@ function FamilyModal({ member, onClose, onSave }) {
         <div>
           <label className="text-xs font-black text-gray-400 mb-2 block ml-1">관계</label>
           <select
-            value={`${formData.relation_type}-${formData.gender}`}
-            onChange={(e) => {
-              const val = e.target.value;
-              let relation = 'OTHER';
-              let gender = 'MALE';
-              if (val === 'PARENT-MALE') { relation = 'PARENT'; gender = 'MALE'; }
-              else if (val === 'PARENT-FEMALE') { relation = 'PARENT'; gender = 'FEMALE'; }
-              else if (val === 'CHILD-MALE') { relation = 'CHILD'; gender = 'MALE'; }
-              else if (val === 'CHILD-FEMALE') { relation = 'CHILD'; gender = 'FEMALE'; }
-              else if (val === 'SPOUSE-MALE') { relation = 'SPOUSE'; gender = 'MALE'; }
-              else if (val === 'SPOUSE-FEMALE') { relation = 'SPOUSE'; gender = 'FEMALE'; }
-              setFormData({ ...formData, relation_type: relation, gender: gender });
-            }}
+            value={formData.relation_type}
+            onChange={(e) => handleRelationChange(e.target.value)}
             className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 appearance-none"
           >
-            <option value="PARENT-MALE">아버지</option>
-            <option value="PARENT-FEMALE">어머니</option>
-            <option value="CHILD-MALE">아들</option>
-            <option value="CHILD-FEMALE">딸</option>
-            <option value="SPOUSE-MALE">남편</option>
-            <option value="SPOUSE-FEMALE">아내</option>
-            <option value="OTHER-MALE">기타</option>
+            {FAMILY_RELATION_OPTIONS.map(({ value, label }) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
           </select>
+        </div>
+        <div>
+          <label className="text-xs font-black text-gray-400 mb-2 block ml-1">성별</label>
+          <div className="flex gap-3">
+            {['MALE', 'FEMALE'].map((g) => (
+              <button
+                key={g}
+                type="button"
+                onClick={() => setFormData({ ...formData, gender: g })}
+                className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${
+                  formData.gender === g
+                    ? 'bg-gray-900 text-white border-gray-900'
+                    : 'bg-gray-50 text-gray-500 border-gray-100 hover:bg-gray-100'
+                }`}
+              >
+                {g === 'MALE' ? '남성' : '여성'}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </Modal>
@@ -271,7 +302,17 @@ export default function MyPage() {
   const [modalType, setModalType] = useState(null)
   const [selectedFamilyMember, setSelectedFamilyMember] = useState(null)
 
-  const relationLabels = { SELF: '본인', PARENT: '부모님', CHILD: '자녀', SPOUSE: '배우자', OTHER: '기타' }
+  // 가족 관계 enum 8종 단일 매핑 — gender 합성 없이 라벨 결정
+  const relationLabels = {
+    SELF: '본인',
+    FATHER: '아버지',
+    MOTHER: '어머니',
+    SON: '아들',
+    DAUGHTER: '딸',
+    HUSBAND: '남편',
+    WIFE: '아내',
+    OTHER: '기타',
+  }
 
   useEffect(() => {
     if (!profileId) return
@@ -344,7 +385,8 @@ export default function MyPage() {
         conditions: newData.conditions.length > 0 ? newData.conditions : null,
         allergies: newData.allergies.length > 0 ? newData.allergies : null,
       }
-      await updateProfile(userProfile.id, { health_survey: healthSurvey })
+      // gender 는 별도 컬럼으로도 저장 (BE 의 Profile.gender) — health_survey.gender 와 dual write
+      await updateProfile(userProfile.id, { health_survey: healthSurvey, gender: newData.gender || null })
       toast.success('건강 정보가 업데이트되었습니다.')
       setModalType(null)
     } catch (err) { handleApiError(err) }
@@ -352,19 +394,18 @@ export default function MyPage() {
 
   const handleSaveFamily = async (newData) => {
     try {
-      // [수정] 성별 데이터를 명시적으로 포함하여 전송 (관계 매칭 오류 해결)
+      // BE 가 RELATION_DEFAULT_GENDER 로 자동 채우므로 gender 미지정 시 null 도 안전.
+      // 사용자가 form 에서 성별 토글 변경 시 그 값이 그대로 BE 에 전송되어 우선됨.
       const payload = {
         name: newData.name,
         relation_type: newData.relation_type,
         gender: newData.gender,
-        account_id: userProfile.account_id,
-        health_survey: { gender: newData.gender }
-      };
+      }
       if (selectedFamilyMember) {
-        await updateProfile(selectedFamilyMember.id, newData)
+        await updateProfile(selectedFamilyMember.id, payload)
         toast.success('가족 정보가 수정되었습니다.')
       } else {
-        await createProfile({ ...newData, account_id: userProfile.account_id, health_survey: {} })
+        await createProfile({ ...payload, account_id: userProfile.account_id })
         toast.success('가족이 추가되었습니다.')
       }
       if (refetchProfiles) await refetchProfiles()
@@ -393,16 +434,12 @@ export default function MyPage() {
     { id: '가족관리', label: '가족 관리', icon: <Users size={18} /> },
   ]
 
-  // [추가] 상세 관계 텍스트 변환 함수
+  // 상세 관계 텍스트 — gender 합성 없이 enum 8종 단일 매핑
   const getDetailRelation = (profile) => {
-    const rel = profile?.relation_type;
-    const gen = profile?.health_survey?.gender || profile?.gender;
-    if (rel === 'SELF') return '본인 계정';
-    if (rel === 'PARENT') return gen === 'MALE' ? '부모님(아버지)' : '부모님(어머니)';
-    if (rel === 'CHILD') return gen === 'MALE' ? '자녀(아들)' : '자녀(딸)';
-    if (rel === 'SPOUSE') return gen === 'MALE' ? '배우자(남편)' : '배우자(아내)';
-    return '가족';
-  };
+    const rel = profile?.relation_type
+    if (rel === 'SELF') return '본인 계정'
+    return relationLabels[rel] ?? '가족'
+  }
 
   return (
     <main className={`max-w-[1400px] mx-auto w-full px-8 py-12 min-h-screen bg-slate-50 relative transition-opacity duration-200 ${isRefreshing ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
@@ -491,7 +528,7 @@ export default function MyPage() {
                 </div>
                 <div className="grid sm:grid-cols-2 gap-6">
                   <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">나이</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.age ? `${userProfile.health_survey.age}세` : '-'}</p></div>
-                  <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">성별</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.gender === 'MALE' ? '남성' : userProfile?.health_survey?.gender === 'FEMALE' ? '여성' : '-'}</p></div>
+                  <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">성별</p><p className="text-xl font-black text-gray-800">{(() => { const g = userProfile?.gender ?? userProfile?.health_survey?.gender; return g === 'MALE' ? '남성' : g === 'FEMALE' ? '여성' : '-' })()}</p></div>
                   <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">키 / 몸무게</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.height ? `${userProfile.health_survey.height}cm` : '-'} / {userProfile?.health_survey?.weight ? `${userProfile.health_survey.weight}kg` : '-'}</p></div>
                   <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">흡연 / 음주</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.is_smoking === true ? '흡연' : userProfile?.health_survey?.is_smoking === false ? '비흡연' : '-'} / {userProfile?.health_survey?.is_drinking === true ? '음주' : userProfile?.health_survey?.is_drinking === false ? '비음주' : '-'}</p></div>
                   <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-100"><p className="text-xs font-black text-gray-400 mb-2">보유 질환</p><p className="text-xl font-black text-gray-800">{userProfile?.health_survey?.conditions?.join(', ') || '없음'}</p></div>
@@ -525,12 +562,8 @@ export default function MyPage() {
                         setSelectedFamilyMember(member)
                         setModalType('family')
                       }
-                      // 상세 호칭 (성별까지) — main PR 흡수
-                      const detailLabel =
-                        member.relation_type === 'PARENT' ? (member.gender === 'MALE' ? '아버지' : '어머니') :
-                        member.relation_type === 'CHILD' ? (member.gender === 'MALE' ? '아들' : '딸') :
-                        member.relation_type === 'SPOUSE' ? (member.gender === 'MALE' ? '남편' : '아내') :
-                        relationLabels[member.relation_type]
+                      // 상세 호칭 — relation_type enum 8종 단일 매핑 (gender 합성 없음)
+                      const detailLabel = relationLabels[member.relation_type] ?? '가족'
                       return (
                         <div
                           key={member.id}
