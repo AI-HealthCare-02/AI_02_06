@@ -47,6 +47,15 @@ class Challenge(models.Model):
         description="Source guide — None means user-created challenge",
     )
 
+    # 처방전 그룹 — 가이드와 함께 처방전 단위로 묶이는 컨텍스트.
+    # 옛 row (마이그레이션 #24 시점 이전) 는 NULL.
+    prescription_group = fields.ForeignKeyField(
+        "models.PrescriptionGroup",
+        related_name="challenges",
+        null=True,
+        description="소속 처방전 그룹 (신규부터 set)",
+    )
+
     # Lifestyle category — matches GuideCategory enum values
     category = fields.CharField(
         max_length=16,

@@ -13,8 +13,10 @@ from tortoise.transactions import in_transaction
 from app.dtos.drug_info import DrugInfoResponse, PrecautionSection
 from app.dtos.medication import MedicationBulkDeleteResponse, MedicationCreate, MedicationUpdate, PrescriptionDateItem
 from app.models.medication import Medication
+from app.models.prescription_group import PrescriptionGroupSource
 from app.repositories.medication_repository import MedicationRepository
 from app.repositories.medicine_info_repository import MedicineInfoRepository
+from app.repositories.prescription_group_repository import PrescriptionGroupRepository
 from app.repositories.profile_repository import ProfileRepository
 from app.services.lifestyle_guide_service import LifestyleGuideService
 from app.services.recall_notification_service import check_and_alert_on_medication_save
@@ -29,6 +31,7 @@ class MedicationService:
         self.repository = MedicationRepository()
         self.profile_repository = ProfileRepository()
         self.lifestyle_guide_service = LifestyleGuideService()
+        self.prescription_group_repository = PrescriptionGroupRepository()
 
     async def _verify_profile_ownership(self, profile_id: UUID, account_id: UUID) -> None:
         """Verify profile ownership.
@@ -199,7 +202,11 @@ class MedicationService:
         profile_id: UUID,
         data: MedicationCreate,
     ) -> Medication:
-        """Create new medication.
+        """Create new medication — 단건 호출 = 단건 처방전 그룹 자동 생성.
+
+        OCR 흐름과 마찬가지로 한 호출 = 한 처방전 도메인 의미를 유지하기 위해
+        manual 등록도 새 ``PrescriptionGroup`` 을 만들고 그 FK 를 채운다. 사용자가
+        같은 처방전에 여러 약을 추가하려면 future bulk endpoint 가 필요하다.
 
         Args:
             profile_id: Profile UUID.
@@ -208,19 +215,27 @@ class MedicationService:
         Returns:
             Medication: Created medication.
         """
-        medication = await self.repository.create(
-            profile_id=profile_id,
-            medicine_name=data.medicine_name,
-            dose_per_intake=data.dose_per_intake,
-            intake_instruction=data.intake_instruction,
-            intake_times=data.intake_times,
-            total_intake_count=data.total_intake_count,
-            remaining_intake_count=data.remaining_intake_count or data.total_intake_count,
-            start_date=data.start_date,
-            end_date=data.end_date,
-            dispensed_date=data.dispensed_date,
-            expiration_date=data.expiration_date,
-        )
+        async with in_transaction():
+            group = await self.prescription_group_repository.create(
+                profile_id=profile_id,
+                dispensed_date=data.dispensed_date,
+                department=None,
+                source=PrescriptionGroupSource.MANUAL,
+            )
+            medication = await self.repository.create(
+                profile_id=profile_id,
+                prescription_group_id=group.id,
+                medicine_name=data.medicine_name,
+                dose_per_intake=data.dose_per_intake,
+                intake_instruction=data.intake_instruction,
+                intake_times=data.intake_times,
+                total_intake_count=data.total_intake_count,
+                remaining_intake_count=data.remaining_intake_count or data.total_intake_count,
+                start_date=data.start_date,
+                end_date=data.end_date,
+                dispensed_date=data.dispensed_date,
+                expiration_date=data.expiration_date,
+            )
 
         # ── F3: 즉시 회수 체크 (Phase 7, PLAN §16.3.2 헬퍼 위임) ────────
         # 등록 시점에 이미 회수 발표된 약이면 cron 24h 대기 없이 즉시 알림.

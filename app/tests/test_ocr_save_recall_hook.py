@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -48,7 +49,11 @@ async def test_save_one_medication_invokes_helper() -> None:
         patch("app.services.ocr_service.Medication.create", new=AsyncMock(return_value=fake_medication)),
         patch(_HELPER, new=AsyncMock(return_value=None)) as helper,
     ):
-        result = await service._save_one_medication(_extracted_medicine(), profile_id="p-1")
+        result = await service._save_one_medication(
+            _extracted_medicine(),
+            profile_id="p-1",
+            group_id=uuid4(),
+        )
 
     assert result is fake_medication
     helper.assert_awaited_once()
@@ -75,6 +80,10 @@ async def test_helper_exception_does_not_break_save() -> None:
         patch("app.services.ocr_service.Medication.create", new=AsyncMock(return_value=fake_medication)),
         patch(_HELPER, new=AsyncMock(side_effect=boom)),
     ):
-        result = await service._save_one_medication(_extracted_medicine(), profile_id="p-1")
+        result = await service._save_one_medication(
+            _extracted_medicine(),
+            profile_id="p-1",
+            group_id=uuid4(),
+        )
 
     assert result is fake_medication

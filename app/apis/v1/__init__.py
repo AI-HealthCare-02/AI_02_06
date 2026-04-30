@@ -17,6 +17,7 @@ from app.apis.v1.message_routers import router as message_router
 from app.apis.v1.mock_oauth_routers import mock_router
 from app.apis.v1.oauth_routers import oauth_router
 from app.apis.v1.ocr_routers import router as ocr_router
+from app.apis.v1.prescription_group_routers import router as prescription_group_router
 from app.apis.v1.profile_routers import router as profile_router
 
 # Main v1 API router
@@ -35,3 +36,4 @@ v1_routers.include_router(profile_router)
 v1_routers.include_router(chat_session_router)
 v1_routers.include_router(message_router)
 v1_routers.include_router(ocr_router)
+v1_routers.include_router(prescription_group_router)

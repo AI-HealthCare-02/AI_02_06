@@ -89,6 +89,10 @@ class MedicationResponse(BaseMedication):
 
     id: UUID = Field(..., description="Medication record ID")
     profile_id: UUID = Field(..., description="Connected profile ID")
+    prescription_group_id: UUID | None = Field(
+        None,
+        description="소속 처방전 그룹 ID (단계 1 이전 row 는 NULL)",
+    )
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     deleted_at: datetime | None = Field(None, description="Deletion timestamp")

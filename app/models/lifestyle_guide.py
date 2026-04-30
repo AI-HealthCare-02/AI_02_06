@@ -67,6 +67,14 @@ class LifestyleGuide(models.Model):
         related_name="lifestyle_guides",
         description="Guide owner profile",
     )
+    # 처방전 그룹 — 신규 가이드는 set 되어 처방전 컨텍스트로 묶임.
+    # 옛 row (마이그레이션 #24 시점 이전 가이드) 는 NULL — 처방전 단위 아님.
+    prescription_group = fields.ForeignKeyField(
+        "models.PrescriptionGroup",
+        related_name="lifestyle_guides",
+        null=True,
+        description="가이드가 만들어진 처방전 그룹 (신규부터 set)",
+    )
 
     status = fields.CharField(
         max_length=16,

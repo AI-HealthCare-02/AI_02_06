@@ -30,6 +30,7 @@ from uuid import UUID
 
 from fastapi import UploadFile
 from rq import Queue
+from tortoise.transactions import in_transaction
 
 from app.core.config import config
 from app.core.redis_client import make_sync_redis
@@ -44,10 +45,33 @@ from app.dtos.ocr import (
 )
 from app.models.medication import Medication
 from app.models.ocr_draft import OcrDraft
+from app.models.prescription_group import PrescriptionGroupSource
 from app.repositories.ocr_draft_repository import OcrDraftRepository
+from app.repositories.prescription_group_repository import PrescriptionGroupRepository
 from app.services.recall_notification_service import check_and_alert_on_medication_save
 
 logger = logging.getLogger(__name__)
+
+
+def _first_dispensed_date(meds: list[ExtractedMedicine]) -> Any:
+    """검수된 약품 list 에서 처방전 그룹 메타로 사용할 dispensed_date 1개를 추출.
+
+    한 처방전 안의 약품들은 보통 같은 dispensed_date 를 가지므로 첫 번째
+    non-null 값을 채택. 모두 NULL 이면 None (그룹의 dispensed_date 도 NULL).
+    """
+    for med in meds:
+        if med.dispensed_date is not None:
+            return med.dispensed_date
+    return None
+
+
+def _first_department(meds: list[ExtractedMedicine]) -> str | None:
+    """그룹 메타 진료과 — 첫 번째 non-null 값 채택."""
+    for med in meds:
+        if med.department:
+            return med.department
+    return None
+
 
 _OCR_JOB_REF = "ai_worker.domains.ocr.jobs.process_ocr_task"
 
@@ -65,6 +89,7 @@ class OCRService:
         redis_url = os.environ.get("REDIS_URL", "redis://redis:6379")
         self._queue = Queue("ai", connection=make_sync_redis(redis_url))
         self._repository = repository or OcrDraftRepository()
+        self._prescription_group_repository = PrescriptionGroupRepository()
 
     async def enqueue_ocr_task(self, file: UploadFile, profile_id: UUID | str) -> OcrExtractResponse:
         """업로드 bytes 를 ai-worker 로 enqueue 한다 (dedup 적용).
@@ -256,20 +281,38 @@ class OCRService:
             await self._audit_ownership_miss(request.draft_id, profile_id, action="confirm")
             raise ValueError("이미 처리되었거나 만료된 처방전입니다. 새로 등록해주세요.")
 
-        saved = [await self._save_one_medication(med, profile_id) for med in request.confirmed_medicines]
+        # 처방전 그룹 + medication bulk insert 트랜잭션 — OCR 한 호출 = 한 처방전
+        # 이라는 도메인 의미를 모델 단에서 일관되게 보장.
+        async with in_transaction():
+            confirmed = list(request.confirmed_medicines)
+            group = await self._prescription_group_repository.create(
+                profile_id=profile_id,
+                dispensed_date=_first_dispensed_date(confirmed),
+                department=_first_department(confirmed),
+                source=PrescriptionGroupSource.OCR,
+            )
+            saved = [await self._save_one_medication(med, profile_id, group_id=group.id) for med in confirmed]
+
         return {
             "status": "success",
             "message": f"{len(saved)}개의 약품이 성공적으로 저장되었습니다.",
         }
 
-    async def _save_one_medication(self, med: ExtractedMedicine, profile_id: UUID | str) -> Medication:
-        """확정된 약품 한 건을 ``Medication`` 으로 저장."""
+    async def _save_one_medication(
+        self,
+        med: ExtractedMedicine,
+        profile_id: UUID | str,
+        *,
+        group_id: UUID,
+    ) -> Medication:
+        """확정된 약품 한 건을 ``Medication`` 으로 저장 (처방전 그룹 FK 채움)."""
         daily_count = med.daily_intake_count or 1
         total_days = med.total_intake_days or 1
         total_count = daily_count * total_days
         today = datetime.now(tz=config.TIMEZONE).date()
         medication = await Medication.create(
             profile_id=str(profile_id),
+            prescription_group_id=group_id,
             medicine_name=med.medicine_name,
             department=med.department,
             category=med.category,

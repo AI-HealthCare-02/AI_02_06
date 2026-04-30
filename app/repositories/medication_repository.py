@@ -154,6 +154,7 @@ class MedicationRepository:
         end_date: date | None = None,
         dispensed_date: date | None = None,
         expiration_date: date | None = None,
+        prescription_group_id: UUID | None = None,
     ) -> Medication:
         """Create new medication.
 
@@ -169,6 +170,8 @@ class MedicationRepository:
             end_date: Optional expected end date.
             dispensed_date: Optional dispensing date.
             expiration_date: Optional expiration date.
+            prescription_group_id: 소속 처방전 그룹 UUID — 호출 측 service 가
+                OCR/MANUAL 흐름에서 그룹을 먼저 만든 뒤 전달한다.
 
         Returns:
             Medication: Created medication.
@@ -176,6 +179,7 @@ class MedicationRepository:
         return await Medication.create(
             id=uuid4(),
             profile_id=profile_id,
+            prescription_group_id=prescription_group_id,
             medicine_name=medicine_name,
             dose_per_intake=dose_per_intake,
             intake_instruction=intake_instruction,
