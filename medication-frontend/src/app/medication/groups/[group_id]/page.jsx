@@ -22,7 +22,15 @@ import toast from 'react-hot-toast'
 
 import { showError } from '@/lib/api'
 import BottomNav from '@/components/layout/BottomNav'
+import MedicationDetailPanel from '@/components/medication/MedicationDetailPanel'
 import { usePrescriptionGroup } from '@/contexts/PrescriptionGroupContext'
+
+// 등록 경로 — 사용자에게 보일 한국어 라벨 매핑
+const SOURCE_LABEL = {
+  OCR: '이미지',
+  MANUAL: '직접 입력',
+  MIGRATED: '기존 등록',
+}
 
 function formatDate(isoStr) {
   if (!isoStr) return '날짜 미상'
@@ -93,7 +101,7 @@ function EditableMetaRow({
   )
 }
 
-function MedicationItem({ medication, onClick }) {
+function MedicationItem({ medication, onClick, selected = false }) {
   const dose = medication.dose_per_intake || ''
   const instr = medication.intake_instruction || ''
   const inactive = !medication.is_active
@@ -101,7 +109,9 @@ function MedicationItem({ medication, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className="w-full text-left bg-white rounded-2xl border border-gray-100 hover:border-gray-300 transition-colors p-4 flex items-center gap-3 cursor-pointer"
+      className={`w-full text-left bg-white rounded-2xl border transition-colors p-4 flex items-center gap-3 cursor-pointer ${
+        selected ? 'border-gray-900 ring-1 ring-gray-900' : 'border-gray-100 hover:border-gray-300'
+      }`}
     >
       <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center shrink-0">
         <Pill size={18} />
@@ -222,6 +232,25 @@ export default function PrescriptionGroupDetailPage() {
 
   const allInactive = group?.medications?.length > 0 && group.medications.every((m) => !m.is_active)
 
+  // 데스크탑 split-pane: lg 이상에서 우측 panel 에 약품 상세 inline 표시.
+  // 같은 처방전의 약 클릭 시 페이지 push 대신 selectedMedicationId 만 변경.
+  // 모바일 (< lg) 에선 약 클릭 시 기존처럼 /medication/[id] 페이지로 이동.
+  const [selectedMedicationId, setSelectedMedicationId] = useState(null)
+  const handleMedicationClick = (medicationId) => {
+    if (typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches) {
+      setSelectedMedicationId(medicationId)
+    } else {
+      router.push(`/medication/${medicationId}`)
+    }
+  }
+  // 그룹의 약 list 가 갱신되면 선택된 약이 사라졌는지 체크 (삭제 등)
+  useEffect(() => {
+    if (!selectedMedicationId || !group?.medications) return
+    if (!group.medications.find((m) => m.id === selectedMedicationId)) {
+      setSelectedMedicationId(null)
+    }
+  }, [group?.medications, selectedMedicationId])
+
   return (
     <main className="min-h-screen bg-gray-50 pb-24">
       <header className="sticky top-0 z-20 bg-white border-b border-gray-100">
@@ -309,24 +338,35 @@ export default function PrescriptionGroupDetailPage() {
                 maxLength={64}
               />
               <p className="text-[11px] text-gray-400 pt-1">
-                약 {group.medications?.length || 0}개 · 등록 경로 {group.source}
+                약 {group.medications?.length || 0}개 · 등록 경로 {SOURCE_LABEL[group.source] || group.source}
                 {allInactive && <span className="ml-2 text-green-500 font-bold">· 복용 완료</span>}
               </p>
             </div>
 
-            {(group.medications || []).length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-8">이 처방전엔 등록된 약이 없어요.</p>
-            ) : (
+            {/* 데스크탑: 약 list (왼쪽) + 약품 상세 (오른쪽) split-pane */}
+            {/* 모바일: list 만 표시, 약 클릭 시 별 페이지로 이동 */}
+            <div className="lg:grid lg:grid-cols-[minmax(280px,360px)_1fr] lg:gap-4">
               <div className="space-y-2">
-                {group.medications.map((m) => (
-                  <MedicationItem
-                    key={m.id}
-                    medication={m}
-                    onClick={() => router.push(`/medication/${m.id}`)}
-                  />
-                ))}
+                {(group.medications || []).length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-8">이 처방전엔 등록된 약이 없어요.</p>
+                ) : (
+                  group.medications.map((m) => (
+                    <MedicationItem
+                      key={m.id}
+                      medication={m}
+                      onClick={() => handleMedicationClick(m.id)}
+                      selected={m.id === selectedMedicationId}
+                    />
+                  ))
+                )}
               </div>
-            )}
+              <div className="hidden lg:block bg-white rounded-2xl border border-gray-100 p-5">
+                <MedicationDetailPanel
+                  medicationId={selectedMedicationId}
+                  onDeleted={() => setSelectedMedicationId(null)}
+                />
+              </div>
+            </div>
           </>
         ) : null}
       </div>
