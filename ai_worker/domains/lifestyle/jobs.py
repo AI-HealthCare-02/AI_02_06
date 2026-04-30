@@ -116,10 +116,18 @@ def _build_openai_client() -> AsyncOpenAI:
 
 
 def _med_to_dict(med: Medication) -> dict:
-    """Medication ORM -> snapshot/prompt 안전한 dict."""
+    """Medication ORM -> snapshot/prompt 안전한 dict.
+
+    FastAPI 측 ``LifestyleGuideService._med_to_dict`` 와 동기화 — 두 곳 모두
+    처방일 / 시작일 / 종료일 ISO 문자열을 포함해야 FE 가 가이드 안내 배너에
+    처방일 라벨을 그릴 수 있다.
+    """
     return {
         "medicine_name": med.medicine_name,
         "category": getattr(med, "category", None),
         "intake_instruction": getattr(med, "intake_instruction", None),
         "dose_per_intake": getattr(med, "dose_per_intake", None),
+        "dispensed_date": med.dispensed_date.isoformat() if med.dispensed_date else None,
+        "start_date": med.start_date.isoformat() if med.start_date else None,
+        "end_date": med.end_date.isoformat() if med.end_date else None,
     }

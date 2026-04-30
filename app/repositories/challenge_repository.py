@@ -32,16 +32,25 @@ class ChallengeRepository:
     async def get_all_by_profile(self, profile_id: UUID) -> list[Challenge]:
         """Get all challenges for a profile.
 
+        ORDER BY target_days -> title 가나다 -> id 로 안정 정렬 (사용자 합의).
+        FE store 의 base list 가 매번 같은 순서가 되어 challengesByGuide /
+        activeChallenges 등 모든 selector 결과가 결정적이 된다.
+
         Args:
             profile_id: Profile UUID.
 
         Returns:
-            list[Challenge]: List of challenges.
+            list[Challenge]: 기간 짧은 순 → 제목 가나다 → id tiebreak.
         """
-        return await Challenge.filter(
-            profile_id=profile_id,
-            deleted_at__isnull=True,
-        ).all()
+        return (
+            await Challenge
+            .filter(
+                profile_id=profile_id,
+                deleted_at__isnull=True,
+            )
+            .order_by("target_days", "title", "id")
+            .all()
+        )
 
     async def get_all_by_profiles(self, profile_ids: list[UUID]) -> list[Challenge]:
         """Get all challenges for multiple profiles.
@@ -62,16 +71,25 @@ class ChallengeRepository:
     async def get_by_guide_id(self, guide_id: UUID) -> list[Challenge]:
         """Get all challenges linked to a specific lifestyle guide.
 
+        Returned order: target_days asc -> title 가나다 -> id (사용자 합의).
+        ORDER BY 없는 쿼리는 PostgreSQL 에서 row 순서가 undefined 라
+        화면이 매번 흔들리던 문제를 막기 위함.
+
         Args:
             guide_id: LifestyleGuide UUID.
 
         Returns:
-            list[Challenge]: List of challenges for the guide.
+            list[Challenge]: 기간 짧은 순 → 제목 가나다 → id tiebreak.
         """
-        return await Challenge.filter(
-            guide_id=guide_id,
-            deleted_at__isnull=True,
-        ).all()
+        return (
+            await Challenge
+            .filter(
+                guide_id=guide_id,
+                deleted_at__isnull=True,
+            )
+            .order_by("target_days", "title", "id")
+            .all()
+        )
 
     async def get_active_by_profile(self, profile_id: UUID) -> list[Challenge]:
         """Get active challenges for a profile.

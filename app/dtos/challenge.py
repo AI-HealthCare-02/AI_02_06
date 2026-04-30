@@ -67,6 +67,10 @@ class ChallengeResponse(BaseModel):
 
     id: UUID = Field(..., description="챌린지 레코드 ID")
     profile_id: UUID = Field(..., description="연결된 프로필 ID")
+    guide_id: UUID | None = Field(
+        None,
+        description="원본 LifestyleGuide ID (LLM 생성 시 set, 사용자 수동 생성 시 None)",
+    )
     # [추가] 생활습관 가이드 탭(diet/sleep/exercise/symptom/interaction)과 챌린지를 매핑하는 키
     # → 프론트에서 현재 탭에 해당하는 챌린지만 필터링할 때 사용
     category: str | None = Field(None, description="생활습관 카테고리 (diet/sleep/exercise/symptom/interaction)")

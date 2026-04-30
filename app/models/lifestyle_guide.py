@@ -54,6 +54,9 @@ class LifestyleGuide(models.Model):
         status: Async generation lifecycle status.
         content: Full GPT-generated guide as JSON (empty until status='ready').
         medication_snapshot: JSON snapshot of active medications at generation time.
+        input_fingerprint: SHA-256 hex of the canonical input (약물 set + 설문 +
+            프롬프트 버전). 같은 fingerprint 의 ready 가이드가 이미 있으면
+            서비스 단에서 새로 생성하지 않고 그것을 재사용한다.
         created_at: Row insertion timestamp (= enqueue time).
         processed_at: ai-worker terminal-status set time.
     """
@@ -78,9 +81,19 @@ class LifestyleGuide(models.Model):
     # Used for medication change detection (future scope)
     medication_snapshot = fields.JSONField(description="Active medication list at guide generation time")
 
+    # Canonical input fingerprint — 동일 입력 dedupe 용 (Phase B)
+    input_fingerprint = fields.CharField(
+        max_length=64,
+        null=True,
+        description="SHA-256 hex of canonical input (medications + survey + prompt_ver)",
+    )
+
     created_at = fields.DatetimeField(auto_now_add=True)
     processed_at = fields.DatetimeField(null=True, description="Terminal-status set time")
 
     class Meta:
         table = "lifestyle_guides"
-        indexes = (("profile_id", "created_at"),)
+        indexes = (
+            ("profile_id", "created_at"),
+            ("profile_id", "input_fingerprint"),
+        )

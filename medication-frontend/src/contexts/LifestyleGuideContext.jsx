@@ -1,9 +1,10 @@
 'use client'
 
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import api from '@/lib/api'
 import { streamSSE } from '@/lib/sseClient'
 import { useProfile } from '@/contexts/ProfileContext'
+import { useChallenge } from '@/contexts/ChallengeContext'
 
 const LifestyleGuideContext = createContext(null)
 
@@ -37,9 +38,16 @@ async function* watchGuideStatus(guideId, signal) {
  */
 export function LifestyleGuideProvider({ children }) {
   const { selectedProfileId } = useProfile()
+  // 가이드 ready 시 BE 가 INSERT 한 챌린지를 ChallengeContext store 에 union.
+  // ChallengeProvider 가 상위에 mount 되어 있어야 한다 (layout.js 참조).
+  const { appendChallenges } = useChallenge()
   const [guides, setGuides] = useState([])
   const [latestGuide, setLatestGuide] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
+  // 사용자가 생성 중인 가이드를 직접 삭제한 경우, SSE 의 "Guide not found" error
+  // 가 generateGuide 까지 throw 되어 토스트 두 개 ("Guide not found." + "가이드가
+  // 삭제되었습니다") 가 동시에 뜨던 문제를 해결하기 위한 silent-cancel ref.
+  const cancelledGuideIds = useRef(new Set())
 
   const fetchGuides = useCallback(async (profileId) => {
     if (!profileId) return
@@ -77,6 +85,9 @@ export function LifestyleGuideProvider({ children }) {
   // ── 응답 기반 mutation ──────────────────────────────
 
   const deleteGuide = useCallback(async (id) => {
+    // SSE 진행 중인 placeholder 도 삭제될 수 있음 — 그 경우 generateGuide 측의
+    // SSE error 가 silent 처리되도록 cancelled set 에 미리 등록.
+    cancelledGuideIds.current.add(id)
     await api.delete(`/api/v1/lifestyle-guides/${id}`)
     setGuides(prev => prev.filter(g => g.id !== id))
     setLatestGuide(prev => (prev?.id === id ? null : prev))
@@ -94,6 +105,26 @@ export function LifestyleGuideProvider({ children }) {
   const generateGuide = useCallback(async (profileId, signal) => {
     const enqueueRes = await api.post(`/api/v1/lifestyle-guides/generate?profile_id=${profileId}`, null)
     const pendingId = enqueueRes.data.id
+
+    // Phase B dedupe hit — BE 가 같은 입력 fingerprint 의 ready 가이드를
+    // 즉시 반환. SSE 건너뛰고 가이드 + 챌린지 한 번에 fetch.
+    if (enqueueRes.data.status === 'ready') {
+      const { data: ready } = await api.get(`/api/v1/lifestyle-guides/${pendingId}`)
+      setGuides(prev => {
+        const exists = prev.some(g => g.id === ready.id)
+        return exists ? prev.map(g => (g.id === ready.id ? ready : g)) : [ready, ...prev]
+      })
+      setLatestGuide(ready)
+      try {
+        const { data: chs } = await api.get(`/api/v1/lifestyle-guides/${pendingId}/challenges`)
+        appendChallenges(chs)
+      } catch (err) {
+        if (err.response?.status !== 401) console.error('dedupe 챌린지 sync 실패:', err)
+      }
+      ready.deduped = true  // page 측에서 토스트 분기 가능
+      return ready
+    }
+
     const pendingGuide = {
       id: pendingId,
       profile_id: profileId,
@@ -104,27 +135,50 @@ export function LifestyleGuideProvider({ children }) {
       processed_at: null,
     }
     setGuides(prev => [pendingGuide, ...prev])
-    setLatestGuide(pendingGuide)
+    // latestGuide 는 ready 일 때만 갱신 — 생성 중에도 페이지가 직전 ready
+    // 가이드를 selectedGuide 로 유지할 수 있게 하기 위함.
 
-    for await (const payload of watchGuideStatus(pendingId, signal)) {
-      if (payload.status === 'ready') {
-        setGuides(prev => prev.map(g => (g.id === pendingId ? payload : g)))
-        setLatestGuide(payload)
-        return payload
+    try {
+      for await (const payload of watchGuideStatus(pendingId, signal)) {
+        if (payload.status === 'ready') {
+          setGuides(prev => prev.map(g => (g.id === pendingId ? payload : g)))
+          setLatestGuide(payload)
+          // 가이드와 함께 BE 가 INSERT 한 챌린지를 ChallengeContext store 에 즉시 union
+          // → 페이지 reload 없이 추천 챌린지 카드/배너가 곧바로 렌더된다.
+          try {
+            const { data: newChallenges } = await api.get(
+              `/api/v1/lifestyle-guides/${pendingId}/challenges`,
+            )
+            appendChallenges(newChallenges)
+          } catch (err) {
+            if (err.response?.status !== 401) console.error('가이드 챌린지 sync 실패:', err)
+          }
+          return payload
+        }
+        if (payload.status in GUIDE_TERMINAL_ERROR_MESSAGES) {
+          setGuides(prev => prev.filter(g => g.id !== pendingId))
+          setLatestGuide(prev => (prev?.id === pendingId ? null : prev))
+          const err = new Error(GUIDE_TERMINAL_ERROR_MESSAGES[payload.status])
+          err.terminal_status = payload.status
+          throw err
+        }
       }
-      if (payload.status in GUIDE_TERMINAL_ERROR_MESSAGES) {
-        setGuides(prev => prev.filter(g => g.id !== pendingId))
-        setLatestGuide(prev => (prev?.id === pendingId ? null : prev))
-        const err = new Error(GUIDE_TERMINAL_ERROR_MESSAGES[payload.status])
-        err.terminal_status = payload.status
-        throw err
+    } catch (err) {
+      // 사용자가 생성 중 placeholder 를 직접 삭제한 경우 — silent return.
+      // (deleteGuide 가 띄우는 "가이드가 삭제되었습니다" 토스트만 보이게.)
+      if (cancelledGuideIds.current.has(pendingId)) {
+        cancelledGuideIds.current.delete(pendingId)
+        return null
       }
+      setGuides(prev => prev.filter(g => g.id !== pendingId))
+      setLatestGuide(prev => (prev?.id === pendingId ? null : prev))
+      throw err
     }
     // SSE 가 ready 없이 종료된 경우 — placeholder 정리 후 throw
     setGuides(prev => prev.filter(g => g.id !== pendingId))
     setLatestGuide(prev => (prev?.id === pendingId ? null : prev))
     throw new Error('가이드 생성이 완료되지 않았어요. 잠시 후 다시 시도해주세요.')
-  }, [])
+  }, [appendChallenges])
 
   const refetchGuides = useCallback(
     () => fetchGuides(selectedProfileId),

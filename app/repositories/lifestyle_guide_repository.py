@@ -46,6 +46,7 @@ class LifestyleGuideRepository:
         self,
         profile_id: UUID,
         medication_snapshot: list[dict],
+        input_fingerprint: str | None = None,
     ) -> LifestyleGuide:
         """Insert a pending guide row — RQ producer 진입점.
 
@@ -55,6 +56,7 @@ class LifestyleGuideRepository:
         Args:
             profile_id: Owner profile UUID.
             medication_snapshot: Snapshot of active meds (이후 LLM 입력).
+            input_fingerprint: 동일 입력 dedupe 용 SHA-256 hex (Phase B).
 
         Returns:
             새로 INSERT 된 ``LifestyleGuide`` 인스턴스.
@@ -65,6 +67,32 @@ class LifestyleGuideRepository:
             content={},
             medication_snapshot=medication_snapshot,
             status=LifestyleGuideStatusValue.PENDING.value,
+            input_fingerprint=input_fingerprint,
+        )
+
+    async def get_ready_by_fingerprint(
+        self,
+        profile_id: UUID,
+        input_fingerprint: str,
+    ) -> LifestyleGuide | None:
+        """동일 입력 fingerprint 의 ready 가이드를 찾아 반환 (Phase B dedupe).
+
+        Args:
+            profile_id: Owner profile UUID.
+            input_fingerprint: SHA-256 hex of canonical input.
+
+        Returns:
+            매칭되는 ready 가이드 (가장 최근). 없으면 None.
+        """
+        return (
+            await LifestyleGuide
+            .filter(
+                profile_id=profile_id,
+                input_fingerprint=input_fingerprint,
+                status=LifestyleGuideStatusValue.READY.value,
+            )
+            .order_by("-created_at")
+            .first()
         )
 
     async def mark_ready(self, guide_id: UUID | str, content: dict) -> int:

@@ -88,6 +88,31 @@ function formatFullDate(isoStr) {
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`
 }
 
+// formatFullDateTime: 과거 가이드 안내/삭제 confirm 등에 표시 — 시간까지 (예: "2026.04.30 18:23")
+function formatFullDateTime(isoStr) {
+  const d = new Date(isoStr)
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const HH = String(d.getHours()).padStart(2, '0')
+  const MM = String(d.getMinutes()).padStart(2, '0')
+  return `${yyyy}.${mm}.${dd} ${HH}:${MM}`
+}
+
+// medication_snapshot 안의 처방일(dispensed_date) 분포에서 사용자에게 보여줄
+// 대표 처방일 라벨을 만든다. 처방일이 모두 같으면 단일 날짜, 다르면 범위로.
+function summarizePrescribedRange(snapshot) {
+  if (!Array.isArray(snapshot) || snapshot.length === 0) return null
+  const dates = snapshot
+    .map((m) => (typeof m === 'object' ? m.dispensed_date || m.start_date : null))
+    .filter(Boolean)
+    .sort()
+  if (dates.length === 0) return null
+  const first = dates[0].slice(0, 10).replace(/-/g, '.')
+  const last = dates[dates.length - 1].slice(0, 10).replace(/-/g, '.')
+  return first === last ? first : `${first} ~ ${last}`
+}
+
 // ── 증상 로그 폼 컴포넌트 ──────────────────────────────────────────────────────
 // '증상 트래킹' 탭에서만 렌더링되는 일일 증상 기록 입력 폼
 // - POST /api/v1/daily-logs 로 {profile_id, log_date, symptoms[], note} 전송
@@ -299,45 +324,76 @@ export default function LifestyleGuidePage() {
   const { checkingId, checkToday } = useChallengeCheck()
 
   const [isGenerating, setIsGenerating] = useState(false)
-  const [selectedGuide, setSelectedGuide] = useState(null)   // 현재 날짜 칩으로 선택된 가이드
+  const [selectedGuide, setSelectedGuide] = useState(null)   // 현재 본문에 표시되는 가이드
+  // 사용자가 칩으로 명시 선택한 가이드 id — set 되어 있으면 sticky.
+  // null 일 때만 자동으로 latestGuide 를 따라간다 (auto-follow).
+  // 새 가이드 생성 또는 picked 가이드 삭제 시 null 로 리셋.
+  const [userPickedGuideId, setUserPickedGuideId] = useState(null)
   const [activeTab, setActiveTab] = useState('interaction')  // 현재 선택된 탭 키
 
 
   const chipScrollRef = useRef(null)
   const isLoading = guidesLoading
 
-  // selectedGuide 의 챌린지는 ChallengeContext store 에서 derived
-  const guideChallenges = selectedGuide ? challengesByGuide(selectedGuide.id) : []
+  // selectedGuide 의 챌린지는 ChallengeContext store 에서 derived.
+  // 정렬 기준 (사용자 합의): 기간 짧은 순 → 제목 가나다 → id tiebreak.
+  // store 의 union 순서나 GET 응답 순서와 무관하게 항상 같은 흐름으로 노출.
+  const guideChallenges = (selectedGuide ? challengesByGuide(selectedGuide.id) : [])
+    .slice()
+    .sort((a, b) => {
+      const da = a.target_days || 0
+      const db = b.target_days || 0
+      if (da !== db) return da - db
+      const ta = a.title || ''
+      const tb = b.title || ''
+      const cmp = ta.localeCompare(tb, 'ko')
+      if (cmp !== 0) return cmp
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+    })
   const isLoadingChallenges = false  // store 에서 derived 라 별도 로딩 없음
 
-  // 선택된 가이드가 최신(guides[0])이 아닌 경우 과거 열람 모드
-  // → 과거 열람 모드에서는 챌린지 시작/체크 버튼이 모두 비활성화됨
-  // selectedGuide 가 null 인 상태 (generation 중 transient 등) 에서 배너 렌더되어
-  // null.created_at 접근하는 것을 방지하려 selectedGuide 존재 여부도 명시 가드.
-  const isViewingHistory = !!selectedGuide && guides.length > 0 && selectedGuide.id !== guides[0]?.id
+  // 과거 열람 = ready 가이드 중 가장 최신과 selectedGuide 가 다를 때.
+  // placeholder (status='pending') 는 비교에 끼지 않는다 — 그래야 "+ 새 가이드"
+  // 직후 placeholder 가 guides[0] 로 prepend 되어도 isViewingHistory 가
+  // 갑자기 true 로 바뀌지 않는다 (사용자 우려).
+  const firstReadyGuide = guides.find(g => g.status === 'ready') || null
+  const isViewingHistory =
+    !!selectedGuide && !!firstReadyGuide && selectedGuide.id !== firstReadyGuide.id
 
   // 가이드 store 변동 시 selectedGuide 자동 보정.
   //
-  // 단순 id 비교만으로는 부족 — Context 의 generateGuide 가 SSE ready 시점에
-  // store 의 placeholder 를 같은 id 로 in-place 교체하므로 (setGuides(prev.map))
-  // page-local selectedGuide 객체가 stale placeholder 를 가리키고 있을 수 있다.
-  // 따라서 store 의 fresh 객체로 reference 도 동기화한다.
+  // 정책:
+  //  1) userPickedGuideId 가 set 되어 있으면 그 가이드를 sticky 로 유지
+  //     (단, 그 가이드가 사라졌으면 auto-follow 로 회귀)
+  //  2) auto-follow: 항상 latestGuide (= 가장 최근 ready) 를 selectedGuide 로
+  //     → "+ 새 가이드" → ready 도달 시 자동으로 새 가이드로 본문 전환
+  //  3) latestGuide 가 없으면 guides 안의 ready 가이드 중 첫 번째
   useEffect(() => {
-    if (selectedGuide) {
-      const fresh = guides.find(g => g.id === selectedGuide.id)
-      if (fresh) {
-        if (fresh !== selectedGuide) setSelectedGuide(fresh)
+    if (userPickedGuideId) {
+      const picked = guides.find(g => g.id === userPickedGuideId && g.status === 'ready')
+      if (picked) {
+        if (picked !== selectedGuide) setSelectedGuide(picked)
         return
       }
+      // picked 가이드가 사라짐 (삭제됨) → auto-follow 로 회귀
+      setUserPickedGuideId(null)
+      return
     }
-    if (latestGuide) {
-      setSelectedGuide(latestGuide)
-    } else if (guides.length > 0) {
-      setSelectedGuide(guides[0])
+
+    if (latestGuide && latestGuide.status === 'ready') {
+      if (selectedGuide?.id !== latestGuide.id || selectedGuide !== latestGuide) {
+        setSelectedGuide(latestGuide)
+      }
+      return
+    }
+
+    if (guides.length > 0) {
+      const firstReady = guides.find(g => g.status === 'ready')
+      setSelectedGuide(firstReady || null)
     } else {
       setSelectedGuide(null)
     }
-  }, [latestGuide, guides, selectedGuide])
+  }, [latestGuide, guides, selectedGuide, userPickedGuideId])
 
   // ── 현재 탭에 해당하는 챌린지 1개 ──
   // 하단 배너에 표시할 챌린지: 현재 탭의 category와 일치하는 것 중 DELETED 제외
@@ -358,11 +414,19 @@ export default function LifestyleGuidePage() {
     }
     if (isGenerating) return
     setIsGenerating(true)
+    // 새 가이드 생성 시 auto-follow 모드로 회귀 — ready 도달 시 자동 본문 전환
+    setUserPickedGuideId(null)
     const abortController = new AbortController()
     try {
-      // Context 의 generateGuide 가 placeholder 삽입 + SSE update + ready 자동 처리
-      await generateGuide(profileId, abortController.signal)
-      toast.success('새 가이드가 생성되었습니다!')
+      // Context 의 generateGuide 가 placeholder 삽입 + SSE update + ready 자동 처리.
+      // 사용자가 생성 중 placeholder 를 직접 삭제한 경우 result === null 로 silent.
+      const result = await generateGuide(profileId, abortController.signal)
+      if (!result) return
+      if (result.deduped) {
+        toast.success('동일 처방전 가이드가 이미 있어 그대로 보여드려요.')
+      } else {
+        toast.success('새 가이드가 생성되었습니다!')
+      }
     } catch (err) {
       // BE 409 + detail.code=NO_ACTIVE_MEDICATIONS → 토스트 + 처방전 등록 페이지 자동 이동
       const detail = err.response?.data?.detail
@@ -379,8 +443,10 @@ export default function LifestyleGuidePage() {
   }
 
   const handleDeleteGuide = async (guide) => {
-    if (!confirm(`${formatFullDate(guide.created_at)} 가이드를 삭제하시겠습니까?`)) return
+    if (!confirm(`${formatFullDateTime(guide.created_at)} 가이드를 삭제하시겠습니까?`)) return
     try {
+      // sticky picked 가 삭제 대상이면 auto-follow 로 회귀
+      if (userPickedGuideId === guide.id) setUserPickedGuideId(null)
       await deleteGuide(guide.id)
       toast.success('가이드가 삭제되었습니다.')
     } catch {
@@ -472,12 +538,11 @@ export default function LifestyleGuidePage() {
           </>
         )}
 
-        {/* ── 가이드 생성 중 스켈레톤 ── */}
-        {isGenerating && (
+        {/* ── 첫 가이드 생성 중 (이력 없음) — 큰 스켈레톤 ── */}
+        {isGenerating && guides.filter(g => g.status === 'ready').length === 0 && (
           <div className="animate-pulse space-y-4">
             <div className="flex gap-2">
               <div className="h-7 bg-gray-200 rounded-full w-20" />
-              {guides.length > 0 && <div className="h-7 bg-gray-200 rounded-full w-14" />}
             </div>
             <div className="bg-white rounded-2xl px-4 py-3 shadow-sm border border-gray-50">
               <div className="h-3 bg-gray-200 rounded w-32 mb-3" />
@@ -505,6 +570,21 @@ export default function LifestyleGuidePage() {
           </div>
         )}
 
+        {/* ── 기존 가이드 보유 + 생성 중 — 작은 inline placeholder ── */}
+        {/*    기존 selectedGuide 본문은 그대로 유지하고, 새 가이드는            */}
+        {/*    이력 칩에서 "생성중" 표시 + 상단 알림 카드로만 안내한다.            */}
+        {isGenerating && guides.filter(g => g.status === 'ready').length > 0 && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center gap-3">
+            <div className="h-4 w-4 rounded-full border-2 border-blue-300 border-t-blue-600 animate-spin shrink-0" />
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-blue-700">새 가이드 생성 중</p>
+              <p className="text-[11px] text-blue-500 mt-0.5">
+                완료되면 자동으로 새 칩으로 추가됩니다. 기존 가이드는 계속 열람 가능.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* ── 이력 날짜 칩 (가이드 있을 때만) ── */}
         {guides.length > 0 && (
           <div ref={chipScrollRef} className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
@@ -520,10 +600,15 @@ export default function LifestyleGuidePage() {
                   }`}
                 >
                   <button
-                    onClick={() => setSelectedGuide(guide)}
-                    className="cursor-pointer"
+                    onClick={() => guide.status === 'ready' && setUserPickedGuideId(guide.id)}
+                    disabled={guide.status !== 'ready'}
+                    className={guide.status === 'ready' ? 'cursor-pointer' : 'cursor-wait'}
                   >
-                    {idx === 0 ? `${formatDate(guide.created_at)} 최신` : formatDate(guide.created_at)}
+                    {guide.status !== 'ready'
+                      ? '생성중...'
+                      : firstReadyGuide?.id === guide.id
+                        ? `${formatDate(guide.created_at)} 최신`
+                        : formatDate(guide.created_at)}
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDeleteGuide(guide) }}
@@ -540,32 +625,56 @@ export default function LifestyleGuidePage() {
           </div>
         )}
 
-        {/* ── 과거 가이드 열람 배너 ── */}
-        {isViewingHistory && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 flex items-center gap-2">
-            <span className="text-amber-500 text-sm">⚠️</span>
-            <p className="text-xs text-amber-700 font-bold">
-              이 가이드는 {formatFullDate(selectedGuide.created_at)} 기준 과거 처방 기준입니다
-            </p>
-          </div>
-        )}
+        {/* ── 과거 가이드 열람 배너 ──
+            처방일이 아니라 "가이드 생성 시점" 기준임을 명확히 함.
+            이후 처방 / 설문 변경이 있을 수 있어 새 가이드 생성을 권장.   */}
+        {isViewingHistory && (() => {
+          const prescribed = summarizePrescribedRange(selectedGuide.medication_snapshot)
+          return (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-amber-500 text-sm">⚠️</span>
+                <p className="text-xs text-amber-800 font-bold">
+                  {formatFullDateTime(selectedGuide.created_at)} 에 만들어진 가이드예요
+                </p>
+              </div>
+              <p className="text-[11px] text-amber-700 leading-relaxed pl-5">
+                {prescribed && <>처방일 {prescribed} 기준으로 작성됐어요. </>}
+                이후 처방이나 설문조사가 바뀌었다면 새 가이드를 만들어 주세요.
+              </p>
+            </div>
+          )
+        })()}
 
-        {/* ── 가이드 내용 (가이드 선택된 경우, 생성 중에는 스켈레톤으로 대체) ── */}
-        {selectedGuide && !isGenerating && (
+        {/* ── 가이드 내용 (가이드 선택된 경우) — 생성 중에도 기존 ready 가이드는 그대로 보인다 ── */}
+        {selectedGuide && (
           <>
-            {/* 복용 약 스냅샷 */}
+            {/* 복용 약 스냅샷 — 처방일이 있으면 chip 옆에 작은 라벨로 표기 */}
             {selectedGuide.medication_snapshot?.length > 0 && (
               <div className="bg-white rounded-2xl px-4 py-3 shadow-sm border border-gray-50">
                 <p className="text-xs font-bold text-gray-400 mb-2">💊 가이드 생성 시 복용 약</p>
                 <div className="flex flex-wrap gap-1.5">
-                  {selectedGuide.medication_snapshot.map((med, i) => (
-                    <span
-                      key={i}
-                      className="bg-gray-100 text-gray-600 text-xs px-2.5 py-1 rounded-full font-bold"
-                    >
-                      {typeof med === 'string' ? med : med.medicine_name || med.name || JSON.stringify(med)}
-                    </span>
-                  ))}
+                  {selectedGuide.medication_snapshot.map((med, i) => {
+                    const name =
+                      typeof med === 'string'
+                        ? med
+                        : med.medicine_name || med.name || JSON.stringify(med)
+                    const dispensed =
+                      typeof med === 'object' ? med.dispensed_date || med.start_date : null
+                    return (
+                      <span
+                        key={i}
+                        className="bg-gray-100 text-gray-600 text-xs px-2.5 py-1 rounded-full font-bold inline-flex items-center gap-1.5"
+                      >
+                        {name}
+                        {dispensed && (
+                          <span className="text-[10px] font-normal text-gray-400">
+                            처방 {dispensed.slice(5, 10).replace('-', '/')}
+                          </span>
+                        )}
+                      </span>
+                    )
+                  })}
                 </div>
               </div>
             )}
