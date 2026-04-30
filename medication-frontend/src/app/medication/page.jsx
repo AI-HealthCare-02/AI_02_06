@@ -22,10 +22,10 @@ import {
 import { useProfile } from '@/contexts/ProfileContext'
 
 const SORT_LABELS = {
-  [PRESCRIPTION_SORT.DATE_DESC]: '날짜 ↓ (최신)',
-  [PRESCRIPTION_SORT.DATE_ASC]: '날짜 ↑',
-  [PRESCRIPTION_SORT.HOSPITAL_ASC]: '병원 ㄱ-ㅎ',
-  [PRESCRIPTION_SORT.HOSPITAL_DESC]: '병원 ㅎ-ㄱ',
+  [PRESCRIPTION_SORT.DATE_DESC]: '날짜: 최신 먼저',
+  [PRESCRIPTION_SORT.DATE_ASC]: '날짜: 오래된 먼저',
+  [PRESCRIPTION_SORT.HOSPITAL_ASC]: '병원: ㄱ → ㅎ',
+  [PRESCRIPTION_SORT.HOSPITAL_DESC]: '병원: ㅎ → ㄱ',
 }
 
 const STATUS_TABS = [
