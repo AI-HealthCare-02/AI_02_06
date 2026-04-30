@@ -58,8 +58,8 @@ class ProfileUpdate(BaseModel):
 class ProfileSummaryResponse(BaseModel):
     """Profile summary response model for list endpoints.
 
-    Lightweight response without health survey data.
-    Used for profile listing and switching UI where full health data is not needed.
+    Lightweight response with minimal health survey data for UI matching.
+    Used for profile listing and switching UI.
     """
 
     model_config = ConfigDict(from_attributes=True)

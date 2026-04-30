@@ -10,7 +10,7 @@ import toast from 'react-hot-toast'
 import { useProfile } from '@/contexts/ProfileContext'
 
 // --- 모달 컴포넌트들 ---
-function Modal({ title, children, onClose, onSave }) {
+function Modal({ title, children, onClose, onSave, saveDisabled }) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
       <div className="bg-white rounded-[40px] w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
@@ -23,7 +23,7 @@ function Modal({ title, children, onClose, onSave }) {
         <div className="p-8 max-h-[70vh] overflow-y-auto">{children}</div>
         <div className="p-8 pt-4 flex gap-3">
           <button onClick={onClose} className="flex-1 py-4 rounded-2xl bg-gray-50 text-gray-500 font-bold hover:bg-gray-100 transition-all cursor-pointer">취소</button>
-          <button onClick={onSave} className="flex-1 py-4 rounded-2xl bg-gray-900 text-white font-black hover:bg-gray-800 transition-all shadow-lg cursor-pointer">저장하기</button>
+          <button onClick={onSave} disabled={saveDisabled} className="flex-1 py-4 rounded-2xl bg-gray-900 text-white font-black hover:bg-gray-800 transition-all shadow-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">저장하기</button>
         </div>
       </div>
     </div>
@@ -57,13 +57,43 @@ function HealthInfoModal({ info, onClose, onSave }) {
     allergies: info?.allergies || [],
   })
 
+  const [errors, setErrors] = useState({
+    age: '',
+    height: '',
+    weight: '',
+  })
+
+  const validateField = (field, value) => {
+    let errorMsg = '';
+    if (field === 'age' && value) {
+      const num = parseInt(value);
+      if (num < 0 || num > 150) errorMsg = '나이는 0~150 사이로 입력해주세요.';
+    }
+    if (field === 'height' && value) {
+      const num = parseInt(value);
+      if (num < 50 || num > 250) errorMsg = '키는 50~250cm 사이로 입력해주세요.';
+    }
+    if (field === 'weight' && value) {
+      const num = parseFloat(value);
+      if (num < 1 || num > 300) errorMsg = '몸무게는 1~300kg 사이로 입력해주세요.';
+    }
+    setErrors(prev => ({ ...prev, [field]: errorMsg }));
+  }
+
+  const handleChange = (field, val) => {
+    setFormData(prev => ({ ...prev, [field]: val }));
+    validateField(field, val);
+  }
+
+  const isSaveDisabled = Object.values(errors).some(err => err !== '');
+
   const btnSelected = 'bg-gray-900 text-white border-gray-900'
   const btnUnselected = 'bg-white text-gray-400 border-gray-100 hover:border-gray-300'
   const chipSelected = 'bg-gray-900 text-white border-gray-900'
   const chipUnselected = 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
 
   return (
-    <Modal title="건강 프로필 수정" onClose={onClose} onSave={() => onSave(formData)}>
+    <Modal title="건강 프로필 수정" onClose={onClose} onSave={() => onSave(formData)} saveDisabled={isSaveDisabled}>
       <div className="space-y-6">
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -71,15 +101,16 @@ function HealthInfoModal({ info, onClose, onSave }) {
             <input type="text" inputMode="numeric" value={formData.age} placeholder="예: 30"
               onChange={(e) => {
                 const val = e.target.value.replace(/[^0-9]/g, '');
-                setFormData({...formData, age: val})
+                handleChange('age', val);
               }}
-              className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
+              className={`w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 border transition-colors ${errors.age ? 'border-red-500' : 'border-transparent focus:border-gray-200'}`} />
+            {errors.age && <span className="text-red-500 text-xs ml-2 mt-1 block">{errors.age}</span>}
           </div>
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">성별</label>
             <div className="flex gap-2">
               {['MALE', 'FEMALE'].map(g => (
-                <button key={g} type="button" onClick={() => setFormData({...formData, gender: g})}
+                <button key={g} type="button" onClick={() => handleChange('gender', g)}
                   className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${formData.gender === g ? btnSelected : btnUnselected}`}>
                   {g === 'MALE' ? '남성' : '여성'}
                 </button>
@@ -93,9 +124,10 @@ function HealthInfoModal({ info, onClose, onSave }) {
             <input type="text" inputMode="decimal" value={formData.height} placeholder="예: 170"
               onChange={(e) => {
                 const val = e.target.value.replace(/[^0-9]/g, '');
-                setFormData({...formData, height: val})
+                handleChange('height', val);
               }}
-              className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
+              className={`w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 border transition-colors ${errors.height ? 'border-red-500' : 'border-transparent focus:border-gray-200'}`} />
+            {errors.height && <span className="text-red-500 text-xs ml-2 mt-1 block">{errors.height}</span>}
           </div>
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">몸무게 (kg)</label>
@@ -104,9 +136,10 @@ function HealthInfoModal({ info, onClose, onSave }) {
                 let val = e.target.value.replace(/[^0-9.]/g, '');
                 const parts = val.split('.');
                 if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
-                setFormData({...formData, weight: val})
+                handleChange('weight', val);
               }}
-              className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
+              className={`w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 border transition-colors ${errors.weight ? 'border-red-500' : 'border-transparent focus:border-gray-200'}`} />
+            {errors.weight && <span className="text-red-500 text-xs ml-2 mt-1 block">{errors.weight}</span>}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -368,18 +401,12 @@ export default function MyPage() {
   }
 
   const handleSaveHealth = async (newData) => {
-    // [추가] 저장 전 최종 범위 검증 로직
-    const h = parseInt(newData.height);
-    const w = parseFloat(newData.weight);
-    if (newData.height && (h < 50 || h > 250)) { toast.error("키는 50~250cm 사이로 입력해주세요."); return; }
-    if (newData.weight && (w < 1 || w > 300)) { toast.error("몸무게는 1~300kg 사이로 입력해주세요."); return; }
-
     try {
       const healthSurvey = {
         age: parseInt(newData.age) || null,
         gender: newData.gender || null,
-        height: h || null,
-        weight: w || null,
+        height: parseInt(newData.height) || null,
+        weight: parseFloat(newData.weight) || null,
         is_smoking: newData.is_smoking,
         is_drinking: newData.is_drinking,
         conditions: newData.conditions.length > 0 ? newData.conditions : null,
@@ -408,10 +435,11 @@ export default function MyPage() {
         await createProfile({ ...payload, account_id: userProfile.account_id })
         toast.success('가족이 추가되었습니다.')
       }
-      if (refetchProfiles) await refetchProfiles()
-      setModalType(null)
-      setSelectedFamilyMember(null)
-    } catch (err) { handleApiError(err) }
+
+      if (refetchProfiles) await refetchProfiles();
+      setModalType(null);
+      setSelectedFamilyMember(null);
+    } catch (err) { handleApiError(err); }
   }
 
   const handleDeleteFamily = async (id, e) => {
@@ -554,11 +582,6 @@ export default function MyPage() {
                       }
                       const handleEdit = (e) => {
                         e.stopPropagation()
-                        if (isSelf) {
-                          // 본인 정보 수정은 기본정보 탭의 BasicInfoModal 사용
-                          setActiveMenu('기본정보')
-                          return
-                        }
                         setSelectedFamilyMember(member)
                         setModalType('family')
                       }
