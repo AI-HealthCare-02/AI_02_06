@@ -32,16 +32,25 @@ class ChallengeRepository:
     async def get_all_by_profile(self, profile_id: UUID) -> list[Challenge]:
         """Get all challenges for a profile.
 
+        ORDER BY target_days -> title 가나다 -> id 로 안정 정렬 (사용자 합의).
+        FE store 의 base list 가 매번 같은 순서가 되어 challengesByGuide /
+        activeChallenges 등 모든 selector 결과가 결정적이 된다.
+
         Args:
             profile_id: Profile UUID.
 
         Returns:
-            list[Challenge]: List of challenges.
+            list[Challenge]: 기간 짧은 순 → 제목 가나다 → id tiebreak.
         """
-        return await Challenge.filter(
-            profile_id=profile_id,
-            deleted_at__isnull=True,
-        ).all()
+        return (
+            await Challenge
+            .filter(
+                profile_id=profile_id,
+                deleted_at__isnull=True,
+            )
+            .order_by("target_days", "title", "id")
+            .all()
+        )
 
     async def get_all_by_profiles(self, profile_ids: list[UUID]) -> list[Challenge]:
         """Get all challenges for multiple profiles.
@@ -62,16 +71,15 @@ class ChallengeRepository:
     async def get_by_guide_id(self, guide_id: UUID) -> list[Challenge]:
         """Get all challenges linked to a specific lifestyle guide.
 
-        Returned order: target_days asc -> id (작은 챌린지부터). 같은 가이드의
-        챌린지들이 클라이언트에 항상 동일한 순서로 노출되어, 화면 흐름과
-        list 의 일관성을 깨지 않도록 한다 (ORDER BY 없는 쿼리는 PostgreSQL
-        에서 row 순서가 undefined).
+        Returned order: target_days asc -> title 가나다 -> id (사용자 합의).
+        ORDER BY 없는 쿼리는 PostgreSQL 에서 row 순서가 undefined 라
+        화면이 매번 흔들리던 문제를 막기 위함.
 
         Args:
             guide_id: LifestyleGuide UUID.
 
         Returns:
-            list[Challenge]: List of challenges, ordered by target_days asc.
+            list[Challenge]: 기간 짧은 순 → 제목 가나다 → id tiebreak.
         """
         return (
             await Challenge
@@ -79,7 +87,7 @@ class ChallengeRepository:
                 guide_id=guide_id,
                 deleted_at__isnull=True,
             )
-            .order_by("target_days", "id")
+            .order_by("target_days", "title", "id")
             .all()
         )
 

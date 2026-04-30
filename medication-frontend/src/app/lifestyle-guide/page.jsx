@@ -336,18 +336,19 @@ export default function LifestyleGuidePage() {
   const isLoading = guidesLoading
 
   // selectedGuide 의 챌린지는 ChallengeContext store 에서 derived.
-  // 화면 일관성을 위해 TABS 순서 (interaction -> sleep -> diet -> exercise
-  // -> symptom) 로 정렬 후 target_days asc 로 tiebreak — store 의 union 순서
-  // (가이드 ready 시 appendChallenges 가 push) 에 영향받지 않게 한다.
+  // 정렬 기준 (사용자 합의): 기간 짧은 순 → 제목 가나다 → id tiebreak.
+  // store 의 union 순서나 GET 응답 순서와 무관하게 항상 같은 흐름으로 노출.
   const guideChallenges = (selectedGuide ? challengesByGuide(selectedGuide.id) : [])
     .slice()
     .sort((a, b) => {
-      const ai = TABS.findIndex((t) => t.key === a.category)
-      const bi = TABS.findIndex((t) => t.key === b.category)
-      const aOrd = ai === -1 ? TABS.length : ai
-      const bOrd = bi === -1 ? TABS.length : bi
-      if (aOrd !== bOrd) return aOrd - bOrd
-      return (a.target_days || 0) - (b.target_days || 0)
+      const da = a.target_days || 0
+      const db = b.target_days || 0
+      if (da !== db) return da - db
+      const ta = a.title || ''
+      const tb = b.title || ''
+      const cmp = ta.localeCompare(tb, 'ko')
+      if (cmp !== 0) return cmp
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
     })
   const isLoadingChallenges = false  // store 에서 derived 라 별도 로딩 없음
 
