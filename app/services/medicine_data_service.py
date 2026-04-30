@@ -9,6 +9,7 @@ Reference:
     - Best Practice: data.go.kr bulk sync pattern with httpx pagination
 """
 
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 import json
 import logging
@@ -65,18 +66,21 @@ class MedicineDataService:
         self.repository = MedicineInfoRepository()
         self.ingredient_repository = MedicineIngredientRepository()
 
-    # ── 메인 동기화 메서드 ─────────────────────────────────────────
+    # ── 메인 동기화 메서드 (page-streaming) ─────────────────────────
     # 전체 흐름:
     #   1. 파라미터 구성 (전체 or 증분)
-    #   2. API 페이징 수집 (_fetch_all_pages)
-    #   3. JSON 백업 저장 (_save_backup)
-    #   4. 병원 전용 주사제 필터링 (_is_hospital_only_injectable)
-    #   5. API 필드 -> 모델 필드 변환 (_transform_item)
-    #   6. DB UPSERT (repository.bulk_upsert)
-    #   7. 동기화 결과 로그 기록 (_record_sync_log)
+    #   2. ndjson 백업 파일 open (페이지마다 한 줄씩 append, 메모리 X)
+    #   3. _iter_pages 로 페이지 단위 (100건) 수신
+    #      → 병원전용 skip + 컬럼 매핑 + 3컬럼 정합 필터
+    #      → 페이지 단위 bulk_upsert 후 즉시 discard (raw 누적 X)
+    #   4. 동기화 결과 로그 기록 (_record_sync_log)
+    # 메모리 피크: 1 페이지(100 items) + 페이지의 transformed 만큼.
 
     async def sync(self, full_sync: bool = False) -> dict[str, int]:
         """Execute full or incremental data synchronization.
+
+        Page-streaming 방식. raw_items 전체를 메모리에 적재하지 않고
+        100건 단위 page 로 받아 즉시 transform + UPSERT 후 discard.
 
         Args:
             full_sync: If True, fetches all records. If False,
@@ -89,82 +93,100 @@ class MedicineDataService:
             httpx.HTTPStatusError: If API request fails.
         """
         # Step 1: 전체/증분에 따라 API 요청 파라미터 구성
-        params = self._build_params(full_sync)
+        params = await self._build_params(full_sync)
         sync_start = datetime.now(tz=UTC)
 
         logger.info(
-            "Starting %s sync for medicine_info",
+            "Starting %s sync for medicine_info (page-streaming)",
             "full" if full_sync else "incremental",
         )
 
-        # Step 2: API에서 전체 페이지 수집 (페이징 자동 처리)
+        fetched = 0
+        inserted = 0
+        updated = 0
+        hospital_skipped = 0
+        empty_doc_skipped = 0
+        is_hospital = self._is_hospital_only_injectable
+        transform = self._transform_item
+
+        # Step 2: ndjson 백업 파일 open (page 단위 streaming append)
+        _DATA_DIR.mkdir(parents=True, exist_ok=True)
+        backup_path = _DATA_DIR / f"medicines_{sync_start.strftime('%Y%m%d_%H%M%S')}.ndjson"
+
         try:
-            raw_items = await self._fetch_all_pages(params)
+            with backup_path.open("w", encoding="utf-8") as backup_file:
+                # Step 3: 페이지 단위 수신 → 즉시 변환/upsert
+                async for page_items in self._iter_pages(params):
+                    fetched += len(page_items)
+
+                    # 백업: 한 줄씩 append (메모리 X)
+                    for item in page_items:
+                        backup_file.write(json.dumps(item, ensure_ascii=False))
+                        backup_file.write("\n")
+
+                    # 변환 + 정합 필터
+                    transformed: list[dict] = []
+                    for item in page_items:
+                        if is_hospital(item):
+                            hospital_skipped += 1
+                            continue
+                        row = transform(item)
+                        if not (row["dosage"] and row["precautions"] and row["side_effects"]):
+                            empty_doc_skipped += 1
+                            continue
+                        transformed.append(row)
+
+                    if transformed:
+                        stats = await self.repository.bulk_upsert(transformed)
+                        inserted += stats["inserted"]
+                        updated += stats["updated"]
         except httpx.HTTPStatusError:
             await self._record_sync_log(
                 sync_start,
-                0,
-                0,
-                0,
+                fetched,
+                inserted,
+                updated,
                 "FAILED",
                 "API request failed",
             )
             raise
 
-        if not raw_items:
+        if fetched == 0:
             logger.info("No new data to sync")
+            backup_path.unlink(missing_ok=True)  # 빈 백업 파일 정리
             await self._record_sync_log(sync_start, 0, 0, 0, "SUCCESS")
             return {"fetched": 0, "inserted": 0, "updated": 0}
 
-        # Step 3: 원본 데이터 JSON 백업 (감사 추적용)
-        self._save_backup(raw_items)
-
-        # Step 4: 병원 전용 주사제 필터링 (인슐린 등 자가주사는 유지)
-        filtered = [item for item in raw_items if not self._is_hospital_only_injectable(item)]
         logger.info(
-            "Filtered %d -> %d items (removed %d hospital-only injectables)",
-            len(raw_items),
-            len(filtered),
-            len(raw_items) - len(filtered),
+            "Filtered: raw=%d, hospital_only=%d, empty_doc=%d, upserted=%d (inserted=%d, updated=%d)",
+            fetched,
+            hospital_skipped,
+            empty_doc_skipped,
+            inserted + updated,
+            inserted,
+            updated,
         )
+        logger.info("Saved backup: %s", backup_path)
 
-        # Step 5-6: API 필드명 -> 모델 필드명 변환 후 DB UPSERT
-        transformed = [self._transform_item(item) for item in filtered]
-        stats = await self.repository.bulk_upsert(transformed)
+        # Step 4: 동기화 결과를 data_sync_log 테이블에 기록
+        await self._record_sync_log(sync_start, fetched, inserted, updated, "SUCCESS")
 
-        # Step 7: 동기화 결과를 data_sync_log 테이블에 기록
-        await self._record_sync_log(
-            sync_start,
-            len(raw_items),
-            stats["inserted"],
-            stats["updated"],
-            "SUCCESS",
-        )
+        logger.info("Sync complete: fetched=%d, inserted=%d, updated=%d", fetched, inserted, updated)
+        return {"fetched": fetched, "inserted": inserted, "updated": updated}
 
-        logger.info(
-            "Sync complete: fetched=%d, inserted=%d, updated=%d",
-            len(raw_items),
-            stats["inserted"],
-            stats["updated"],
-        )
-        return {
-            "fetched": len(raw_items),
-            "inserted": stats["inserted"],
-            "updated": stats["updated"],
-        }
-
-    # ── 약품-성분(Mcpn07) 동기화 ─────────────────────────────────────────
+    # ── 약품-성분(Mcpn07) 동기화 (page-streaming) ───────────────────────
     # 흐름:
-    #   1. Mcpn07 endpoint 페이징 수집
-    #   2. ITEM_SEQ -> medicine_info_id FK 매핑 (선행 sync 필요)
+    #   1. Mcpn07 endpoint 페이지 단위 수신
+    #   2. 페이지 단위 ITEM_SEQ → medicine_info_id batch lookup
     #   3. 매칭 안 되는 row 는 skip (medicine_info 미등록 약품)
-    #   4. (medicine_info_id, mtral_sn) UPSERT
+    #   4. 페이지 단위 (medicine_info_id, mtral_sn) UPSERT 후 discard
 
     async def sync_ingredients(self) -> dict[str, int]:
         """식약처 Mcpn07 응답을 받아 medicine_ingredient 테이블을 채움.
 
-        medicine_info 가 먼저 sync 되어 있어야 FK 해석 가능. 모르는
-        item_seq 는 skip (로그 only).
+        Page-streaming 방식. 페이지(100건) 단위로 lookup + transform + upsert
+        후 즉시 discard 하여 메모리 누적을 막는다. medicine_info 가 먼저
+        sync 되어 있어야 FK 해석 가능. 모르는 item_seq 는 skip.
 
         Returns:
             {"fetched": n, "inserted": i, "updated": u, "skipped": s}.
@@ -175,43 +197,48 @@ class MedicineDataService:
             "numOfRows": _MAX_ROWS_PER_PAGE,
             "pageNo": 1,
         }
-        logger.info("Starting ingredient sync (Mcpn07)")
-        raw_items = await self._fetch_all_pages(params, endpoint=_INGREDIENT_ENDPOINT)
-        if not raw_items:
+        logger.info("Starting ingredient sync (Mcpn07, page-streaming)")
+
+        fetched = 0
+        inserted = 0
+        updated = 0
+        skipped = 0
+
+        async for page_items in self._iter_pages(params, endpoint=_INGREDIENT_ENDPOINT):
+            fetched += len(page_items)
+
+            # 페이지 단위 ITEM_SEQ → medicine_info.id batch lookup
+            item_seqs = [item.get("ITEM_SEQ", "") for item in page_items]
+            id_map = await self.ingredient_repository.get_medicine_id_map(item_seqs)
+
+            transformed: list[dict] = []
+            for item in page_items:
+                row = self._transform_ingredient_item(item, id_map)
+                if row is None:
+                    skipped += 1
+                    continue
+                transformed.append(row)
+
+            if transformed:
+                stats = await self.ingredient_repository.bulk_upsert(transformed)
+                inserted += stats["inserted"]
+                updated += stats["updated"]
+
+        if fetched == 0:
             logger.info("No ingredient data to sync")
             return {"fetched": 0, "inserted": 0, "updated": 0, "skipped": 0}
 
-        # ITEM_SEQ -> medicine_info.id 매핑 (한 번에 batch lookup)
-        item_seqs = [item.get("ITEM_SEQ", "") for item in raw_items]
-        id_map = await self.ingredient_repository.get_medicine_id_map(item_seqs)
-
-        transformed: list[dict] = []
-        skipped = 0
-        for item in raw_items:
-            row = self._transform_ingredient_item(item, id_map)
-            if row is None:
-                skipped += 1
-                continue
-            transformed.append(row)
-
-        if not transformed:
+        if inserted + updated == 0:
             logger.warning("All ingredient rows skipped — medicine_info empty?")
-            return {"fetched": len(raw_items), "inserted": 0, "updated": 0, "skipped": skipped}
 
-        stats = await self.ingredient_repository.bulk_upsert(transformed)
         logger.info(
             "Ingredient sync complete: fetched=%d, inserted=%d, updated=%d, skipped=%d",
-            len(raw_items),
-            stats["inserted"],
-            stats["updated"],
+            fetched,
+            inserted,
+            updated,
             skipped,
         )
-        return {
-            "fetched": len(raw_items),
-            "inserted": stats["inserted"],
-            "updated": stats["updated"],
-            "skipped": skipped,
-        }
+        return {"fetched": fetched, "inserted": inserted, "updated": updated, "skipped": skipped}
 
     # ── API 파라미터 구성 (전체: 필터 없음 / 증분: start_change_date 설정) ──
 
@@ -243,56 +270,56 @@ class MedicineDataService:
 
         return params
 
-    # ── 페이징 수집 (pageNo를 증가시키며 totalCount에 도달할 때까지 반복) ──
+    # ── 페이징 streaming (page 단위 yield, 메모리 누적 없음) ───────────
 
-    async def _fetch_all_pages(self, params: dict, endpoint: str = _DETAIL_ENDPOINT) -> list[dict]:
-        """Fetch all pages of data from the public API.
+    async def _iter_pages(
+        self,
+        params: dict,
+        endpoint: str = _DETAIL_ENDPOINT,
+    ) -> AsyncIterator[list[dict]]:
+        """페이지 단위로 API 응답 items 를 yield.
 
-        Paginates through API responses until all data is collected.
+        호출자는 한 페이지(100건) 처리 후 즉시 discard 가능 — raw 누적이
+        없어 메모리 피크가 페이지 크기로 제한된다.
 
         Args:
-            params: Base API request parameters.
+            params: Base API request parameters (mutated: pageNo).
             endpoint: API endpoint URL (default: Dtl06 — 허가 상세).
 
-        Returns:
-            List of all item dictionaries from the API.
+        Yields:
+            한 페이지의 item dict 리스트.
         """
-        all_items: list[dict] = []
-
         async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
             page = 1
+            accumulated = 0
+            total_count: int | None = None
             while True:
                 params["pageNo"] = page
-                response = await client.get(
-                    endpoint,
-                    params=params,
-                )
+                response = await client.get(endpoint, params=params)
                 response.raise_for_status()
 
-                data = response.json()
-                body = data.get("body", {})
+                body = response.json().get("body", {})
                 items = body.get("items", [])
-
                 if not items:
                     break
 
-                all_items.extend(items)
-                total_count = body.get("totalCount", 0)
+                if total_count is None:
+                    total_count = body.get("totalCount", 0)
+                accumulated += len(items)
 
                 logger.info(
                     "Fetched page %d: %d items (total so far: %d/%d)",
                     page,
                     len(items),
-                    len(all_items),
+                    accumulated,
                     total_count,
                 )
 
-                if len(all_items) >= total_count:
+                yield items
+
+                if total_count and accumulated >= total_count:
                     break
-
                 page += 1
-
-        return all_items
 
     # ── 필터링: 병원 전용 주사제 판별 ──────────────────────────────
     # 흐름: API row → ITEM_NAME 추출 → 공용 medicine_filters 위임
@@ -351,7 +378,8 @@ class MedicineDataService:
             "chart": item.get("CHART") or None,
             "material_name": item.get("MATERIAL_NAME") or None,
             "valid_term": item.get("VALID_TERM") or None,
-            "pack_unit": item.get("PACK_UNIT") or None,
+            # pack_unit max_length=2048 — 식약처 raw 가 종종 2k+ 콤마나열을 보내므로 잘라냄
+            "pack_unit": (item.get("PACK_UNIT") or "")[:2048] or None,
             "atc_code": item.get("ATC_CODE") or None,
             # 허가 문서 PDF URL (EE_DOC_ID/UD_DOC_ID/NB_DOC_ID → *_doc_url)
             "ee_doc_url": item.get("EE_DOC_ID") or None,
@@ -401,30 +429,11 @@ class MedicineDataService:
             "mtral_sn": mtral_sn,
             "mtral_code": item.get("MTRAL_CODE") or None,
             "mtral_name": mtral_name,
-            "main_ingr_eng": item.get("MAIN_INGR_ENG") or None,
+            # main_ingr_eng max_length=256 — 식약처 raw 가 슬래시 나열로 종종 256+ 보내므로 잘라냄
+            "main_ingr_eng": (item.get("MAIN_INGR_ENG") or "")[:256] or None,
             "quantity": str(item.get("QNT")) if item.get("QNT") not in (None, "") else None,
             "unit": item.get("INGD_UNIT_CD") or None,
         }
-
-    # ── 원본 데이터 JSON 백업 (ai_worker/data/에 타임스탬프 파일) ──
-
-    @staticmethod
-    def _save_backup(items: list[dict]) -> None:
-        """Save raw API data as JSON backup file.
-
-        Stores timestamped JSON file in ai_worker/data/ for audit trail.
-
-        Args:
-            items: Raw API response items to save.
-        """
-        _DATA_DIR.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
-        filepath = _DATA_DIR / f"medicines_{timestamp}.json"
-
-        with filepath.open("w", encoding="utf-8") as f:
-            json.dump(items, f, ensure_ascii=False, indent=2)
-
-        logger.info("Saved backup: %s (%d items)", filepath, len(items))
 
     # ── 동기화 결과 로그 기록 (data_sync_log 테이블) ────────────────
 
