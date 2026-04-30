@@ -260,17 +260,22 @@ function MainPageContent() {
             </button>
           </div>
 
-          {/* 이미지 인디케이터 — 클릭으로 수동 전환 가능 */}
+          {/* 이미지 인디케이터 — 클릭으로 수동 전환 가능 (hit area 충분히 확보) */}
           <div className="flex gap-2 justify-center mt-10">
             {HERO_BG_IMAGES.map((_, i) => (
               <button
                 key={i}
+                type="button"
                 onClick={() => setCurrentBgIndex(i)}
                 aria-label={`배경 이미지 ${i + 1}`}
-                className={`h-2 rounded-full transition-all cursor-pointer ${
-                  i === currentBgIndex ? 'bg-white w-8' : 'bg-white/40 w-2'
-                }`}
-              />
+                className="py-3 px-1 cursor-pointer flex items-center justify-center"
+              >
+                <span
+                  className={`block h-2 rounded-full transition-all ${
+                    i === currentBgIndex ? 'bg-white w-8' : 'bg-white/40 w-2'
+                  }`}
+                />
+              </button>
             ))}
           </div>
         </div>
