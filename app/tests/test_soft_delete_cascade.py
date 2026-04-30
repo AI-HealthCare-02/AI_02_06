@@ -179,7 +179,7 @@ class TestProfileCascade:
         """비-SELF 프로필은 owner check 통과 후 자식 모두 cascade."""
         profile_id = uuid4()
         account_id = uuid4()
-        profile = MagicMock(id=profile_id, account_id=account_id, relation_type=RelationType.PARENT)
+        profile = MagicMock(id=profile_id, account_id=account_id, relation_type=RelationType.FATHER)
 
         service = _build_profile_service_with_mocks(profile)
 
@@ -227,7 +227,7 @@ class TestAccountWithdrawalCascade:
         account = MagicMock(id=account_id, deleted_at=None)
         account.save = AsyncMock()
         self_profile = MagicMock(id=uuid4(), relation_type=RelationType.SELF)
-        family_profile = MagicMock(id=uuid4(), relation_type=RelationType.PARENT)
+        family_profile = MagicMock(id=uuid4(), relation_type=RelationType.FATHER)
 
         service = self._build_oauth_service(account, [self_profile, family_profile], [])
 

@@ -10,17 +10,24 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.profiles import RelationType
+from app.models.profiles import Gender, RelationType
 
 
 class BaseProfile(BaseModel):
     """Base profile model with common fields.
 
-    Provides shared fields for profile operations
-    including relationship type and health survey data.
+    Provides shared fields for profile operations including relationship type,
+    gender, and health survey data.
     """
 
-    relation_type: RelationType = Field(..., description="Relationship type (SELF, PARENT, CHILD, SPOUSE, OTHER)")
+    relation_type: RelationType = Field(
+        ...,
+        description="가족 관계 (SELF / FATHER / MOTHER / SON / DAUGHTER / HUSBAND / WIFE / OTHER)",
+    )
+    gender: Gender | None = Field(
+        None,
+        description="성별 (MALE / FEMALE). 명시적 가족 관계 6종은 BE 가 default 자동 채움.",
+    )
     name: str = Field(..., max_length=32, description="Profile name")
     health_survey: dict[str, Any] | None = Field(default=None, description="Health survey results (JSON)")
 
@@ -42,7 +49,8 @@ class ProfileUpdate(BaseModel):
     All fields are optional for flexible updates.
     """
 
-    relation_type: RelationType | None = Field(None, description="Relationship type")
+    relation_type: RelationType | None = Field(None, description="가족 관계")
+    gender: Gender | None = Field(None, description="성별 (MALE / FEMALE)")
     name: str | None = Field(None, max_length=32, description="Profile name")
     health_survey: dict[str, Any] | None = Field(None, description="Health survey results")
 
@@ -59,7 +67,8 @@ class ProfileSummaryResponse(BaseModel):
     id: UUID = Field(..., description="Profile unique ID")
     account_id: UUID = Field(..., description="Connected account ID")
     name: str = Field(..., description="Profile name")
-    relation_type: RelationType = Field(..., description="Relationship type")
+    relation_type: RelationType = Field(..., description="가족 관계")
+    gender: Gender | None = Field(None, description="성별")
 
 
 class ProfileResponse(BaseProfile):

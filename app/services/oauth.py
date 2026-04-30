@@ -5,8 +5,8 @@ Supports both development/test environments with mock servers and production
 environments with actual provider servers. Follows modern async patterns.
 """
 
-import logging
 from datetime import datetime
+import logging
 from typing import Any
 from uuid import uuid4
 
@@ -17,7 +17,7 @@ from tortoise.transactions import in_transaction
 from app.core import config
 from app.core.config import Env
 from app.models.accounts import Account, AuthProvider
-from app.models.profiles import Profile, RelationType
+from app.models.profiles import Gender, Profile, RelationType
 from app.repositories.account_repository import AccountRepository
 from app.repositories.chat_session_repository import ChatSessionRepository
 from app.repositories.message_repository import MessageRepository
@@ -189,6 +189,7 @@ class OAuthService:
         await self._ensure_self_profile(
             account,
             nickname=nickname,
+            gender=Gender.MALE,
             health_survey={"age": 25, "gender": "MALE", "conditions": ["Test"], "allergies": ["None"]},
         )
 
@@ -278,6 +279,7 @@ class OAuthService:
         account: Account,
         *,
         nickname: str,
+        gender: Gender | None = None,
         health_survey: dict[str, Any] | None = None,
     ) -> None:
         """계정에 SELF 프로필이 없으면 생성. 이미 있으면 no-op.
@@ -285,6 +287,8 @@ class OAuthService:
         Args:
             account: 대상 Account.
             nickname: SELF 프로필 이름 베이스 (카카오 닉네임 또는 dev nickname).
+            gender: SELF 의 성별. dev_login 은 'MALE', 카카오는 None (사용자
+                추후 mypage 에서 입력) — SELF 는 RELATION_DEFAULT_GENDER 미적용.
             health_survey: 초기 health_survey JSON (dev 한정 — 운영 카카오는 None).
         """
         existing = await Profile.filter(
@@ -301,6 +305,7 @@ class OAuthService:
             account_id=account.id,
             name=(nickname or "사용자")[:32],
             relation_type=RelationType.SELF,
+            gender=gender,
             health_survey=health_survey,
         )
         logger.info("[OAUTH] SELF profile auto-created account_id=%s nickname=%s", account.id, nickname)

@@ -10,7 +10,7 @@ from fastapi import HTTPException, status
 from tortoise.transactions import in_transaction
 
 from app.dtos.profile import ProfileCreate, ProfileUpdate
-from app.models.profiles import Profile, RelationType
+from app.models.profiles import RELATION_DEFAULT_GENDER, Gender, Profile, RelationType
 from app.repositories.challenge_repository import ChallengeRepository
 from app.repositories.chat_session_repository import ChatSessionRepository
 from app.repositories.daily_symptom_log_repository import DailySymptomLogRepository
@@ -99,6 +99,25 @@ class ProfileService:
         """
         return await self.repository.get_self_profile(account_id)
 
+    @staticmethod
+    def _resolve_gender(relation_type: RelationType, requested_gender: Gender | None) -> Gender | None:
+        """relation_type 기반 gender default 결정.
+
+        - 사용자가 명시적으로 gender 보내면(``requested_gender`` 가 not None)
+          그 값을 우선 사용 (특수 케이스 대응).
+        - 그렇지 않으면 6 가지 명시적 가족 관계는 자동 매핑, SELF / OTHER 는 None.
+
+        Args:
+            relation_type: 가족 관계.
+            requested_gender: 사용자 요청에서 받은 gender 값 (없으면 None).
+
+        Returns:
+            최종 적용할 Gender 값 또는 None.
+        """
+        if requested_gender is not None:
+            return requested_gender
+        return RELATION_DEFAULT_GENDER.get(relation_type)
+
     async def create_profile(
         self,
         account_id: UUID,
@@ -127,12 +146,33 @@ class ProfileService:
                     detail="Self profile already exists.",
                 )
 
+        gender = self._resolve_gender(relation_type, data.gender)
+
         return await self.repository.create(
             account_id=account_id,
             name=data.name,
             relation_type=relation_type,
+            gender=gender,
             health_survey=data.health_survey,
         )
+
+    @staticmethod
+    def _apply_gender_default_on_relation_change(update_data: dict) -> None:
+        """relation_type 변경 시 gender 도 default 자동 갱신 (사용자 명시 없을 때).
+
+        ``update_data`` 에 ``relation_type`` 이 들어있는데 ``gender`` 가
+        명시되지 않았다면, 새 relation_type 의 default gender 로 자동 set.
+        SELF / OTHER 는 default 없음 → 기존 값 유지 (update_data 에 추가 안 함).
+
+        Args:
+            update_data: model_dump 결과 dict — 본 함수가 gender 키를 추가할 수 있음.
+        """
+        if "relation_type" not in update_data or "gender" in update_data:
+            return
+        new_relation = RelationType(update_data["relation_type"])
+        default_gender = RELATION_DEFAULT_GENDER.get(new_relation)
+        if default_gender is not None:
+            update_data["gender"] = default_gender
 
     async def update_profile(
         self,
@@ -150,6 +190,7 @@ class ProfileService:
         """
         profile = await self.get_profile(profile_id)
         update_data = data.model_dump(exclude_unset=True)
+        self._apply_gender_default_on_relation_change(update_data)
         return await self.repository.update(profile, **update_data)
 
     async def update_profile_with_owner_check(
@@ -170,6 +211,7 @@ class ProfileService:
         """
         profile = await self.get_profile_with_owner_check(profile_id, account_id)
         update_data = data.model_dump(exclude_unset=True)
+        self._apply_gender_default_on_relation_change(update_data)
         return await self.repository.update(profile, **update_data)
 
     # ── 프로필 삭제 (cascade — soft + hard 혼합) ────────────────────────

@@ -8,7 +8,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from app.core import config
-from app.models.profiles import Profile, RelationType
+from app.models.profiles import Gender, Profile, RelationType
 
 
 class ProfileRepository:
@@ -62,6 +62,7 @@ class ProfileRepository:
         account_id: UUID,
         name: str,
         relation_type: RelationType,
+        gender: Gender | None = None,
         health_survey: dict | None = None,
     ) -> Profile:
         """Create new profile.
@@ -70,6 +71,8 @@ class ProfileRepository:
             account_id: Account UUID.
             name: Profile name.
             relation_type: Relationship type.
+            gender: 성별 (MALE / FEMALE / None). 명시적 가족 관계는 service
+                레이어에서 default 자동 채움.
             health_survey: Optional health survey data.
 
         Returns:
@@ -80,6 +83,7 @@ class ProfileRepository:
             account_id=account_id,
             name=name,
             relation_type=relation_type,
+            gender=gender,
             health_survey=health_survey,
         )
 

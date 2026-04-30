@@ -10,12 +10,27 @@ const STORAGE_KEY = 'selectedProfileId'
 
 const PUBLIC_PATHS = ['/', '/login']
 
+// 가족 관계 enum 8종 단일 매핑 — relation_type 만으로 라벨 결정 (gender 합성 없음)
 const RELATION_LABELS = {
   SELF: '본인',
-  PARENT: '부모님',
-  CHILD: '자녀',
-  SPOUSE: '배우자',
+  FATHER: '아버지',
+  MOTHER: '어머니',
+  SON: '아들',
+  DAUGHTER: '딸',
+  HUSBAND: '남편',
+  WIFE: '아내',
   OTHER: '가족',
+}
+
+// relation_type → 기본 gender 매핑 (FE form 의 자동 채움 UX)
+// SELF / OTHER 는 사용자 직접 입력. BE 도 동일 default 정책 (RELATION_DEFAULT_GENDER).
+export const RELATION_GENDER_DEFAULT = {
+  FATHER: 'MALE',
+  MOTHER: 'FEMALE',
+  SON: 'MALE',
+  DAUGHTER: 'FEMALE',
+  HUSBAND: 'MALE',
+  WIFE: 'FEMALE',
 }
 
 /**
