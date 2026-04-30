@@ -6,6 +6,7 @@ import BottomNav from '@/components/layout/BottomNav'
 import GlobalAuthGuard from '@/components/auth/AuthGuard'
 import { ProfileProvider } from '@/contexts/ProfileContext'
 import { MedicationProvider } from '@/contexts/MedicationContext'
+import { PrescriptionGroupProvider } from '@/contexts/PrescriptionGroupContext'
 import { ChallengeProvider } from '@/contexts/ChallengeContext'
 import { LifestyleGuideProvider } from '@/contexts/LifestyleGuideContext'
 import { OcrDraftProvider } from '@/contexts/OcrDraftContext'
@@ -50,6 +51,7 @@ export default function RootLayout({ children }) {
         <GlobalAuthGuard>
           <ProfileProvider>
             <MedicationProvider>
+              <PrescriptionGroupProvider>
               <ChallengeProvider>
                 <LifestyleGuideProvider>
                   <OcrDraftProvider>
@@ -61,6 +63,7 @@ export default function RootLayout({ children }) {
                   </OcrDraftProvider>
                 </LifestyleGuideProvider>
               </ChallengeProvider>
+              </PrescriptionGroupProvider>
             </MedicationProvider>
           </ProfileProvider>
         </GlobalAuthGuard>
