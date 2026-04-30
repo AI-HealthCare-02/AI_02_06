@@ -65,6 +65,17 @@ export function ChallengeProvider({ children }) {
     setChallenges(prev => prev.filter(c => c.id !== id))
   }, [])
 
+  // 외부 Provider (예: LifestyleGuideContext) 가 새로 받은 챌린지를 store 에 union.
+  // 같은 id 는 중복 push 하지 않고 fresh 객체로 교체 (in-place update 의도).
+  const appendChallenges = useCallback((incoming) => {
+    if (!incoming || incoming.length === 0) return
+    setChallenges(prev => {
+      const byId = new Map(prev.map(c => [c.id, c]))
+      for (const c of incoming) byId.set(c.id, c)
+      return Array.from(byId.values())
+    })
+  }, [])
+
   // ── computed selectors ──────────────────────────────
   const activeChallenges = challenges.filter(
     c => c.challenge_status === 'IN_PROGRESS' && c.is_active,
@@ -91,6 +102,7 @@ export function ChallengeProvider({ children }) {
       startChallenge,
       updateChallenge,
       deleteChallenge,
+      appendChallenges,
       refetchChallenges,
     }}>
       {children}
