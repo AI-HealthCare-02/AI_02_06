@@ -248,3 +248,20 @@ class MedicationRepository:
             profile_id__in=profile_ids,
             deleted_at__isnull=True,
         ).update(deleted_at=datetime.now(tz=config.TIMEZONE))
+
+    async def bulk_soft_delete_by_profile(self, profile_id: UUID) -> int:
+        """프로필의 모든 active medication 을 일괄 soft delete.
+
+        Profile cascade soft-delete 흐름에서 호출. 이미 deleted_at 이 set
+        된 row 는 자연스럽게 제외 (idempotent).
+
+        Args:
+            profile_id: 대상 프로필 UUID.
+
+        Returns:
+            새로 deleted_at 이 채워진 row 수.
+        """
+        return await Medication.filter(
+            profile_id=profile_id,
+            deleted_at__isnull=True,
+        ).update(deleted_at=datetime.now(tz=config.TIMEZONE))

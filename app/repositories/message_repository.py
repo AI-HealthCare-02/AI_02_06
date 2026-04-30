@@ -4,8 +4,10 @@ This module provides data access layer for the messages table,
 handling chat message storage and retrieval operations.
 """
 
+from datetime import datetime
 from uuid import UUID, uuid4
 
+from app.core import config
 from app.models.messages import ChatMessage, SenderType
 
 
@@ -143,10 +145,23 @@ class MessageRepository:
         Returns:
             ChatMessage: Soft deleted message.
         """
-        from datetime import datetime
-
-        from app.core import config
-
         message.deleted_at = datetime.now(tz=config.TIMEZONE)
         await message.save()
         return message
+
+    async def bulk_soft_delete_by_session(self, session_id: UUID) -> int:
+        """세션의 모든 active 메시지를 일괄 soft delete.
+
+        ChatSession cascade soft-delete 흐름에서 호출. 이미 삭제된 row 는
+        자연스럽게 제외 (idempotent).
+
+        Args:
+            session_id: 대상 세션 UUID.
+
+        Returns:
+            새로 deleted_at 이 채워진 row 수.
+        """
+        return await ChatMessage.filter(
+            session_id=session_id,
+            deleted_at__isnull=True,
+        ).update(deleted_at=datetime.now(tz=config.TIMEZONE))
