@@ -182,16 +182,30 @@ function OcrResultContent() {
     }
 
     // 수동 추가 시 프로필 필수 (selectedProfileId 미설정 상태 방어)
-    if (draftId === 'manual' && !profileId) {
+    if (draftId === 'manual' && !selectedProfileId) {
       alert('프로필을 선택한 후 다시 시도해주세요.')
       return
     }
 
     setIsSubmitting(true)
     try {
-      // 처방일을 모든 약품에 공통 적용
+      // 처방일을 모든 약품에 공통 적용 + 빈 string → null sanitize
+      // (사용자가 직접 추가한 빈 행을 BE 의 int|None 검증이 거부하지 않도록)
+      const toIntOrNull = (v) => {
+        if (v === '' || v === null || v === undefined) return null
+        const n = parseInt(v, 10)
+        return Number.isNaN(n) ? null : n
+      }
+      const toStrOrNull = (v) => (v === '' || v === undefined ? null : v)
       const confirmedMedicines = meds.map(med => ({
         ...med,
+        medicine_name: med.medicine_name?.trim() ?? '',
+        dose_per_intake: toStrOrNull(med.dose_per_intake),
+        daily_intake_count: toIntOrNull(med.daily_intake_count),
+        total_intake_days: toIntOrNull(med.total_intake_days),
+        intake_instruction: toStrOrNull(med.intake_instruction),
+        category: toStrOrNull(med.category),
+        department: toStrOrNull(med.department),
         dispensed_date: prescriptionDate || null,
       }))
       if (draftId === 'manual') {

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { Pill, ChevronRight, Plus, Building2, Pencil, Trash2, CheckCircle2 } from 'lucide-react'
 import api from '@/lib/api'
 import BottomNav from '@/components/layout/BottomNav'
+import TimeSlotPicker from '@/components/medication/TimeSlotPicker'
 import { useProfile } from '@/contexts/ProfileContext'
 import { useMedication } from '@/contexts/MedicationContext'
 import { useOcrEntryNavigator } from '@/contexts/OcrDraftContext'
@@ -169,37 +170,52 @@ function PrescriptionGroup({ group, onMedClick, onEditGroup, onDeleteGroup, onDe
       </div>
       <div className="divide-y divide-gray-50">
         {items.map((med) => (
-          <div key={med.id} className="w-full flex items-center px-5 py-3 hover:bg-gray-50 transition-colors group">
-            <div
-              className="flex-1 flex items-center gap-3 cursor-pointer min-w-0"
-              onClick={() => onMedClick(med.id)}
-            >
-              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${med.is_active ? 'bg-green-400' : 'bg-gray-300'}`} />
-              <div className="flex-1 min-w-0">
-                <span className={`text-sm font-bold truncate block ${med.is_active ? 'text-gray-900' : 'text-gray-400'}`}>
-                  {med.medicine_name}
-                </span>
-                {med.dose_per_intake && (
-                  <span className="text-xs text-gray-400">{med.dose_per_intake}</span>
+          <div key={med.id} className="px-5 py-3 hover:bg-gray-50 transition-colors group">
+            {/* 약품 정보 행 — 탭 시 상세 이동 */}
+            <div className="flex items-center">
+              <div
+                className="flex-1 flex items-center gap-3 cursor-pointer min-w-0"
+                onClick={() => onMedClick(med.id)}
+              >
+                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${med.is_active ? 'bg-green-400' : 'bg-gray-300'}`} />
+                <div className="flex-1 min-w-0">
+                  <span className={`text-sm font-bold truncate block ${med.is_active ? 'text-gray-900' : 'text-gray-400'}`}>
+                    {med.medicine_name}
+                  </span>
+                  {(med.daily_intake_count || med.dose_per_intake || med.intake_instruction) && (
+                    <span className="text-xs text-gray-400">
+                      {[
+                        med.daily_intake_count && `1일 ${med.daily_intake_count}회`,
+                        med.dose_per_intake && `1회 ${med.dose_per_intake}`,
+                        med.intake_instruction,
+                      ].filter(Boolean).join(' · ')}
+                    </span>
+                  )}
+                </div>
+                {med.category && (
+                  <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
+                    {med.category}
+                  </span>
                 )}
               </div>
-              {med.category && (
-                <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
-                  {med.category}
-                </span>
-              )}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteMed([med]);
+                }}
+                className="ml-3 p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                aria-label="삭제"
+              >
+                <Trash2 size={16} />
+              </button>
+              <ChevronRight size={13} className="text-gray-300 shrink-0 ml-1" />
             </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDeleteMed([med]);
-              }}
-              className="ml-3 p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
-              aria-label="삭제"
-            >
-              <Trash2 size={16} />
-            </button>
-            <ChevronRight size={13} className="text-gray-300 shrink-0 ml-1" />
+            {/* 복약 시간대 슬롯 — 활성 약품에만 표시 */}
+            {med.is_active && (
+              <div className="mt-2 ml-4 pl-3">
+                <TimeSlotPicker medication={med} />
+              </div>
+            )}
           </div>
         ))}
       </div>

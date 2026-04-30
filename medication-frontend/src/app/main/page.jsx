@@ -9,6 +9,15 @@ import { useProfile } from '@/contexts/ProfileContext'
 import { useMedication } from '@/contexts/MedicationContext'
 import { useChallenge } from '@/contexts/ChallengeContext'
 import { useOcrDraft, useOcrEntryNavigator } from '@/contexts/OcrDraftContext'
+import TodaySchedule from '@/components/medication/TodaySchedule'
+
+// ── 히어로 배경 이미지 슬라이드쇼 ────────────────────────────────────────────
+// 흐름: 3초 타이머 → 다음 이미지 인덱스로 순환 → CSS transition으로 페이드
+const HERO_BG_IMAGES = [
+  '/hero_bg_1.png',
+  '/hero_bg_2.png',
+  '/hero_bg_3.png',
+]
 
 // 활성 OCR draft 카드 — main 우측하단 floating (챗봇 아이콘 위)
 // 사용자가 X 로 카드 전체를 숨길 수 있고 (새로고침 시 다시 표시),
@@ -97,6 +106,33 @@ function MainSkeleton() {
   )
 }
 
+// ── 복약 잔여 일수 계산 ────────────────────────────────────────────────────────
+// 흐름: end_date 우선 → 없으면 start_date + total_intake_days 로 추정
+function getRemainingDays(med) {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  if (med.end_date) {
+    const end = new Date(med.end_date)
+    end.setHours(0, 0, 0, 0)
+    const diff = Math.ceil((end - today) / (1000 * 60 * 60 * 24))
+    if (diff > 0) return `${diff}일 남음`
+    if (diff === 0) return '오늘 종료'
+    return null
+  }
+
+  if (med.total_intake_days && med.start_date) {
+    const start = new Date(med.start_date)
+    start.setHours(0, 0, 0, 0)
+    const elapsed = Math.ceil((today - start) / (1000 * 60 * 60 * 24))
+    const remaining = med.total_intake_days - elapsed
+    if (remaining > 0) return `${remaining}일 남음`
+    return null
+  }
+
+  return null
+}
+
 function MainPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -115,6 +151,17 @@ function MainPageContent() {
   const userName = selectedProfile?.name?.split('(')[0] || '사용자'
   const isInitialLoad = useRef(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [currentBgIndex, setCurrentBgIndex] = useState(0)
+  const bgTimerRef = useRef(null)
+
+  // ── 히어로 배경 이미지 슬라이드쇼 ──────────────────────────────────────────
+  // 흐름: mount → 3초 타이머 → 인덱스 순환 → 이전 타이머 클린업
+  useEffect(() => {
+    bgTimerRef.current = setTimeout(() => {
+      setCurrentBgIndex((prev) => (prev + 1) % HERO_BG_IMAGES.length)
+    }, 3000)
+    return () => clearTimeout(bgTimerRef.current)
+  }, [currentBgIndex])
 
   // 설문 팝업 쿼리 파라미터 감지
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -186,34 +233,68 @@ function MainPageContent() {
       {showSurvey && <SurveyModal onClose={() => setShowSurvey(false)} userName={userName} profileId={selectedProfileId} />}
       {showChat && <ChatModal onClose={() => setShowChat(false)} profileId={selectedProfileId} />}
 
-      {/* ── 히어로 섹션 (main의 다크 테마 + donghoon의 이름 데이터) ── */}
-      <section className="relative w-full min-h-[540px] flex items-center justify-center overflow-hidden bg-black">
+      {/* ── 히어로 섹션 (배경 이미지 슬라이드쇼 + 다크 오버레이) ── */}
+      <section
+        className="relative w-full min-h-[540px] flex items-center justify-center overflow-hidden bg-black"
+        style={{
+          backgroundImage: `url('${HERO_BG_IMAGES[currentBgIndex]}')`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          transition: 'background-image 1s ease-in-out',
+        }}
+      >
+        {/* 다크 오버레이 — 텍스트 가독성 확보 */}
+        <div className="absolute inset-0 bg-black/50" />
+        {/* 그리드 패턴 */}
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle, #ffffff 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+
         <div className="relative z-10 text-center px-6 max-w-3xl mx-auto py-24">
-          <p className="text-gray-500 text-xs font-bold mb-5 tracking-[0.2em] uppercase">{greeting.sub}</p>
+          <p className="text-gray-400 text-sm font-bold mb-5 tracking-[0.2em] uppercase">{greeting.sub}</p>
           <h1 className="text-5xl md:text-7xl font-black text-white leading-tight mb-8">
-            {greeting.msg},<br /><span className="text-gray-600">{userName} 님</span>
+            {greeting.msg},<br /><span className="text-gray-400">{userName} 님</span>
           </h1>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <button onClick={goToOcrFlow} className="px-8 py-4 bg-white text-black font-bold rounded-full hover:bg-gray-100 transition-all cursor-pointer">처방전 등록하기</button>
-            <button onClick={() => setShowChat(true)} className="px-8 py-4 bg-gray-900 text-white font-bold rounded-full border border-gray-800 hover:bg-gray-800 transition-all cursor-pointer flex items-center gap-2 justify-center">
+            <button onClick={() => setShowChat(true)} className="px-8 py-4 bg-gray-900/80 text-white font-bold rounded-full border border-gray-700 hover:bg-gray-800 transition-all cursor-pointer flex items-center gap-2 justify-center">
               <MessageCircle size={20}/> AI 상담하기
             </button>
+          </div>
+
+          {/* 이미지 인디케이터 — 클릭으로 수동 전환 가능 (hit area 충분히 확보) */}
+          <div className="flex gap-2 justify-center mt-10">
+            {HERO_BG_IMAGES.map((_, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setCurrentBgIndex(i)}
+                aria-label={`배경 이미지 ${i + 1}`}
+                className="py-3 px-1 cursor-pointer flex items-center justify-center"
+              >
+                <span
+                  className={`block h-2 rounded-full transition-all ${
+                    i === currentBgIndex ? 'bg-white w-8' : 'bg-white/40 w-2'
+                  }`}
+                />
+              </button>
+            ))}
           </div>
         </div>
       </section>
 
       {/* ── 대시보드 ── */}
       <main className="max-w-7xl mx-auto w-full px-6 py-14">
+        {/* 오늘의 복약 스케줄 — 약품 그리드 상단 전체 너비 */}
+        <TodaySchedule medications={medications} profileId={selectedProfileId} />
+
         <div className="grid md:grid-cols-12 gap-6 items-start">
           {/* 복약 현황 */}
           <section className="md:col-span-8 bg-white rounded-[32px] p-8 border border-gray-100">
             <div className="flex justify-between items-center mb-8">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-gray-100 rounded-2xl flex items-center justify-center"><Pill size={20} className="text-gray-900" /></div>
-                <h2 className="text-xl font-bold text-gray-900">복용 중인 약</h2>
+                <h2 className="text-2xl font-bold text-gray-900">복용 중인 약</h2>
               </div>
-              <button onClick={() => router.push('/medication')} className="text-sm font-bold text-gray-400 hover:text-gray-900 transition-colors cursor-pointer">
+              <button onClick={() => router.push('/medication')} className="text-base font-bold text-gray-400 hover:text-gray-900 transition-colors cursor-pointer">
                 전체보기 →
               </button>
             </div>
@@ -222,9 +303,9 @@ function MainPageContent() {
                 <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
                   <Pill size={28} className="text-gray-300" />
                 </div>
-                <p className="text-gray-400 font-bold mb-1">등록된 약이 없어요</p>
-                <p className="text-gray-300 text-sm mb-6">처방전을 촬영해서 약을 등록해보세요</p>
-                <button onClick={goToOcrFlow} className="px-6 py-3 bg-gray-900 text-white text-sm font-bold rounded-full cursor-pointer hover:bg-gray-800 transition-colors">
+                <p className="text-gray-400 font-bold text-base mb-1">등록된 약이 없어요</p>
+                <p className="text-gray-300 text-base mb-6">처방전을 촬영해서 약을 등록해보세요</p>
+                <button onClick={goToOcrFlow} className="px-6 py-3 bg-gray-900 text-white text-base font-bold rounded-full cursor-pointer hover:bg-gray-800 transition-colors">
                   처방전 등록하기
                 </button>
               </div>
@@ -238,16 +319,22 @@ function MainPageContent() {
                   >
                     <div className="flex justify-between items-start mb-3">
                       {med.category && (
-                        <span className="text-[10px] font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded-full">{med.category}</span>
+                        <span className="text-xs font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded-full">{med.category}</span>
                       )}
                       <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center ml-auto">
                         <Plus size={12} className="text-gray-400" />
                       </div>
                     </div>
-                    <h3 className="font-bold text-gray-900 text-sm mb-2 leading-snug">{med.medicine_name}</h3>
-                    <p className="text-xs text-gray-400">
-                      {[med.dose_per_intake, med.intake_instruction].filter(Boolean).join(' · ') || '복용 정보 없음'}
+                    <h3 className="font-bold text-gray-900 text-base mb-1 leading-snug">{med.medicine_name}</h3>
+                    <p className="text-sm text-gray-500 mb-0.5">
+                      {[
+                        med.daily_intake_count && `1일 ${med.daily_intake_count}회`,
+                        med.intake_instruction,
+                      ].filter(Boolean).join(' · ') || med.dose_per_intake || '복용 정보 없음'}
                     </p>
+                    {getRemainingDays(med) && (
+                      <p className="text-sm text-blue-500 font-semibold">{getRemainingDays(med)}</p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -258,18 +345,18 @@ function MainPageContent() {
           <div className="md:col-span-4 space-y-6">
             <div onClick={() => router.push('/challenge')} className="bg-gray-900 rounded-[32px] p-8 text-white cursor-pointer hover:-translate-y-1 transition-all min-h-[220px] flex flex-col justify-end relative overflow-hidden group">
               <Flame size={120} className="absolute -right-4 -top-4 opacity-[0.05] group-hover:scale-110 transition-transform" />
-              <p className="text-gray-500 font-bold text-xs mb-2 tracking-widest">CHALLENGE</p>
+              <p className="text-gray-500 font-bold text-sm mb-2 tracking-widest">CHALLENGE</p>
               {activeChallenge ? (
                 <>
-                  <h2 className="text-2xl font-black mb-3">{activeChallenge.title}</h2>
-                  <p className="text-orange-500 text-sm font-bold">
+                  <h2 className="text-3xl font-black mb-3">{activeChallenge.title}</h2>
+                  <p className="text-orange-500 text-base font-bold">
                     {activeChallenge.completed_dates?.length || 0}일째 성공 중! →
                   </p>
                 </>
               ) : (
                 <>
-                  <h2 className="text-2xl font-black mb-3">챌린지 시작하기</h2>
-                  <p className="text-gray-400 text-sm font-bold">건강한 습관을 만들어보세요 →</p>
+                  <h2 className="text-3xl font-black mb-3">챌린지 시작하기</h2>
+                  <p className="text-gray-400 text-base font-bold">건강한 습관을 만들어보세요 →</p>
                 </>
               )}
             </div>
