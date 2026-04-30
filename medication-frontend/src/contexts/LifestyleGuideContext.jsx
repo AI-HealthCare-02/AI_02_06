@@ -4,6 +4,7 @@ import { createContext, useContext, useState, useEffect, useCallback } from 'rea
 import api from '@/lib/api'
 import { streamSSE } from '@/lib/sseClient'
 import { useProfile } from '@/contexts/ProfileContext'
+import { useChallenge } from '@/contexts/ChallengeContext'
 
 const LifestyleGuideContext = createContext(null)
 
@@ -37,6 +38,9 @@ async function* watchGuideStatus(guideId, signal) {
  */
 export function LifestyleGuideProvider({ children }) {
   const { selectedProfileId } = useProfile()
+  // 가이드 ready 시 BE 가 INSERT 한 챌린지를 ChallengeContext store 에 union.
+  // ChallengeProvider 가 상위에 mount 되어 있어야 한다 (layout.js 참조).
+  const { appendChallenges } = useChallenge()
   const [guides, setGuides] = useState([])
   const [latestGuide, setLatestGuide] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -110,6 +114,18 @@ export function LifestyleGuideProvider({ children }) {
       if (payload.status === 'ready') {
         setGuides(prev => prev.map(g => (g.id === pendingId ? payload : g)))
         setLatestGuide(payload)
+        // 가이드와 함께 BE 가 INSERT 한 챌린지를 ChallengeContext store 에 즉시 union
+        // → 페이지 reload 없이 추천 챌린지 카드/배너가 곧바로 렌더된다.
+        try {
+          const { data: newChallenges } = await api.get(
+            `/api/v1/lifestyle-guides/${pendingId}/challenges`,
+          )
+          appendChallenges(newChallenges)
+        } catch (err) {
+          // 챌린지 fetch 실패해도 가이드 자체는 ready 이므로 throw 하지 않음.
+          // 사용자가 페이지 새로고침하면 ChallengeContext 의 effect 가 복구.
+          if (err.response?.status !== 401) console.error('가이드 챌린지 sync 실패:', err)
+        }
         return payload
       }
       if (payload.status in GUIDE_TERMINAL_ERROR_MESSAGES) {
@@ -124,7 +140,7 @@ export function LifestyleGuideProvider({ children }) {
     setGuides(prev => prev.filter(g => g.id !== pendingId))
     setLatestGuide(prev => (prev?.id === pendingId ? null : prev))
     throw new Error('가이드 생성이 완료되지 않았어요. 잠시 후 다시 시도해주세요.')
-  }, [])
+  }, [appendChallenges])
 
   const refetchGuides = useCallback(
     () => fetchGuides(selectedProfileId),
