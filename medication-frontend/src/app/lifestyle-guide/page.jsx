@@ -422,7 +422,11 @@ export default function LifestyleGuidePage() {
       // 사용자가 생성 중 placeholder 를 직접 삭제한 경우 result === null 로 silent.
       const result = await generateGuide(profileId, abortController.signal)
       if (!result) return
-      toast.success('새 가이드가 생성되었습니다!')
+      if (result.deduped) {
+        toast.success('동일 처방전 가이드가 이미 있어 그대로 보여드려요.')
+      } else {
+        toast.success('새 가이드가 생성되었습니다!')
+      }
     } catch (err) {
       // BE 409 + detail.code=NO_ACTIVE_MEDICATIONS → 토스트 + 처방전 등록 페이지 자동 이동
       const detail = err.response?.data?.detail

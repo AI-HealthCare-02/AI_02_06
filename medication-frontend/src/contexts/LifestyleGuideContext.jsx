@@ -105,6 +105,26 @@ export function LifestyleGuideProvider({ children }) {
   const generateGuide = useCallback(async (profileId, signal) => {
     const enqueueRes = await api.post(`/api/v1/lifestyle-guides/generate?profile_id=${profileId}`, null)
     const pendingId = enqueueRes.data.id
+
+    // Phase B dedupe hit — BE 가 같은 입력 fingerprint 의 ready 가이드를
+    // 즉시 반환. SSE 건너뛰고 가이드 + 챌린지 한 번에 fetch.
+    if (enqueueRes.data.status === 'ready') {
+      const { data: ready } = await api.get(`/api/v1/lifestyle-guides/${pendingId}`)
+      setGuides(prev => {
+        const exists = prev.some(g => g.id === ready.id)
+        return exists ? prev.map(g => (g.id === ready.id ? ready : g)) : [ready, ...prev]
+      })
+      setLatestGuide(ready)
+      try {
+        const { data: chs } = await api.get(`/api/v1/lifestyle-guides/${pendingId}/challenges`)
+        appendChallenges(chs)
+      } catch (err) {
+        if (err.response?.status !== 401) console.error('dedupe 챌린지 sync 실패:', err)
+      }
+      ready.deduped = true  // page 측에서 토스트 분기 가능
+      return ready
+    }
+
     const pendingGuide = {
       id: pendingId,
       profile_id: profileId,

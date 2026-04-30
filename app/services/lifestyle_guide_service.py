@@ -8,10 +8,14 @@
 
 ai-worker 가 ``content`` 를 채우고 status='ready' 로 UPDATE 하면 GET
 ``/lifestyle-guides/{id}`` 또는 SSE 가 곧바로 ready payload 를 응답한다.
+
+Phase B (입력 fingerprint dedupe): 같은 (활성 약물 set + 프롬프트 버전) 의
+ready 가이드가 이미 있으면 새 가이드를 생성하지 않고 그것을 그대로 반환.
 """
 
 import asyncio
 from collections.abc import AsyncIterator
+import hashlib
 import json
 import logging
 import os
@@ -39,6 +43,32 @@ _GUIDE_JOB_REF = "ai_worker.domains.lifestyle.jobs.process_lifestyle_guide_task"
 # SSE long-polling — nginx default proxy_read_timeout(60s) 안에 close
 _STREAM_MAX_SECONDS = 50
 _STREAM_TICK_SECONDS = 0.5
+
+# 프롬프트 / 분배 규칙 변경 시 bump — 기존 ready 가이드 fingerprint 가 stale
+# 처리되어 새 LLM 호출이 강제된다. 본 사이클에서 1일 챌린지 강제 + 일관성
+# instruction 도입하며 v2 로 bump.
+_GUIDE_PROMPT_VERSION = "v2"
+
+
+def _compute_input_fingerprint(snapshot: list[dict]) -> str:
+    """가이드 입력 fingerprint — 동일 입력 dedupe 키.
+
+    현재는 약물 set (medicine_name 정렬) + 프롬프트 버전만 사용.
+    추후 설문조사가 프롬프트에 들어가면 canonical 설문 JSON 도 합산.
+
+    Args:
+        snapshot: medication snapshot dict list (LLM 프롬프트 입력과 동일 source).
+
+    Returns:
+        SHA-256 hex (64 chars) — DB 저장 + 동등 비교 용.
+    """
+    names = sorted((m.get("medicine_name") or "") for m in snapshot)
+    payload = json.dumps(
+        {"prompt_ver": _GUIDE_PROMPT_VERSION, "medications": names},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _med_to_dict(med: Medication) -> dict:
@@ -71,23 +101,25 @@ class LifestyleGuideService:
         redis_url = os.environ.get("REDIS_URL", "redis://redis:6379")
         self._queue = Queue("ai", connection=make_sync_redis(redis_url))
 
-    # ── 가이드 생성 (RQ producer) ─────────────────────────────────────────
-    # 흐름: 활성 약물 조회 -> snapshot 직렬화 -> pending row INSERT
-    #       -> RQ enqueue (ai-worker 가 LLM 호출) -> pending guide 반환
+    # ── 가이드 생성 (RQ producer + Phase B dedupe) ─────────────────────────
+    # 흐름: 활성 약물 조회 -> snapshot 직렬화 -> input fingerprint 계산
+    #       -> 동일 fingerprint ready 가이드 존재 시 즉시 그것 반환 (LLM 호출 X)
+    #       -> 없으면 pending row INSERT + RQ enqueue -> pending guide 반환
     async def enqueue_guide_generation(self, profile_id: UUID) -> LifestyleGuide:
         """활성 약물을 snapshot 으로 묶어 pending guide + RQ task 를 등록.
+
+        같은 입력 fingerprint 의 ready 가이드가 이미 있으면 그것을 그대로
+        반환하여 LLM 호출 없이 즉시 동일 가이드를 응답한다 (Phase B dedupe).
 
         Args:
             profile_id: 가이드 받을 프로필 UUID.
 
         Returns:
-            ``LifestyleGuide`` (status='pending'). 프론트는 ``id`` 로 SSE 연결.
+            ``LifestyleGuide``. 신규 enqueue 시 status='pending', dedupe hit
+            시 status='ready'. 프론트는 status 보고 SSE 연결 / 즉시 표시 결정.
 
         Raises:
-            HTTPException 409: 활성 약물(복용 중 처방약) 미등록 시. detail 에
-                ``code=NO_ACTIVE_MEDICATIONS`` / ``message`` (사용자 안내) /
-                ``redirect_to=/ocr`` 가 포함되어 FE 가 토스트 + 라우팅을
-                한 번에 처리한다.
+            HTTPException 409: 활성 약물(복용 중 처방약) 미등록 시.
         """
         meds = await self.medication_repo.get_active_by_profile(profile_id)
         if not meds:
@@ -101,9 +133,32 @@ class LifestyleGuideService:
             )
 
         snapshot = [_med_to_dict(m) for m in meds]
-        guide = await self.guide_repo.create_pending(profile_id=profile_id, medication_snapshot=snapshot)
+        fingerprint = _compute_input_fingerprint(snapshot)
+
+        # Phase B dedupe — 같은 입력의 ready 가이드가 있으면 그것을 즉시 반환
+        existing = await self.guide_repo.get_ready_by_fingerprint(profile_id, fingerprint)
+        if existing is not None:
+            logger.info(
+                "[GUIDE] dedupe hit guide_id=%s profile_id=%s fingerprint=%s",
+                existing.id,
+                profile_id,
+                fingerprint[:12],
+            )
+            return existing
+
+        guide = await self.guide_repo.create_pending(
+            profile_id=profile_id,
+            medication_snapshot=snapshot,
+            input_fingerprint=fingerprint,
+        )
         self._queue.enqueue(_GUIDE_JOB_REF, str(guide.id), str(profile_id))
-        logger.info("[GUIDE] enqueued guide_id=%s profile_id=%s meds=%d", guide.id, profile_id, len(meds))
+        logger.info(
+            "[GUIDE] enqueued guide_id=%s profile_id=%s meds=%d fingerprint=%s",
+            guide.id,
+            profile_id,
+            len(meds),
+            fingerprint[:12],
+        )
         return guide
 
     # ── SSE 스트림 ─────────────────────────────────────────────────────────

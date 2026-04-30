@@ -72,7 +72,9 @@ async def enqueue_guide(
             FE 가 토스트 표시 + 처방전 등록 페이지 라우팅을 한 번에 처리한다.
     """
     guide = await service.enqueue_guide_with_owner_check(profile_id, current_account.id)
-    return LifestyleGuidePendingResponse(id=guide.id)
+    # Phase B dedupe hit 이면 service 가 이미 ready 가이드를 반환 — status 도
+    # 함께 응답해 FE 가 SSE 를 건너뛰고 즉시 GET 으로 fetch 할 수 있게 한다.
+    return LifestyleGuidePendingResponse(id=guide.id, status=guide.status)
 
 
 # ── GET /lifestyle-guides/{guide_id}/stream (SSE long-poll) ──────────────
