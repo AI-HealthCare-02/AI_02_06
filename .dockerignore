@@ -39,6 +39,8 @@
 !**/.env.example
 **/envs/
 **/*.log
+**/logs/
+**/logs.prev/
 **/npm-debug.log*
 **/yarn-debug.log*
 **/yarn-error.log*

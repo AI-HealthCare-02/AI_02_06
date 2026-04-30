@@ -83,7 +83,11 @@ services:
       - ./app:/app/app
       - ./ai_worker:/app/ai_worker
       - ./scripts:/app/scripts
+      - ./tests:/app/tests
+      - ./logs/fastapi:/app/logs
       - static_volume:/app/templates
+    environment:
+      LOG_DIR: /app/logs
     ports:
       - "8000:8000"
     networks:
@@ -127,6 +131,9 @@ services:
       - ./app:/app/app
       - ./ai_worker:/app/ai_worker
       - ./scripts:/app/scripts
+      - ./logs/ai-worker:/app/logs
+    environment:
+      LOG_DIR: /app/logs
     networks:
       - frontend  # OpenAI / Kakao Local / CLOVA OCR 외부 호출
       - backend   # Redis

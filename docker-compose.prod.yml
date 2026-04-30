@@ -84,6 +84,9 @@ services:
     volumes:
       - static_volume:/app/templates
       - media_volume:/app/media
+      - ./logs/fastapi:/app/logs
+    environment:
+      LOG_DIR: /app/logs
     networks:
       - frontend
       - backend
@@ -122,6 +125,10 @@ services:
       dockerfile: ai_worker/Dockerfile.prod
     env_file:
       - .env
+    volumes:
+      - ./logs/ai-worker:/app/logs
+    environment:
+      LOG_DIR: /app/logs
     networks:
       - frontend  # OpenAI / Kakao Local / CLOVA OCR 외부 호출
       - backend   # Redis
