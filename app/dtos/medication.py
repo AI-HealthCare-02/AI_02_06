@@ -111,3 +111,14 @@ class MedicationBulkDeleteResponse(BaseModel):
         default_factory=list,
         description="ownership/존재하지 않음/이미 삭제됨으로 건너뛴 ID",
     )
+
+
+class MedicationPrescriptionGroupDeleteRequest(BaseModel):
+    """처방전 그룹 단위 삭제 요청 — medication 들 + 가이드/챌린지 cascade.
+
+    단건 medication 삭제와 다른 endpoint 로 분리. 본 요청은 그룹 전체가
+    무효화됐다는 시그널로 가이드까지 함께 정리한다.
+    """
+
+    ids: list[UUID] = Field(..., min_length=1, max_length=100, description="처방전 그룹에 속한 medication ID 목록")
+    profile_id: UUID = Field(..., description="그룹 소유 프로필 — cascade scope")

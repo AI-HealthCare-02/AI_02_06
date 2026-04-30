@@ -15,6 +15,7 @@ from app.dtos.medication import (
     MedicationBulkDeleteRequest,
     MedicationBulkDeleteResponse,
     MedicationCreate,
+    MedicationPrescriptionGroupDeleteRequest,
     MedicationResponse,
     MedicationUpdate,
     PrescriptionDateItem,
@@ -241,3 +242,41 @@ async def bulk_delete_medications(
         ``MedicationBulkDeleteResponse`` — 처리된 개수 + 건너뛴 ids.
     """
     return await service.bulk_delete_with_owner_check(request.ids, current_account.id)
+
+
+# ── POST /medications/prescription-group/delete ──────────────────────────
+# 흐름: medication 그룹 soft delete -> 그 프로필의 active 가이드 cascade
+#       (가이드 안에서 챌린지 정책 — 미시작 soft / 활성 보존 — 자동 적용)
+@router.post(
+    "/prescription-group/delete",
+    response_model=MedicationBulkDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    summary="처방전 그룹 삭제 (medication + 가이드 + 챌린지 cascade)",
+)
+async def delete_prescription_group(
+    request: MedicationPrescriptionGroupDeleteRequest,
+    current_account: CurrentAccount,
+    service: MedicationServiceDep,
+) -> MedicationBulkDeleteResponse:
+    """처방전 그룹 단위 삭제 — 약 + 가이드 + 챌린지 의미적 cascade.
+
+    단건 약 삭제는 ``DELETE /medications`` 그대로 사용. 본 endpoint 는 처방전
+    카드 자체가 사라지는 시나리오에서 호출되며, 그 프로필의 active
+    lifestyle_guide 들도 함께 정리한다 (challenge 보존 정책 동일).
+
+    Args:
+        request: medication ids + profile_id.
+        current_account: 인증된 계정.
+        service: medication 서비스 인스턴스.
+
+    Returns:
+        ``MedicationBulkDeleteResponse`` — medication 처리 결과.
+
+    Raises:
+        HTTPException: 404/403 if profile not found / not owned.
+    """
+    return await service.delete_prescription_group_with_owner_check(
+        request.ids,
+        request.profile_id,
+        current_account.id,
+    )

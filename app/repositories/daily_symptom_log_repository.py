@@ -64,3 +64,17 @@ class DailySymptomLogRepository:
             .order_by("-log_date")
             .all()
         )
+
+    async def bulk_delete_by_profile(self, profile_id: UUID) -> int:
+        """프로필의 모든 daily symptom log 일괄 hard-delete.
+
+        DailySymptomLog 는 deleted_at 컬럼이 없는 일별 누적 로그라 hard-delete
+        정책. Profile cascade soft-delete 흐름의 일부로 호출.
+
+        Args:
+            profile_id: 대상 프로필 UUID.
+
+        Returns:
+            삭제된 row 수.
+        """
+        return await DailySymptomLog.filter(profile_id=profile_id).delete()

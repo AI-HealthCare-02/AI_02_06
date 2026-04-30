@@ -239,6 +239,18 @@ class LifestyleGuideService:
     async def delete_guide_with_owner_check(self, guide_id: UUID, account_id: UUID) -> None:
         """가이드 삭제 — 활성/완료 챌린지는 보존(guide_id=None), 미시작은 soft delete."""
         guide = await self.get_guide_with_owner_check(guide_id, account_id)
+        await self._cascade_delete_guide(guide)
+        logger.info("[GUIDE] 가이드 삭제 완료 guide_id=%s account_id=%s", guide_id, account_id)
+
+    async def _cascade_delete_guide(self, guide: LifestyleGuide) -> None:
+        """단일 가이드 cascade 삭제 — 챌린지 보존 정책 그대로.
+
+        - 활성/완료 챌린지: guide_id=None 으로 분리만 (사용자 진행분 보존)
+        - 미시작 챌린지: soft-delete
+
+        Args:
+            guide: 삭제 대상 LifestyleGuide.
+        """
         challenges = await self.challenge_repo.get_by_guide_id(guide.id)
         for c in challenges:
             if not c.is_active:
@@ -246,7 +258,24 @@ class LifestyleGuideService:
             else:
                 await Challenge.filter(id=c.id).update(guide_id=None)
         await self.guide_repo.delete_by_id(guide.id)
-        logger.info("[GUIDE] 가이드 삭제 완료 guide_id=%s account_id=%s", guide_id, account_id)
+
+    async def cascade_delete_active_guides_by_profile(self, profile_id: UUID) -> int:
+        """프로필의 모든 active 가이드 일괄 cascade 삭제.
+
+        처방전 그룹 삭제 흐름에서 호출 — 약 그룹이 사라지면 그 시점 기준의
+        가이드도 의미가 흐려지므로 함께 정리. 챌린지 보존 정책은
+        ``_cascade_delete_guide`` 와 동일하게 적용.
+
+        Args:
+            profile_id: 대상 프로필 UUID.
+
+        Returns:
+            정리된 가이드 수.
+        """
+        guides = await self.guide_repo.get_all_by_profile(profile_id)
+        for g in guides:
+            await self._cascade_delete_guide(g)
+        return len(guides)
 
     async def get_guide_challenges_with_owner_check(
         self,
