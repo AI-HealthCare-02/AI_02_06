@@ -99,6 +99,20 @@ function formatFullDateTime(isoStr) {
   return `${yyyy}.${mm}.${dd} ${HH}:${MM}`
 }
 
+// medication_snapshot 안의 처방일(dispensed_date) 분포에서 사용자에게 보여줄
+// 대표 처방일 라벨을 만든다. 처방일이 모두 같으면 단일 날짜, 다르면 범위로.
+function summarizePrescribedRange(snapshot) {
+  if (!Array.isArray(snapshot) || snapshot.length === 0) return null
+  const dates = snapshot
+    .map((m) => (typeof m === 'object' ? m.dispensed_date || m.start_date : null))
+    .filter(Boolean)
+    .sort()
+  if (dates.length === 0) return null
+  const first = dates[0].slice(0, 10).replace(/-/g, '.')
+  const last = dates[dates.length - 1].slice(0, 10).replace(/-/g, '.')
+  return first === last ? first : `${first} ~ ${last}`
+}
+
 // ── 증상 로그 폼 컴포넌트 ──────────────────────────────────────────────────────
 // '증상 트래킹' 탭에서만 렌더링되는 일일 증상 기록 입력 폼
 // - POST /api/v1/daily-logs 로 {profile_id, log_date, symptoms[], note} 전송
@@ -597,31 +611,53 @@ export default function LifestyleGuidePage() {
         {/* ── 과거 가이드 열람 배너 ──
             처방일이 아니라 "가이드 생성 시점" 기준임을 명확히 함.
             이후 처방 / 설문 변경이 있을 수 있어 새 가이드 생성을 권장.   */}
-        {isViewingHistory && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 flex items-center gap-2">
-            <span className="text-amber-500 text-sm">⚠️</span>
-            <p className="text-xs text-amber-700 font-bold">
-              {formatFullDateTime(selectedGuide.created_at)} 시점에 만든 가이드예요. 이후 변경사항은 반영되지 않아요.
-            </p>
-          </div>
-        )}
+        {isViewingHistory && (() => {
+          const prescribed = summarizePrescribedRange(selectedGuide.medication_snapshot)
+          return (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-amber-500 text-sm">⚠️</span>
+                <p className="text-xs text-amber-800 font-bold">
+                  {formatFullDateTime(selectedGuide.created_at)} 에 만들어진 가이드예요
+                </p>
+              </div>
+              <p className="text-[11px] text-amber-700 leading-relaxed pl-5">
+                {prescribed && <>처방일 {prescribed} 기준으로 작성됐어요. </>}
+                이후 처방이나 설문조사가 바뀌었다면 새 가이드를 만들어 주세요.
+              </p>
+            </div>
+          )
+        })()}
 
         {/* ── 가이드 내용 (가이드 선택된 경우) — 생성 중에도 기존 ready 가이드는 그대로 보인다 ── */}
         {selectedGuide && (
           <>
-            {/* 복용 약 스냅샷 */}
+            {/* 복용 약 스냅샷 — 처방일이 있으면 chip 옆에 작은 라벨로 표기 */}
             {selectedGuide.medication_snapshot?.length > 0 && (
               <div className="bg-white rounded-2xl px-4 py-3 shadow-sm border border-gray-50">
                 <p className="text-xs font-bold text-gray-400 mb-2">💊 가이드 생성 시 복용 약</p>
                 <div className="flex flex-wrap gap-1.5">
-                  {selectedGuide.medication_snapshot.map((med, i) => (
-                    <span
-                      key={i}
-                      className="bg-gray-100 text-gray-600 text-xs px-2.5 py-1 rounded-full font-bold"
-                    >
-                      {typeof med === 'string' ? med : med.medicine_name || med.name || JSON.stringify(med)}
-                    </span>
-                  ))}
+                  {selectedGuide.medication_snapshot.map((med, i) => {
+                    const name =
+                      typeof med === 'string'
+                        ? med
+                        : med.medicine_name || med.name || JSON.stringify(med)
+                    const dispensed =
+                      typeof med === 'object' ? med.dispensed_date || med.start_date : null
+                    return (
+                      <span
+                        key={i}
+                        className="bg-gray-100 text-gray-600 text-xs px-2.5 py-1 rounded-full font-bold inline-flex items-center gap-1.5"
+                      >
+                        {name}
+                        {dispensed && (
+                          <span className="text-[10px] font-normal text-gray-400">
+                            처방 {dispensed.slice(5, 10).replace('-', '/')}
+                          </span>
+                        )}
+                      </span>
+                    )
+                  })}
                 </div>
               </div>
             )}

@@ -42,12 +42,20 @@ _STREAM_TICK_SECONDS = 0.5
 
 
 def _med_to_dict(med: Medication) -> dict:
-    """Medication ORM -> snapshot-safe dict (LLM prompt + DB JSONField 공용)."""
+    """Medication ORM -> snapshot-safe dict (LLM prompt + DB JSONField 공용).
+
+    날짜 필드는 ISO 문자열로 저장해 FE 에서 처방일 라벨에 활용한다.
+    LLM 프롬프트는 medicine_name/category/intake_instruction/dose_per_intake 만
+    참조하므로 추가 필드는 prompt 출력에 영향 없음.
+    """
     return {
         "medicine_name": med.medicine_name,
         "category": getattr(med, "category", None),
         "intake_instruction": getattr(med, "intake_instruction", None),
         "dose_per_intake": getattr(med, "dose_per_intake", None),
+        "dispensed_date": med.dispensed_date.isoformat() if med.dispensed_date else None,
+        "start_date": med.start_date.isoformat() if med.start_date else None,
+        "end_date": med.end_date.isoformat() if med.end_date else None,
     }
 
 
