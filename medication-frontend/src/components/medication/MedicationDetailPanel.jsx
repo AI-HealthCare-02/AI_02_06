@@ -205,8 +205,13 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
               </span>
             )}
             <h2 className="text-xl font-black leading-snug mt-1">{med.medicine_name}</h2>
-            <p className="text-gray-400 text-sm mt-2">
-              남은 복용 {med.remaining_intake_count} / {med.total_intake_count}회
+            <p className="text-gray-400 text-sm mt-2 flex items-center flex-wrap gap-x-3">
+              <span>
+                남은 복용 {med.remaining_intake_count} / {med.total_intake_count}회
+              </span>
+              {med.dispensed_date && (
+                <span className="text-gray-500">· 처방일 {med.dispensed_date.replace(/-/g, '.')}</span>
+              )}
             </p>
           </div>
           <div
