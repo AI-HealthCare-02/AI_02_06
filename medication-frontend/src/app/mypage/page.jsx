@@ -7,6 +7,7 @@ import BottomNav from '@/components/layout/BottomNav'
 import LogoutModal, { useLogout, DeleteAccountModal, useDeleteAccount } from '@/components/auth/LogoutModal'
 import api, { handleApiError } from '@/lib/api'
 import toast from 'react-hot-toast'
+import { useConfirm } from '@/components/common/ConfirmDialog'
 import { useProfile } from '@/contexts/ProfileContext'
 
 // --- 모달 컴포넌트들 ---
@@ -305,6 +306,7 @@ function MyPageSkeleton() {
 
 export default function MyPage() {
   const router = useRouter()
+  const confirm = useConfirm()
   const searchParams = useSearchParams()
   const {
     selectedProfileId: profileId,
@@ -444,7 +446,13 @@ export default function MyPage() {
 
   const handleDeleteFamily = async (id, e) => {
     e.stopPropagation()
-    if (!confirm('정말로 삭제하시겠습니까?')) return
+    const ok = await confirm({
+      title: '가족 프로필 삭제',
+      message: '이 가족 프로필을 삭제할까요?\n관련 약품·가이드·챌린지가 함께 정리됩니다.',
+      confirmLabel: '삭제',
+      danger: true,
+    })
+    if (!ok) return
     try {
       await deleteProfile(id)
       toast.success('삭제되었습니다.')

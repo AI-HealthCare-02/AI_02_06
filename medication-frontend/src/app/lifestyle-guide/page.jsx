@@ -15,6 +15,7 @@ import { useLifestyleGuide } from '@/contexts/LifestyleGuideContext'
 import { useChallenge, useChallengeStart, useChallengeCheck } from '@/contexts/ChallengeContext'
 import { usePrescriptionGroup } from '@/contexts/PrescriptionGroupContext'
 import StartChallengeModal from '@/components/common/StartChallengeModal'
+import { useConfirm } from '@/components/common/ConfirmDialog'
 import PrescriptionPickerModal from '@/components/lifestyle/PrescriptionPickerModal'
 import SymptomLogForm from '@/components/lifestyle/SymptomLogForm'
 import toast from 'react-hot-toast'
@@ -222,6 +223,7 @@ function ChallengeBanner({ challenge, isViewingHistory }) {
 // ── 메인 페이지 ────────────────────────────────────────────────────────────────
 export default function LifestyleGuidePage() {
   const router = useRouter()
+  const confirm = useConfirm()
   const { selectedProfileId: profileId } = useProfile()
   const {
     guides,
@@ -379,7 +381,13 @@ export default function LifestyleGuidePage() {
   }
 
   const handleDeleteGuide = async (guide) => {
-    if (!confirm(`${formatFullDateTime(guide.created_at)} 가이드를 삭제하시겠습니까?`)) return
+    const ok = await confirm({
+      title: '가이드 삭제',
+      message: `${formatFullDateTime(guide.created_at)} 에 만들어진 가이드를 삭제하시겠습니까?`,
+      confirmLabel: '삭제',
+      danger: true,
+    })
+    if (!ok) return
     try {
       // sticky picked 가 삭제 대상이면 auto-follow 로 회귀
       if (userPickedGuideId === guide.id) setUserPickedGuideId(null)
