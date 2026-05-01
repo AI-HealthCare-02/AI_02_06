@@ -1,1 +1,2 @@
 * text=auto eol=lf
+app/db/migrations/models/*.py binary
