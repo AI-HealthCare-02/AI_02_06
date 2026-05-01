@@ -9,13 +9,14 @@ import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/Header'
 import BottomNav from '@/components/layout/BottomNav'
 import EmptyState from '@/components/common/EmptyState'
-import api, { showError } from '@/lib/api'
+import { showError } from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
 import { useLifestyleGuide } from '@/contexts/LifestyleGuideContext'
 import { useChallenge, useChallengeStart, useChallengeCheck } from '@/contexts/ChallengeContext'
 import { usePrescriptionGroup } from '@/contexts/PrescriptionGroupContext'
 import StartChallengeModal from '@/components/common/StartChallengeModal'
 import PrescriptionPickerModal from '@/components/lifestyle/PrescriptionPickerModal'
+import SymptomLogForm from '@/components/lifestyle/SymptomLogForm'
 import toast from 'react-hot-toast'
 
 // "추천 챌린지 더 보기" 한도 — BE 와 동일 (LifestyleGuide.revealed_challenge_count
@@ -119,102 +120,7 @@ function summarizePrescribedRange(snapshot) {
   return first === last ? first : `${first} ~ ${last}`
 }
 
-// ── 증상 로그 폼 컴포넌트 ──────────────────────────────────────────────────────
-// '증상 트래킹' 탭에서만 렌더링되는 일일 증상 기록 입력 폼
-// - POST /api/v1/daily-logs 로 {profile_id, log_date, symptoms[], note} 전송
-// - 409 충돌 시 "오늘 기록이 이미 있습니다." 안내 (하루 1회 제한)
-function SymptomLogForm({ profileId, onSaved }) {
-  // 선택 가능한 증상 프리셋 태그 목록
-  const PRESET_SYMPTOMS = [
-    '어지러움', '두통', '구역질', '복통', '설사', '변비',
-    '피로감', '수면 장애', '식욕 부진', '발진', '심계항진',
-  ]
-
-  const [selected, setSelected] = useState([])
-  const [note, setNote] = useState('')
-  const [isSaving, setIsSaving] = useState(false)
-  const today = new Date().toISOString().split('T')[0]
-
-  // 프리셋 태그 토글: 선택된 항목이면 제거, 아니면 추가
-  const toggle = (symptom) => {
-    setSelected((prev) =>
-      prev.includes(symptom) ? prev.filter((s) => s !== symptom) : [...prev, symptom]
-    )
-  }
-
-  const handleSave = async () => {
-    if (!profileId) return
-    setIsSaving(true)
-    try {
-      await api.post('/api/v1/daily-logs', {
-        profile_id: profileId,
-        log_date: today,
-        symptoms: selected,
-        note: note || null,
-      })
-      toast.success('증상 기록이 저장되었습니다.')
-      setSelected([])
-      setNote('')
-      onSaved?.()
-    } catch (err) {
-      // 409: 당일 중복 기록 방지
-      if (err.response?.status === 409) {
-        showError('오늘 기록이 이미 있습니다.')
-      } else {
-        showError('저장에 실패했습니다.')
-      }
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  return (
-    <div className="mt-4 space-y-4">
-      <div>
-        <p className="text-xs font-bold text-gray-500 mb-2">오늘의 증상 선택</p>
-        <div className="flex flex-wrap gap-2">
-          {PRESET_SYMPTOMS.map((s) => (
-            <button
-              key={s}
-              onClick={() => toggle(s)}
-              className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${
-                selected.includes(s)
-                  ? 'bg-orange-500 text-white border-orange-500'
-                  : 'bg-white text-gray-500 border-gray-200 hover:border-orange-300'
-              }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <p className="text-xs font-bold text-gray-500 mb-1">메모 (선택)</p>
-        <textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="오늘 몸 상태를 자유롭게 적어보세요"
-          maxLength={512}
-          rows={3}
-          className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:border-orange-300"
-        />
-      </div>
-
-      <button
-        onClick={handleSave}
-        disabled={isSaving}
-        className={`w-full py-3 rounded-xl text-sm font-bold transition-colors ${
-          isSaving
-            ? 'bg-gray-100 text-gray-400 cursor-wait'
-            : 'bg-orange-500 text-white hover:bg-orange-600 cursor-pointer'
-        }`}
-      >
-        {isSaving ? '저장 중...' : '오늘 증상 기록하기'}
-      </button>
-    </div>
-  )
-}
+// ── 증상 로그 폼은 components/lifestyle/SymptomLogForm.jsx 로 추출됨 (PR-B 표준 폼) ──
 
 // ── 챌린지 배너 컴포넌트 ────────────────────────────────────────────────────────
 // 화면 하단에 고정되는 배너로, 현재 선택된 탭 카테고리에 해당하는 챌린지 1개를 표시

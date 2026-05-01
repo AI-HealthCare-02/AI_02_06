@@ -1,11 +1,24 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Trash2 } from 'lucide-react'
+import { useFieldArray, useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
+import toast from 'react-hot-toast'
+
 import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
 import { useMedication } from '@/contexts/MedicationContext'
+import { medicationEditPatchSchema } from '@/schemas'
+import FormError from '@/components/form/FormError'
+
+// 여러 medication 을 한 화면에서 검증하기 위해 array 로 wrap.
+const editFormSchema = z.object({
+  prescription_date: z.string().optional(),
+  meds: z.array(medicationEditPatchSchema).min(1, '저장할 약품이 없어요'),
+})
 
 function EditSkeleton() {
   return (
@@ -26,16 +39,26 @@ function EditSkeleton() {
 function MedicationEditContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  // URL 쿼리 ?ids=id1,id2,... 로 처방전 그룹 내 약품 ID 목록 전달받음
-  // medication/page.jsx의 onEditGroup에서 ids=items.map(m=>m.id).join(',') 형태로 생성
   const ids = searchParams.get('ids')?.split(',').filter(Boolean) ?? []
   const { medications, updateMedication } = useMedication()
 
   const [isLoading, setIsLoading] = useState(true)
-  const [meds, setMeds] = useState([])
-  // prescriptionDate: 그룹 내 모든 약품에 공통 적용되는 처방일 (dispensed_date)
-  const [prescriptionDate, setPrescriptionDate] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const {
+    control,
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm({
+    resolver: zodResolver(editFormSchema),
+    mode: 'onChange',
+    defaultValues: {
+      prescription_date: '',
+      meds: [],
+    },
+  })
+  const { fields, remove } = useFieldArray({ control, name: 'meds' })
 
   useEffect(() => {
     if (ids.length === 0) {
@@ -43,88 +66,95 @@ function MedicationEditContent() {
       return
     }
 
-    // MedicationContext 의 store 에서 ids 매칭 우선 (페이지 이동 시 즉시 반영)
-    const cached = ids.map(id => medications.find(m => m.id === id)).filter(Boolean)
-    if (cached.length === ids.length) {
-      setMeds(cached)
-      setPrescriptionDate(cached[0]?.dispensed_date || cached[0]?.start_date || '')
+    const fillForm = (rows) => {
+      reset({
+        prescription_date: rows[0]?.dispensed_date || rows[0]?.start_date || '',
+        meds: rows.map((m) => ({
+          id: m.id,
+          medicine_name: m.medicine_name || '',
+          dose_per_intake: m.dose_per_intake || '',
+          intake_instruction: m.intake_instruction || '',
+          category: m.category || '',
+          daily_intake_count: m.daily_intake_count ?? '',
+          total_intake_days: m.total_intake_days ?? '',
+        })),
+      })
       setIsLoading(false)
+    }
+
+    const cached = ids.map((id) => medications.find((m) => m.id === id)).filter(Boolean)
+    if (cached.length === ids.length) {
+      fillForm(cached)
       return
     }
-    if (medications.length === 0) {
-      // Context 의 첫 fetch 가 아직 진행 중일 수 있어 다음 effect 까지 대기
-      return
-    }
-    // 일부 매칭 누락 (직접 URL 진입 등) → fallback 으로 bulk fetch
-    const fetchMedications = async () => {
+    if (medications.length === 0) return // 첫 fetch 대기.
+
+    const fetchAll = async () => {
       try {
-        const results = await Promise.all(ids.map(id => api.get(`/api/v1/medications/${id}`)))
-        const fetched = results.map(r => r.data)
-        setMeds(fetched)
-        setPrescriptionDate(fetched[0]?.dispensed_date || fetched[0]?.start_date || '')
+        const results = await Promise.all(ids.map((id) => api.get(`/api/v1/medications/${id}`)))
+        fillForm(results.map((r) => r.data))
       } catch {
-        alert('약품 정보를 불러올 수 없습니다.')
+        toast.error('약품 정보를 불러올 수 없습니다.')
         router.push('/medication')
-      } finally {
-        setIsLoading(false)
       }
     }
-    fetchMedications()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    fetchAll()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [medications])
 
-  const handleInputChange = (index, field, value) => {
-    setMeds(prev => {
-      const updated = [...prev]
-      updated[index] = { ...updated[index], [field]: value }
-      return updated
-    })
-  }
-
-  const handleDelete = (index) => {
-    setMeds(prev => prev.filter((_, i) => i !== index))
-  }
-
-  const handleSave = async () => {
-    if (isSubmitting) return
-    if (meds.length === 0) {
-      alert('저장할 약품이 없습니다.')
+  const onSubmit = async (values) => {
+    if (values.meds.length === 0) {
+      toast.error('저장할 약품이 없어요.')
       return
     }
-
-    setIsSubmitting(true)
     try {
-      // Context 의 updateMedication 이 응답으로 store in-place 갱신 → list 자동 반영
       await Promise.all(
-        meds.map(med =>
+        values.meds.map((med) =>
           updateMedication(med.id, {
             medicine_name: med.medicine_name,
-            department: med.department || null,
             category: med.category || null,
             dose_per_intake: med.dose_per_intake || null,
             daily_intake_count: med.daily_intake_count || null,
             total_intake_days: med.total_intake_days || null,
             intake_instruction: med.intake_instruction || null,
-            dispensed_date: prescriptionDate || null,
-          })
-        )
+            dispensed_date: values.prescription_date || null,
+          }),
+        ),
       )
-      alert('수정이 완료되었습니다.')
+      toast.success('수정이 완료되었습니다.')
       router.push('/medication')
     } catch {
-      alert('저장 중 오류가 발생했습니다.')
-      setIsSubmitting(false)
+      toast.error('저장 중 오류가 발생했습니다.')
     }
+  }
+
+  const onInvalid = (formErrors) => {
+    // 첫 에러 메시지만 toast — 어느 row 든 한 번에 1개 안내.
+    const dig = (obj) => {
+      if (!obj) return null
+      if (typeof obj === 'object' && 'message' in obj && obj.message) return obj.message
+      for (const v of Object.values(obj)) {
+        const r = dig(v)
+        if (r) return r
+      }
+      return null
+    }
+    toast.error(dig(formErrors) || '입력값을 다시 확인해주세요.')
   }
 
   if (isLoading) return <EditSkeleton />
 
   return (
     <main className="min-h-screen bg-gray-50 pb-24">
-      <div className="max-w-2xl mx-auto">
-        {/* 헤더 */}
+      <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="max-w-2xl mx-auto">
         <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-4">
-          <button onClick={() => router.back()} className="text-gray-400 hover:text-black cursor-pointer text-xl">←</button>
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="text-gray-400 hover:text-black cursor-pointer text-xl"
+          >
+            ←
+          </button>
           <div>
             <h1 className="font-bold text-gray-900">처방전 수정</h1>
             <p className="text-xs text-gray-400">내용을 터치해서 수정할 수 있어요</p>
@@ -132,13 +162,13 @@ function MedicationEditContent() {
         </div>
 
         <div className="px-6 py-6 space-y-4">
-          {/* 안내 배너 */}
           <div className="bg-blue-50 rounded-2xl p-4 flex items-center gap-3">
             <span className="text-lg font-bold text-blue-400">!</span>
-            <p className="text-blue-600 text-xs">등록된 약품 정보를 수정합니다. 처방일은 전체 약품에 공통 적용됩니다.</p>
+            <p className="text-blue-600 text-xs">
+              등록된 약품 정보를 수정합니다. 처방일은 전체 약품에 공통 적용됩니다.
+            </p>
           </div>
 
-          {/* 처방일 */}
           <div className="bg-white rounded-2xl p-5 border border-gray-200 flex items-center justify-between gap-4">
             <div>
               <p className="text-sm font-bold text-gray-900">처방일</p>
@@ -146,28 +176,32 @@ function MedicationEditContent() {
             </div>
             <input
               type="date"
-              value={prescriptionDate}
-              onChange={(e) => setPrescriptionDate(e.target.value)}
+              {...register('prescription_date')}
               className="text-sm font-bold text-gray-700 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50"
             />
           </div>
 
-          {/* 약품 카드 목록 */}
           <div className="space-y-4">
-            {meds.map((med, i) => (
+            {fields.map((field, i) => (
               <div
-                key={med.id}
+                key={field.id}
                 className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200"
               >
                 <div className="flex justify-between items-start mb-4 gap-4">
-                  <input
-                    type="text"
-                    value={med.medicine_name || ''}
-                    onChange={(e) => handleInputChange(i, 'medicine_name', e.target.value)}
-                    className="font-bold text-lg text-gray-900 border-b-2 border-transparent hover:border-blue-200 focus:border-blue-500 focus:outline-none bg-transparent w-full transition-colors"
-                    placeholder="약품명 입력"
-                  />
-                  <button onClick={() => handleDelete(i)} className="text-gray-300 hover:text-red-400 mt-1 cursor-pointer shrink-0">
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      {...register(`meds.${i}.medicine_name`)}
+                      className="font-bold text-lg text-gray-900 border-b-2 border-transparent hover:border-blue-200 focus:border-blue-500 focus:outline-none bg-transparent w-full transition-colors"
+                      placeholder="약품명 입력"
+                    />
+                    <FormError name={`meds.${i}.medicine_name`} errors={errors} />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => remove(i)}
+                    className="text-gray-300 hover:text-red-400 mt-1 cursor-pointer shrink-0"
+                  >
                     <Trash2 size={20} />
                   </button>
                 </div>
@@ -177,51 +211,52 @@ function MedicationEditContent() {
                     <p className="text-[10px] text-gray-500 mb-1 px-1">1회 복용량</p>
                     <input
                       type="text"
-                      value={med.dose_per_intake || ''}
-                      onChange={(e) => handleInputChange(i, 'dose_per_intake', e.target.value)}
+                      {...register(`meds.${i}.dose_per_intake`)}
                       className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
                       placeholder="예: 1정"
                     />
+                    <FormError name={`meds.${i}.dose_per_intake`} errors={errors} />
                   </div>
                   <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
                     <p className="text-[10px] text-gray-500 mb-1 px-1">1일 복용 횟수</p>
                     <input
                       type="number"
-                      value={med.daily_intake_count || ''}
-                      onChange={(e) => handleInputChange(i, 'daily_intake_count', Number(e.target.value) || null)}
+                      inputMode="numeric"
+                      {...register(`meds.${i}.daily_intake_count`)}
                       className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
                       placeholder="예: 3"
                     />
+                    <FormError name={`meds.${i}.daily_intake_count`} errors={errors} />
                   </div>
                   <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
                     <p className="text-[10px] text-gray-500 mb-1 px-1">총 복용 일수</p>
                     <input
                       type="number"
-                      value={med.total_intake_days || ''}
-                      onChange={(e) => handleInputChange(i, 'total_intake_days', Number(e.target.value) || null)}
+                      inputMode="numeric"
+                      {...register(`meds.${i}.total_intake_days`)}
                       className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
                       placeholder="예: 5"
                     />
+                    <FormError name={`meds.${i}.total_intake_days`} errors={errors} />
                   </div>
                   <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
                     <p className="text-[10px] text-gray-500 mb-1 px-1">복용 방법</p>
                     <input
                       type="text"
-                      value={med.intake_instruction || ''}
-                      onChange={(e) => handleInputChange(i, 'intake_instruction', e.target.value)}
+                      {...register(`meds.${i}.intake_instruction`)}
                       className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
                       placeholder="예: 식후 30분"
                     />
+                    <FormError name={`meds.${i}.intake_instruction`} errors={errors} />
                   </div>
                 </div>
 
-                {med.category && (
+                {field.category && (
                   <div className="mt-3 bg-gray-50 p-2 rounded-xl border border-gray-100">
                     <p className="text-[10px] text-gray-500 mb-1 px-1">약품 분류</p>
                     <input
                       type="text"
-                      value={med.category || ''}
-                      onChange={(e) => handleInputChange(i, 'category', e.target.value)}
+                      {...register(`meds.${i}.category`)}
                       className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
                       placeholder="예: 해열진통제"
                     />
@@ -231,16 +266,16 @@ function MedicationEditContent() {
             ))}
           </div>
 
-          {/* 하단 버튼 */}
           <div className="flex gap-3 pb-10">
             <button
+              type="button"
               onClick={() => router.back()}
               className="flex-1 bg-white border border-gray-200 py-4 rounded-xl text-gray-500 text-sm font-bold cursor-pointer hover:bg-gray-50 transition-colors"
             >
               취소
             </button>
             <button
-              onClick={handleSave}
+              type="submit"
               disabled={isSubmitting}
               className="flex-1 bg-gray-900 text-white py-4 rounded-xl font-semibold transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed enabled:hover:bg-gray-800 enabled:cursor-pointer"
             >
@@ -248,7 +283,7 @@ function MedicationEditContent() {
             </button>
           </div>
         </div>
-      </div>
+      </form>
 
       <BottomNav />
     </main>

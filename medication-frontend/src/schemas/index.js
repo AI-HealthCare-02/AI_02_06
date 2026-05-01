@@ -94,6 +94,34 @@ export const medicationCreateSchema = z
     path: ['end_date'],
   })
 
+// ── 2-b. Medication edit (인라인 편집 — 부분 patch) ─────────────────────
+// edit 페이지는 이미 등록된 medication 의 일부 필드만 수정. medicine_name 만
+// 필수, 나머지는 optional. 음수/0 은 차단.
+export const medicationEditPatchSchema = z.object({
+  medicine_name: trimmed(64),
+  dose_per_intake: optionalTrimmed(32),
+  intake_instruction: optionalTrimmed(128),
+  category: optionalTrimmed(64),
+  daily_intake_count: z.preprocess(
+    emptyToUndef,
+    z
+      .coerce.number({ invalid_type_error: '숫자만 입력해주세요' })
+      .int('정수만 가능해요')
+      .min(1, '1회 이상이어야 해요')
+      .max(24, '하루 최대 24회까지 가능해요')
+      .optional(),
+  ),
+  total_intake_days: z.preprocess(
+    emptyToUndef,
+    z
+      .coerce.number({ invalid_type_error: '숫자만 입력해주세요' })
+      .int('정수만 가능해요')
+      .min(1, '1일 이상이어야 해요')
+      .max(365, '1년 이내로 입력해주세요')
+      .optional(),
+  ),
+})
+
 // ── 3. 일일 증상 로그 ──────────────────────────────────────────────────
 export const dailyLogCreateSchema = z.object({
   log_date: z.coerce.date({ invalid_type_error: '날짜를 입력해주세요' }),
