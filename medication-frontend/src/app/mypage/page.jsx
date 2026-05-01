@@ -2,12 +2,22 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { User, Activity, Users, Home, Trash2, X, Check, Plus, FileText, LogOut, Pencil } from 'lucide-react'
+import { Controller, useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+
 import EmptyState from '@/components/common/EmptyState'
 import BottomNav from '@/components/layout/BottomNav'
 import LogoutModal, { useLogout, DeleteAccountModal, useDeleteAccount } from '@/components/auth/LogoutModal'
 import api, { handleApiError } from '@/lib/api'
 import toast from 'react-hot-toast'
+import { useConfirm } from '@/components/common/ConfirmDialog'
+import FormError from '@/components/form/FormError'
 import { useProfile } from '@/contexts/ProfileContext'
+import {
+  familyProfileSchema,
+  healthSurveySchema,
+  nicknameUpdateSchema,
+} from '@/schemas'
 
 // --- 모달 컴포넌트들 ---
 function Modal({ title, children, onClose, onSave, saveDisabled }) {
@@ -31,14 +41,33 @@ function Modal({ title, children, onClose, onSave, saveDisabled }) {
 }
 
 function BasicInfoModal({ info, onClose, onSave }) {
-  const [formData, setFormData] = useState({ nickname: info?.name?.split('(')[0] || '' })
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isValid },
+  } = useForm({
+    resolver: zodResolver(nicknameUpdateSchema),
+    mode: 'onChange',
+    defaultValues: { nickname: info?.name?.split('(')[0] || '' },
+  })
+
+  const onSubmit = (values) => {
+    onSave(values)
+  }
+
   return (
-    <Modal title="계정 정보 수정" onClose={onClose} onSave={() => onSave(formData)}>
+    <Modal title="계정 정보 수정" onClose={onClose} onSave={handleSubmit(onSubmit)} saveDisabled={!isValid}>
       <div className="space-y-6">
         <div>
           <label className="text-xs font-black text-gray-400 mb-2 block ml-1">닉네임</label>
-          <input type="text" value={formData.nickname} onChange={(e) => setFormData({ nickname: e.target.value })}
-            className="w-full px-6 py-4 bg-gray-50 border border-transparent focus:border-gray-200 focus:bg-white rounded-2xl outline-none font-bold text-gray-800 transition-all" />
+          <input
+            type="text"
+            {...register('nickname')}
+            className={`w-full px-6 py-4 bg-gray-50 border focus:bg-white rounded-2xl outline-none font-bold text-gray-800 transition-all ${
+              errors.nickname ? 'border-red-500' : 'border-transparent focus:border-gray-200'
+            }`}
+          />
+          <FormError name="nickname" errors={errors} />
         </div>
       </div>
     </Modal>
@@ -46,167 +75,206 @@ function BasicInfoModal({ info, onClose, onSave }) {
 }
 
 function HealthInfoModal({ info, onClose, onSave }) {
-  const [formData, setFormData] = useState({
-    age: info?.age?.toString() || '',
-    gender: info?.gender || 'MALE',
-    height: info?.height?.toString() || '',
-    weight: info?.weight?.toString() || '',
-    is_smoking: info?.is_smoking ?? null,
-    is_drinking: info?.is_drinking ?? null,
-    conditions: info?.conditions || [],
-    allergies: info?.allergies || [],
+  const {
+    register,
+    control,
+    handleSubmit,
+    formState: { errors, isValid },
+  } = useForm({
+    resolver: zodResolver(healthSurveySchema),
+    mode: 'onChange',
+    defaultValues: {
+      age: info?.age?.toString() || '',
+      gender: info?.gender || 'MALE',
+      height: info?.height?.toString() || '',
+      weight: info?.weight?.toString() || '',
+      is_smoking: info?.is_smoking ?? null,
+      is_drinking: info?.is_drinking ?? null,
+      conditions: info?.conditions || [],
+      allergies: info?.allergies || [],
+    },
   })
-
-  const [errors, setErrors] = useState({
-    age: '',
-    height: '',
-    weight: '',
-  })
-
-  const validateField = (field, value) => {
-    let errorMsg = '';
-    if (field === 'age' && value) {
-      const num = parseInt(value);
-      if (num < 0 || num > 150) errorMsg = '나이는 0~150 사이로 입력해주세요.';
-    }
-    if (field === 'height' && value) {
-      const num = parseInt(value);
-      if (num < 50 || num > 250) errorMsg = '키는 50~250cm 사이로 입력해주세요.';
-    }
-    if (field === 'weight' && value) {
-      const num = parseFloat(value);
-      if (num < 1 || num > 300) errorMsg = '몸무게는 1~300kg 사이로 입력해주세요.';
-    }
-    setErrors(prev => ({ ...prev, [field]: errorMsg }));
-  }
-
-  const handleChange = (field, val) => {
-    setFormData(prev => ({ ...prev, [field]: val }));
-    validateField(field, val);
-  }
-
-  const isSaveDisabled = Object.values(errors).some(err => err !== '');
 
   const btnSelected = 'bg-gray-900 text-white border-gray-900'
   const btnUnselected = 'bg-white text-gray-400 border-gray-100 hover:border-gray-300'
   const chipSelected = 'bg-gray-900 text-white border-gray-900'
   const chipUnselected = 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
 
+  // "없음" 토글 처리 — 다른 항목과 mutual exclusion.
+  const toggleChip = (list, item) => {
+    if (item === '없음') return list.includes('없음') ? [] : ['없음']
+    const without = list.filter((v) => v !== '없음')
+    return without.includes(item) ? without.filter((v) => v !== item) : [...without, item]
+  }
+
+  const onSubmit = (values) => onSave(values)
+
   return (
-    <Modal title="건강 프로필 수정" onClose={onClose} onSave={() => onSave(formData)} saveDisabled={isSaveDisabled}>
+    <Modal title="건강 프로필 수정" onClose={onClose} onSave={handleSubmit(onSubmit)} saveDisabled={!isValid}>
       <div className="space-y-6">
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">나이</label>
-            <input type="text" inputMode="numeric" value={formData.age} placeholder="예: 30"
-              onChange={(e) => {
-                const val = e.target.value.replace(/[^0-9]/g, '');
-                handleChange('age', val);
-              }}
-              className={`w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 border transition-colors ${errors.age ? 'border-red-500' : 'border-transparent focus:border-gray-200'}`} />
-            {errors.age && <span className="text-red-500 text-xs ml-2 mt-1 block">{errors.age}</span>}
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="예: 30"
+              {...register('age')}
+              className={`w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 border transition-colors ${
+                errors.age ? 'border-red-500' : 'border-transparent focus:border-gray-200'
+              }`}
+            />
+            <FormError name="age" errors={errors} />
           </div>
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">성별</label>
-            <div className="flex gap-2">
-              {['MALE', 'FEMALE'].map(g => (
-                <button key={g} type="button" onClick={() => handleChange('gender', g)}
-                  className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${formData.gender === g ? btnSelected : btnUnselected}`}>
-                  {g === 'MALE' ? '남성' : '여성'}
-                </button>
-              ))}
-            </div>
+            <Controller
+              control={control}
+              name="gender"
+              render={({ field }) => (
+                <div className="flex gap-2">
+                  {['MALE', 'FEMALE'].map((g) => (
+                    <button
+                      key={g}
+                      type="button"
+                      onClick={() => field.onChange(g)}
+                      className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${
+                        field.value === g ? btnSelected : btnUnselected
+                      }`}
+                    >
+                      {g === 'MALE' ? '남성' : '여성'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            />
           </div>
         </div>
+
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">키 (cm)</label>
-            <input type="text" inputMode="decimal" value={formData.height} placeholder="예: 170"
-              onChange={(e) => {
-                const val = e.target.value.replace(/[^0-9]/g, '');
-                handleChange('height', val);
-              }}
-              className={`w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 border transition-colors ${errors.height ? 'border-red-500' : 'border-transparent focus:border-gray-200'}`} />
-            {errors.height && <span className="text-red-500 text-xs ml-2 mt-1 block">{errors.height}</span>}
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="예: 170"
+              {...register('height')}
+              className={`w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 border transition-colors ${
+                errors.height ? 'border-red-500' : 'border-transparent focus:border-gray-200'
+              }`}
+            />
+            <FormError name="height" errors={errors} />
           </div>
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">몸무게 (kg)</label>
-            <input type="text" inputMode="decimal" value={formData.weight} placeholder="예: 65.5"
-              onChange={(e) => {
-                let val = e.target.value.replace(/[^0-9.]/g, '');
-                const parts = val.split('.');
-                if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
-                handleChange('weight', val);
-              }}
-              className={`w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 border transition-colors ${errors.weight ? 'border-red-500' : 'border-transparent focus:border-gray-200'}`} />
-            {errors.weight && <span className="text-red-500 text-xs ml-2 mt-1 block">{errors.weight}</span>}
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="예: 65.5"
+              {...register('weight')}
+              className={`w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 border transition-colors ${
+                errors.weight ? 'border-red-500' : 'border-transparent focus:border-gray-200'
+              }`}
+            />
+            <FormError name="weight" errors={errors} />
           </div>
         </div>
+
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">흡연 여부</label>
-            <div className="flex gap-2">
-              {[true, false].map(v => (
-                <button key={String(v)} type="button" onClick={() => setFormData({...formData, is_smoking: v})}
-                  className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${formData.is_smoking === v ? btnSelected : btnUnselected}`}>
-                  {v ? '예' : '아니오'}
-                </button>
-              ))}
-            </div>
+            <Controller
+              control={control}
+              name="is_smoking"
+              render={({ field }) => (
+                <div className="flex gap-2">
+                  {[true, false].map((v) => (
+                    <button
+                      key={String(v)}
+                      type="button"
+                      onClick={() => field.onChange(v)}
+                      className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${
+                        field.value === v ? btnSelected : btnUnselected
+                      }`}
+                    >
+                      {v ? '예' : '아니오'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            />
           </div>
           <div>
             <label className="text-xs font-black text-gray-400 mb-2 block ml-1">음주 여부</label>
-            <div className="flex gap-2">
-              {[true, false].map(v => (
-                <button key={String(v)} type="button" onClick={() => setFormData({...formData, is_drinking: v})}
-                  className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${formData.is_drinking === v ? btnSelected : btnUnselected}`}>
-                  {v ? '예' : '아니오'}
-                </button>
-              ))}
-            </div>
+            <Controller
+              control={control}
+              name="is_drinking"
+              render={({ field }) => (
+                <div className="flex gap-2">
+                  {[true, false].map((v) => (
+                    <button
+                      key={String(v)}
+                      type="button"
+                      onClick={() => field.onChange(v)}
+                      className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${
+                        field.value === v ? btnSelected : btnUnselected
+                      }`}
+                    >
+                      {v ? '예' : '아니오'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            />
           </div>
         </div>
+
         <div>
           <label className="text-xs font-black text-gray-400 mb-3 block ml-1">기저질환</label>
-          <div className="flex flex-wrap gap-2">
-            {['고혈압', '당뇨', '고지혈증', '심장질환', '뇌졸중', '천식', '신장질환', '갑상선질환', '없음'].map(item => (
-              <button key={item} type="button"
-                onClick={() => {
-                  let updated
-                  if (item === '없음') {
-                    updated = formData.conditions.includes(item) ? [] : ['없음']
-                  } else {
-                    const withoutNone = formData.conditions.filter(c => c !== '없음')
-                    updated = withoutNone.includes(item) ? withoutNone.filter(c => c !== item) : [...withoutNone, item]
-                  }
-                  setFormData({...formData, conditions: updated})
-                }}
-                className={`px-4 py-2 rounded-full text-xs font-bold transition-all border cursor-pointer ${formData.conditions.includes(item) ? chipSelected : chipUnselected}`}>
-                {item}
-              </button>
-            ))}
-          </div>
+          <Controller
+            control={control}
+            name="conditions"
+            render={({ field }) => (
+              <div className="flex flex-wrap gap-2">
+                {['고혈압', '당뇨', '고지혈증', '심장질환', '뇌졸중', '천식', '신장질환', '갑상선질환', '없음'].map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => field.onChange(toggleChip(field.value || [], item))}
+                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all border cursor-pointer ${
+                      (field.value || []).includes(item) ? chipSelected : chipUnselected
+                    }`}
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+            )}
+          />
         </div>
+
         <div>
           <label className="text-xs font-black text-gray-400 mb-3 block ml-1">알레르기</label>
-          <div className="flex flex-wrap gap-2">
-            {['페니실린', '아스피린', '항생제', '소염제', '없음'].map(item => (
-              <button key={item} type="button"
-                onClick={() => {
-                  let updated
-                  if (item === '없음') {
-                    updated = formData.allergies.includes(item) ? [] : ['없음']
-                  } else {
-                    const withoutNone = formData.allergies.filter(a => a !== '없음')
-                    updated = withoutNone.includes(item) ? withoutNone.filter(a => a !== item) : [...withoutNone, item]
-                  }
-                  setFormData({...formData, allergies: updated})
-                }}
-                className={`px-4 py-2 rounded-full text-xs font-bold transition-all border cursor-pointer ${formData.allergies.includes(item) ? chipSelected : chipUnselected}`}>
-                {item}
-              </button>
-            ))}
-          </div>
+          <Controller
+            control={control}
+            name="allergies"
+            render={({ field }) => (
+              <div className="flex flex-wrap gap-2">
+                {['페니실린', '아스피린', '항생제', '소염제', '없음'].map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => field.onChange(toggleChip(field.value || [], item))}
+                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all border cursor-pointer ${
+                      (field.value || []).includes(item) ? chipSelected : chipUnselected
+                    }`}
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+            )}
+          />
         </div>
       </div>
     </Modal>
@@ -235,56 +303,90 @@ const RELATION_GENDER_DEFAULT = {
 }
 
 function FamilyModal({ member, onClose, onSave }) {
-  const [formData, setFormData] = useState(
-    member
+  const {
+    register,
+    control,
+    handleSubmit,
+    setValue,
+    formState: { errors, isValid },
+  } = useForm({
+    resolver: zodResolver(familyProfileSchema),
+    mode: 'onChange',
+    defaultValues: member
       ? { name: member.name, relation_type: member.relation_type, gender: member.gender || null }
-      : { name: '', relation_type: 'FATHER', gender: 'MALE' }
-  )
+      : { name: '', relation_type: 'FATHER', gender: 'MALE' },
+  })
 
-  // 관계 변경 시 gender 자동 default — 사용자가 별도로 다른 성별을 선택했으면 그 값 유지
+  // 관계 변경 시 gender 자동 default — 사용자가 별도로 선택한 성별이 있어도 default 로 덮음
+  // (BE 의 RELATION_DEFAULT_GENDER 와 동기화). OTHER 는 default null.
   const handleRelationChange = (newRelation) => {
     const defaultGender = RELATION_GENDER_DEFAULT[newRelation] ?? null
-    setFormData({ ...formData, relation_type: newRelation, gender: defaultGender })
+    setValue('relation_type', newRelation, { shouldValidate: true })
+    setValue('gender', defaultGender, { shouldValidate: true })
   }
 
+  const onSubmit = (values) => onSave(values)
+
   return (
-    <Modal title={member ? "가족 정보 수정" : "가족 추가하기"} onClose={onClose} onSave={() => onSave(formData)}>
+    <Modal title={member ? '가족 정보 수정' : '가족 추가하기'} onClose={onClose} onSave={handleSubmit(onSubmit)} saveDisabled={!isValid}>
       <div className="space-y-6">
         <div>
           <label className="text-xs font-black text-gray-400 mb-2 block ml-1">이름</label>
-          <input type="text" value={formData.name} placeholder="이름을 입력하세요" onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800" />
+          <input
+            type="text"
+            placeholder="이름을 입력하세요"
+            {...register('name')}
+            className={`w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 border transition-colors ${
+              errors.name ? 'border-red-500' : 'border-transparent'
+            }`}
+          />
+          <FormError name="name" errors={errors} />
         </div>
         <div>
           <label className="text-xs font-black text-gray-400 mb-2 block ml-1">관계</label>
-          <select
-            value={formData.relation_type}
-            onChange={(e) => handleRelationChange(e.target.value)}
-            className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 appearance-none"
-          >
-            {FAMILY_RELATION_OPTIONS.map(({ value, label }) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
+          <Controller
+            control={control}
+            name="relation_type"
+            render={({ field }) => (
+              <select
+                value={field.value}
+                onChange={(e) => handleRelationChange(e.target.value)}
+                className="w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 appearance-none"
+              >
+                {FAMILY_RELATION_OPTIONS.map(({ value, label }) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            )}
+          />
+          <FormError name="relation_type" errors={errors} />
         </div>
         <div>
           <label className="text-xs font-black text-gray-400 mb-2 block ml-1">성별</label>
-          <div className="flex gap-3">
-            {['MALE', 'FEMALE'].map((g) => (
-              <button
-                key={g}
-                type="button"
-                onClick={() => setFormData({ ...formData, gender: g })}
-                className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${
-                  formData.gender === g
-                    ? 'bg-gray-900 text-white border-gray-900'
-                    : 'bg-gray-50 text-gray-500 border-gray-100 hover:bg-gray-100'
-                }`}
-              >
-                {g === 'MALE' ? '남성' : '여성'}
-              </button>
-            ))}
-          </div>
+          <Controller
+            control={control}
+            name="gender"
+            render={({ field }) => (
+              <div className="flex gap-3">
+                {['MALE', 'FEMALE'].map((g) => (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => field.onChange(g)}
+                    className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${
+                      field.value === g
+                        ? 'bg-gray-900 text-white border-gray-900'
+                        : 'bg-gray-50 text-gray-500 border-gray-100 hover:bg-gray-100'
+                    }`}
+                  >
+                    {g === 'MALE' ? '남성' : '여성'}
+                  </button>
+                ))}
+              </div>
+            )}
+          />
         </div>
       </div>
     </Modal>
@@ -305,6 +407,7 @@ function MyPageSkeleton() {
 
 export default function MyPage() {
   const router = useRouter()
+  const confirm = useConfirm()
   const searchParams = useSearchParams()
   const {
     selectedProfileId: profileId,
@@ -444,7 +547,13 @@ export default function MyPage() {
 
   const handleDeleteFamily = async (id, e) => {
     e.stopPropagation()
-    if (!confirm('정말로 삭제하시겠습니까?')) return
+    const ok = await confirm({
+      title: '가족 프로필 삭제',
+      message: '이 가족 프로필을 삭제할까요?\n관련 약품·가이드·챌린지가 함께 정리됩니다.',
+      confirmLabel: '삭제',
+      danger: true,
+    })
+    if (!ok) return
     try {
       await deleteProfile(id)
       toast.success('삭제되었습니다.')

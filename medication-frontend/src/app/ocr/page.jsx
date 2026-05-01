@@ -2,7 +2,9 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Info, Camera } from 'lucide-react'
+
 import Header from '@/components/layout/Header'
+import { useConfirm } from '@/components/common/ConfirmDialog'
 
 function OCRSkeleton() {
   return (
@@ -22,6 +24,7 @@ function OCRSkeleton() {
 
 export default function OcrPage() {
   const router = useRouter()
+  const confirm = useConfirm()
   const [isLoading, setIsLoading] = useState(true)
   const [preview, setPreview] = useState(null)
   const [file, setFile] = useState(null)
@@ -32,10 +35,14 @@ export default function OcrPage() {
 
   if (isLoading) return <OCRSkeleton />
 
-  const handleCancel = () => {
-    if (window.confirm('작성 중인 내용이 사라집니다. 정말 나가시겠습니까?')) {
-      router.push('/main')
-    }
+  const handleCancel = async () => {
+    const ok = await confirm({
+      title: '작성 취소',
+      message: '작성 중인 내용이 사라집니다. 정말 나가시겠습니까?',
+      confirmLabel: '나가기',
+      danger: true,
+    })
+    if (ok) router.push('/main')
   }
 
   const handleFileChange = (e) => {

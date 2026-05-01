@@ -8,6 +8,7 @@ import { showError } from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
 import { useChallenge, useChallengeStart } from '@/contexts/ChallengeContext'
 import StartChallengeModal from '@/components/common/StartChallengeModal'
+import { useConfirm } from '@/components/common/ConfirmDialog'
 import { useLifestyleGuide } from '@/contexts/LifestyleGuideContext'
 import { usePrescriptionGroup } from '@/contexts/PrescriptionGroupContext'
 import toast from 'react-hot-toast'
@@ -114,6 +115,7 @@ function getDaysSince(startedDate) {
 
 export default function ChallengePage() {
   const router = useRouter()
+  const confirm = useConfirm()
   const [activeTab, setActiveTab] = useState('추천')
   const [processingIds, setProcessingIds] = useState([])
   // 처방전 그룹 필터 (탭과 직교) — 'all' 또는 prescription_group_id.
@@ -227,7 +229,13 @@ export default function ChallengePage() {
   }
 
   const handleAbandon = async (challenge) => {
-    if (!confirm(`'${challenge.title}' 챌린지를 포기하시겠습니까?`)) return
+    const ok = await confirm({
+      title: '챌린지 포기',
+      message: `'${challenge.title}' 챌린지를 포기하시겠습니까?`,
+      confirmLabel: '포기',
+      danger: true,
+    })
+    if (!ok) return
     try {
       await deleteChallenge(challenge.id)
       toast.success('챌린지가 삭제되었습니다.')

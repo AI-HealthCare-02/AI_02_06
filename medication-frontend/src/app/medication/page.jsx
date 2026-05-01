@@ -16,6 +16,7 @@ import toast from 'react-hot-toast'
 import BottomNav from '@/components/layout/BottomNav'
 import EmptyState from '@/components/common/EmptyState'
 import { showError } from '@/lib/api'
+import { useConfirm } from '@/components/common/ConfirmDialog'
 import {
   PRESCRIPTION_SORT,
   PRESCRIPTION_STATUS,
@@ -124,6 +125,7 @@ function PrescriptionCard({ group, onClick, onDelete, isDeleting }) {
 
 export default function MedicationPage() {
   const router = useRouter()
+  const confirm = useConfirm()
   const { selectedProfileId } = useProfile()
   const {
     groups,
@@ -151,11 +153,15 @@ export default function MedicationPage() {
   const handleDeleteGroup = async (group) => {
     const dateLabel = group.dispensed_date ? formatDate(group.dispensed_date) : '이 처방전'
     const hospitalLabel = group.hospital_name ? ` · ${group.hospital_name}` : ''
-    const ok = window.confirm(
-      `${dateLabel}${hospitalLabel} 처방전을 삭제할까요?\n\n` +
+    const ok = await confirm({
+      title: '처방전 삭제',
+      message:
+        `${dateLabel}${hospitalLabel} 처방전을 삭제할까요?\n\n` +
         '이 처방전의 약품과 연결된 가이드도 함께 정리됩니다.\n' +
         '진행 중·완료된 챌린지는 그대로 보존됩니다.',
-    )
+      confirmLabel: '삭제',
+      danger: true,
+    })
     if (!ok) return
     setDeletingId(group.id)
     try {

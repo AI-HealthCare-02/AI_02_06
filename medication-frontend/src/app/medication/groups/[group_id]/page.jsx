@@ -22,6 +22,7 @@ import toast from 'react-hot-toast'
 
 import { showError } from '@/lib/api'
 import BottomNav from '@/components/layout/BottomNav'
+import { useConfirm } from '@/components/common/ConfirmDialog'
 import MedicationDetailPanel from '@/components/medication/MedicationDetailPanel'
 import { usePrescriptionGroup } from '@/contexts/PrescriptionGroupContext'
 
@@ -137,6 +138,7 @@ function MedicationItem({ medication, onClick, selected = false }) {
 export default function PrescriptionGroupDetailPage() {
   const router = useRouter()
   const params = useParams()
+  const confirm = useConfirm()
   const groupId = params?.group_id
   const {
     groupsById,
@@ -204,7 +206,12 @@ export default function PrescriptionGroupDetailPage() {
 
   const handleComplete = async () => {
     if (!groupId || !group) return
-    if (!confirm('이 처방전을 복용 완료로 처리할까요? 그룹 안 모든 약이 비활성으로 변경됩니다.')) return
+    const ok = await confirm({
+      title: '복용 완료 처리',
+      message: '이 처방전을 복용 완료로 처리할까요?\n그룹 안 모든 약이 비활성으로 변경됩니다.',
+      confirmLabel: '완료 처리',
+    })
+    if (!ok) return
     setIsCompleting(true)
     try {
       await markGroupCompleted(groupId)
@@ -218,7 +225,13 @@ export default function PrescriptionGroupDetailPage() {
 
   const handleDelete = async () => {
     if (!groupId) return
-    if (!confirm('이 처방전을 삭제할까요? 안 약품과 관련 가이드도 함께 정리됩니다.')) return
+    const ok = await confirm({
+      title: '처방전 삭제',
+      message: '이 처방전을 삭제할까요?\n안 약품과 관련 가이드도 함께 정리됩니다.',
+      confirmLabel: '삭제',
+      danger: true,
+    })
+    if (!ok) return
     setIsDeleting(true)
     try {
       await deleteGroup(groupId)

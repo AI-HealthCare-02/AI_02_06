@@ -5,6 +5,7 @@ import Navigation from '@/components/layout/Navigation'
 import BottomNav from '@/components/layout/BottomNav'
 import GlobalAuthGuard from '@/components/auth/AuthGuard'
 import QueryProvider from '@/providers/QueryProvider'
+import { ConfirmProvider } from '@/components/common/ConfirmDialog'
 import { ProfileProvider } from '@/contexts/ProfileContext'
 import { MedicationProvider } from '@/contexts/MedicationContext'
 import { PrescriptionGroupProvider } from '@/contexts/PrescriptionGroupContext'
@@ -50,6 +51,7 @@ export default function RootLayout({ children }) {
       </head>
       <body className="min-h-full flex flex-col">
         <QueryProvider>
+          <ConfirmProvider>
           <GlobalAuthGuard>
             <ProfileProvider>
               <MedicationProvider>
@@ -69,6 +71,7 @@ export default function RootLayout({ children }) {
               </MedicationProvider>
             </ProfileProvider>
           </GlobalAuthGuard>
+          </ConfirmProvider>
         </QueryProvider>
         <Toaster
           position="top-center"

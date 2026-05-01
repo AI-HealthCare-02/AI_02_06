@@ -137,6 +137,20 @@ export const prescriptionGroupPatchSchema = z.object({
   dispensed_date: z.preprocess(emptyToUndef, z.coerce.date().optional()),
 })
 
+// ── 5. 닉네임 변경 (mypage BasicInfoModal) ──────────────────────────────
+export const nicknameUpdateSchema = z.object({
+  nickname: trimmed(32),
+})
+
+// ── 6. 가족 프로필 추가/수정 (mypage FamilyModal) ───────────────────────
+// relation_type 은 RELATION_LABELS 7종 (SELF 제외). gender 는 nullable —
+// OTHER 등 일부 case 는 미정 가능.
+export const familyProfileSchema = z.object({
+  name: trimmed(32),
+  relation_type: z.enum(['FATHER', 'MOTHER', 'SON', 'DAUGHTER', 'HUSBAND', 'WIFE', 'OTHER']),
+  gender: z.enum(['MALE', 'FEMALE']).nullable().optional(),
+})
+
 // ── 폼 helper — react-hook-form errors 객체에서 메시지 한 줄 추출 ───────
 // `<FormError name="medicine_name" errors={errors} />` 같이 일관된 컴포넌트
 // 하나에 매핑시키기 위한 path 정규화.

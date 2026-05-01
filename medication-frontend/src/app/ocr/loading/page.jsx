@@ -2,6 +2,8 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { CheckCircle, X } from 'lucide-react'
+import toast from 'react-hot-toast'
+
 import api from '@/lib/api'
 import { streamSSE } from '@/lib/sseClient'
 import { useProfile } from '@/contexts/ProfileContext'
@@ -158,7 +160,7 @@ export default function OcrLoadingPage() {
           }
           if (status in TERMINAL_ERROR_MESSAGES) {
             clearInterval(stepTicker)
-            alert(`${TERMINAL_ERROR_MESSAGES[status]} 다시 촬영해주세요.`)
+            toast.error(`${TERMINAL_ERROR_MESSAGES[status]} 다시 촬영해주세요.`)
             router.push('/ocr')
             return
           }

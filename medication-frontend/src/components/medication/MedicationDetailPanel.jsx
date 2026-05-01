@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react'
 
 import { AlertCircle, AlertTriangle, Ban, Calendar, Clock, Pill, Trash2, Utensils } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 import api from '@/lib/api'
 import { useMedication } from '@/contexts/MedicationContext'
@@ -123,7 +124,7 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
       onDeleted?.()
     } catch (err) {
       console.error(err)
-      alert('삭제에 실패했습니다. 다시 시도해주세요.')
+      toast.error('삭제에 실패했습니다. 다시 시도해주세요.')
       setIsDeleting(false)
       setShowDeleteModal(false)
     }
@@ -134,7 +135,7 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
       await deactivateMedication(id)
     } catch (err) {
       console.error(err)
-      alert('처리에 실패했습니다. 다시 시도해주세요.')
+      toast.error('처리에 실패했습니다. 다시 시도해주세요.')
     }
   }
 
