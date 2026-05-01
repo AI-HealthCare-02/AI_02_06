@@ -139,6 +139,11 @@ Returns configuration needed for frontend to redirect to Kakao login page.
 async def get_kakao_oauth_config() -> OAuthConfigResponse:
     """Return Kakao OAuth client config (authorize URL + client_id) for the frontend.
 
+    의도된 NO-AUTH endpoint — 로그인 *진입* 흐름이라 인증 필수 아님. 응답엔
+    ``client_id`` 와 ``authorize_url`` 만 포함하며, 둘 다 사용자 브라우저에
+    어차피 노출되는 값. ``client_secret`` / 내부 자원 상태는 응답에 포함하지
+    않는다. CSRF 방지용 signed ``state`` 도 함께 발급.
+
     Returns:
         OAuthConfigResponse: ``authorize_url`` adapts to environment
         (local → mock server, dev/prod → real Kakao endpoint).
