@@ -47,6 +47,7 @@ class LifestyleGuideRepository:
         profile_id: UUID,
         medication_snapshot: list[dict],
         input_fingerprint: str | None = None,
+        prescription_group_id: UUID | None = None,
     ) -> LifestyleGuide:
         """Insert a pending guide row — RQ producer 진입점.
 
@@ -57,6 +58,8 @@ class LifestyleGuideRepository:
             profile_id: Owner profile UUID.
             medication_snapshot: Snapshot of active meds (이후 LLM 입력).
             input_fingerprint: 동일 입력 dedupe 용 SHA-256 hex (Phase B).
+            prescription_group_id: 가이드를 만들 처방전 그룹 UUID (v3 — 처방전
+                단위 가이드). 기존 호출자(테스트 등) 호환 위해 nullable.
 
         Returns:
             새로 INSERT 된 ``LifestyleGuide`` 인스턴스.
@@ -68,6 +71,7 @@ class LifestyleGuideRepository:
             medication_snapshot=medication_snapshot,
             status=LifestyleGuideStatusValue.PENDING.value,
             input_fingerprint=input_fingerprint,
+            prescription_group_id=prescription_group_id,
         )
 
     async def get_ready_by_fingerprint(
@@ -109,6 +113,27 @@ class LifestyleGuideRepository:
             status=LifestyleGuideStatusValue.READY.value,
             content=content,
             processed_at=datetime.now(tz=config.TIMEZONE),
+        )
+
+    async def set_revealed_challenge_count(
+        self,
+        guide_id: UUID | str,
+        new_count: int,
+    ) -> int:
+        """노출 챌린지 수를 *절대값* 으로 set (단일 UPDATE).
+
+        호출자가 사전에 한도(15) 검증 + min(15) 클램핑한 뒤 호출. atomic UPDATE
+        라 동시 클릭이 와도 race-free.
+
+        Args:
+            guide_id: 대상 가이드 UUID.
+            new_count: 새 노출 카운트 (5 / 10 / 15 중 하나).
+
+        Returns:
+            UPDATE 된 row 수 (정상 1).
+        """
+        return await LifestyleGuide.filter(id=guide_id).update(
+            revealed_challenge_count=new_count,
         )
 
     async def mark_terminal(

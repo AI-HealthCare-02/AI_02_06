@@ -93,6 +93,10 @@ class LifestyleGuideResponse(BaseModel):
     status: LifestyleGuideStatus = Field(..., description="비동기 생성 상태")
     content: dict = Field(default_factory=dict, description="5개 카테고리 가이드 내용 (pending 일 때 빈 dict)")
     medication_snapshot: list = Field(default_factory=list, description="가이드 생성 시점 활성 약물 목록")
+    revealed_challenge_count: int = Field(
+        5,
+        description="현재까지 사용자에게 노출된 챌린지 수 (5/10/15) — '추천 챌린지 더 보기' 한도 안내용",
+    )
     created_at: datetime = Field(..., description="가이드 생성 일시 (= enqueue 시점)")
     processed_at: datetime | None = Field(None, description="ai-worker 가 terminal status 로 진입한 시점")
 

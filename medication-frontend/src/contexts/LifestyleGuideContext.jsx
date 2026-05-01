@@ -102,8 +102,20 @@ export function LifestyleGuideProvider({ children }) {
    *
    * 페이지는 promise 의 ready guide 를 받거나 throw 를 catch 하면 됨.
    */
-  const generateGuide = useCallback(async (profileId, signal) => {
-    const enqueueRes = await api.post(`/api/v1/lifestyle-guides/generate?profile_id=${profileId}`, null)
+  const generateGuide = useCallback(async (profileId, prescriptionGroupId, signal) => {
+    if (!prescriptionGroupId) {
+      // 호출자(페이지) 가 처방전 선택 모달을 열어 group_id 를 보장해야 한다.
+      // BE 는 group_id 필수라 fallback 없음 — 명확한 에러로 throw.
+      throw new Error('처방전을 먼저 선택해주세요.')
+    }
+    const params = new URLSearchParams({
+      profile_id: profileId,
+      prescription_group_id: prescriptionGroupId,
+    })
+    const enqueueRes = await api.post(
+      `/api/v1/lifestyle-guides/generate?${params.toString()}`,
+      null,
+    )
     const pendingId = enqueueRes.data.id
 
     // Phase B dedupe hit — BE 가 같은 입력 fingerprint 의 ready 가이드를
@@ -185,6 +197,26 @@ export function LifestyleGuideProvider({ children }) {
     [fetchGuides, selectedProfileId],
   )
 
+  // ── "추천 챌린지 더 보기" — 노출 카운트만 +5 (LLM 호출 X) ──
+  // BE 가 응답으로 갱신된 LifestyleGuideResponse 를 돌려주므로 store 의 가이드를
+  // in-place 갱신 (revealed_challenge_count 동기화). 이후 호출자가 챌린지 list
+  // 를 다시 fetch 해 ChallengeContext 에 union.
+  const revealMoreChallenges = useCallback(async (guideId) => {
+    const { data: updated } = await api.post(
+      `/api/v1/lifestyle-guides/${guideId}/reveal-more-challenges`,
+    )
+    setGuides(prev => prev.map(g => (g.id === guideId ? updated : g)))
+    setLatestGuide(prev => (prev?.id === guideId ? updated : prev))
+    // 새로 노출된 챌린지를 ChallengeContext store 에 union
+    try {
+      const { data: chs } = await api.get(`/api/v1/lifestyle-guides/${guideId}/challenges`)
+      appendChallenges(chs)
+    } catch (err) {
+      if (err.response?.status !== 401) console.error('reveal more sync 실패:', err)
+    }
+    return updated
+  }, [appendChallenges])
+
   return (
     <LifestyleGuideContext.Provider value={{
       guides,
@@ -193,6 +225,7 @@ export function LifestyleGuideProvider({ children }) {
       generateGuide,
       deleteGuide,
       refetchGuides,
+      revealMoreChallenges,
     }}>
       {children}
     </LifestyleGuideContext.Provider>

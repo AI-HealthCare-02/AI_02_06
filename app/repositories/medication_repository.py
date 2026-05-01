@@ -62,6 +62,32 @@ class MedicationRepository:
             deleted_at__isnull=True,
         ).all()
 
+    async def get_active_by_prescription_group(self, group_id: UUID) -> list[Medication]:
+        """Get currently active medications for a prescription group.
+
+        그룹 단위 가이드 생성에서 사용 — 사용자가 선택한 처방전의 약물만 LLM
+        프롬프트 입력으로 사용한다. 정렬은 ``get_active_by_profile`` 과 동일
+        하게 medicine_name → id 안정 순서로 fingerprint 결정성 보장.
+
+        Args:
+            group_id: 처방전 그룹 UUID.
+
+        Returns:
+            list[Medication]: ordered active medications in this group.
+        """
+        today = datetime.now(tz=config.TIMEZONE).date()
+        return (
+            await Medication
+            .filter(
+                prescription_group_id=group_id,
+                is_active=True,
+                deleted_at__isnull=True,
+            )
+            .filter(Q(end_date__isnull=True) | Q(end_date__gte=today))
+            .order_by("medicine_name", "id")
+            .all()
+        )
+
     async def get_active_by_profile(self, profile_id: UUID) -> list[Medication]:
         """Get currently active medications for a profile.
 

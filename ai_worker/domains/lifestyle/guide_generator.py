@@ -3,9 +3,13 @@
 Pulled out of ``app.services.lifestyle_guide_service`` so the heavy LLM call
 runs in ai-worker (not the FastAPI request loop). Imports of ``app.*`` are
 type/data only — no FastAPI / HTTPException dependencies live here.
+
+v3 시점부터 약물 + 사용자 건강정보 조합으로 prompt 와 seed 를 함께 산출 →
+같은 (처방전 + 건강정보) 입력엔 거의 동일한 LLM 출력 (deterministic decoding).
 """
 
 import hashlib
+import json
 
 from openai import AsyncOpenAI, OpenAIError
 from pydantic import ValidationError
@@ -17,41 +21,51 @@ from app.services.lifestyle_guide_prompt_builder import build_guide_prompt
 logger = get_logger(__name__)
 
 _LLM_MODEL = "gpt-4o"
-# 일관성 우선 — 같은 처방전 조합에는 거의 동일 출력.
+# 일관성 우선 — 같은 처방전+건강정보 조합엔 거의 동일 출력.
 _LLM_TEMPERATURE = 0.0
 
 
-def _seed_for(medication_dicts: list[dict]) -> int:
-    """약물 조합 기반 OpenAI seed 계산.
+def _seed_for(medication_dicts: list[dict], health_profile: dict | None) -> int:
+    """약물 + 건강정보 조합 기반 OpenAI seed 계산.
 
-    같은 약물 set (이름 정렬 후 sha256) 이면 항상 같은 정수 seed 를 반환.
-    OpenAI 의 ``seed`` 는 best-effort deterministic decoding 을 제공 —
-    동일 (model, prompt, temperature, seed, system_fingerprint) 조합에서
-    거의 동일한 출력. 캐싱이 아니므로 매 호출 비용은 그대로 발생한다.
+    같은 (약물 set + 건강정보) 면 항상 같은 정수 seed. OpenAI 의 ``seed`` 는
+    best-effort deterministic decoding — 동일 (model, prompt, temperature,
+    seed, system_fingerprint) 에서 거의 동일한 출력. 캐싱이 아니므로 매 호출
+    비용은 그대로 발생, dedupe 는 fingerprint (FastAPI 측) 가 담당.
 
     Args:
         medication_dicts: 활성 약물 dict 목록.
+        health_profile: ``Profile.health_survey`` 의 dict 또는 None.
 
     Returns:
         2^31-1 이하의 양의 정수 (OpenAI 권장 범위).
     """
     names = sorted((m.get("medicine_name") or "") for m in medication_dicts)
-    digest = hashlib.sha256("\n".join(names).encode("utf-8")).digest()
+    payload = json.dumps(
+        {"medications": names, "health": health_profile or {}},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).digest()
     return int.from_bytes(digest[:4], "big") & 0x7FFFFFFF
 
 
 # ── 라이프스타일 가이드 LLM 호출 ──────────────────────────────────────────
-# 흐름: 활성 약물 dict 목록 -> seed 계산 -> 프롬프트 빌드
+# 흐름: (활성 약물 + 건강정보) -> seed 계산 -> 프롬프트 빌드
 #       -> GPT 호출 (json_object, temperature=0, seed) -> JSON 검증
 #       -> LlmGuideResponse 반환
 async def generate_guide_payload(
     medication_dicts: list[dict],
+    health_profile: dict | None,
     client: AsyncOpenAI,
 ) -> LlmGuideResponse:
     """Build prompt, call GPT, validate JSON.
 
     Args:
         medication_dicts: Snapshot-safe dict list of active medications.
+        health_profile: ``Profile.health_survey`` JSONField 의 dict 값 또는 None.
+            나이/성별/알레르기/운동/흡연/키/몸무게/기저질환 키. 누락 키는
+            prompt 빌더가 "미입력" 으로 정규화.
         client: Pre-instantiated ``AsyncOpenAI`` client (caller owns lifecycle).
 
     Returns:
@@ -60,8 +74,8 @@ async def generate_guide_payload(
     Raises:
         ValueError: LLM call or JSON parse failure (caller decides terminal status).
     """
-    prompt = build_guide_prompt(medication_dicts)
-    seed = _seed_for(medication_dicts)
+    prompt = build_guide_prompt(medication_dicts, health_profile)
+    seed = _seed_for(medication_dicts, health_profile)
     raw_json = await _call_llm(prompt, client, seed=seed)
     return _parse_response(raw_json)
 
