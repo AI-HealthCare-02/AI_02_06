@@ -38,42 +38,51 @@ LifestyleGuideServiceDep = Annotated[LifestyleGuideService, Depends(get_lifestyl
 CurrentAccount = Annotated[Account, Depends(get_current_account)]
 
 
-# ── POST /lifestyle-guides/generate (RQ enqueue) ─────────────────────────
-# 흐름: ownership 검증 -> 활성 약물 snapshot -> pending row INSERT
-#       -> RQ enqueue -> 202 + pending guide_id
+# ── POST /lifestyle-guides/generate (RQ enqueue, 처방전 단위) ─────────────
+# 흐름: ownership 검증 -> 처방전 그룹의 active medications + Profile.health_survey
+#       -> fingerprint 산출 -> 동일 fingerprint ready 가이드 존재 시 즉시 반환
+#       -> 없으면 pending row INSERT (group_id 기록) + RQ enqueue -> 202
 @router.post(
     "/generate",
     response_model=LifestyleGuidePendingResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Enqueue lifestyle guide generation (async)",
+    summary="Enqueue lifestyle guide generation (async, 처방전 단위)",
 )
 async def enqueue_guide(
     profile_id: UUID,
+    prescription_group_id: UUID,
     current_account: CurrentAccount,
     service: LifestyleGuideServiceDep,
 ) -> LifestyleGuidePendingResponse:
-    """라이프스타일 가이드 생성을 비동기로 시작한다.
+    """처방전 그룹 단위로 라이프스타일 가이드 생성을 비동기 등록한다.
 
     LLM 호출은 ai-worker 가 수행하므로 이 엔드포인트는 즉시 반환한다.
     프론트는 응답 ``id`` 로 ``GET /lifestyle-guides/{id}/stream`` SSE 를 연다.
 
+    fingerprint 는 (그룹의 active medications + Profile.health_survey + 프롬프트
+    버전) 의 sha256 — 같은 입력 = 같은 가이드 본문 (dedupe).
+
     Args:
         profile_id: 가이드 받을 프로필 UUID.
+        prescription_group_id: 가이드를 생성할 처방전 그룹 UUID.
         current_account: 인증된 계정.
         service: 라이프스타일 가이드 서비스.
 
     Returns:
         ``LifestyleGuidePendingResponse`` — pending guide id + status.
+        dedupe hit 이면 status='ready' 로 즉시 반환되어 FE 가 SSE 를 건너뛴다.
 
     Raises:
-        HTTPException 409: 활성 약물(복용 중인 처방약) 미등록 시 — service
-            가 직접 raise. 응답 ``detail`` 에 ``code=NO_ACTIVE_MEDICATIONS`` /
-            ``message`` (사용자 안내) / ``redirect_to=/ocr`` 가 포함되어
-            FE 가 토스트 표시 + 처방전 등록 페이지 라우팅을 한 번에 처리한다.
+        HTTPException 404/403: 처방전 그룹 존재 X / 소유자 불일치.
+        HTTPException 409 (NO_ACTIVE_MEDICATIONS): 그룹 내 복용 중 약 0건 —
+            ``detail`` 에 ``code`` / ``message`` / ``redirect_to=/medication``
+            포함되어 FE 가 토스트 + 라우팅 처리.
     """
-    guide = await service.enqueue_guide_with_owner_check(profile_id, current_account.id)
-    # Phase B dedupe hit 이면 service 가 이미 ready 가이드를 반환 — status 도
-    # 함께 응답해 FE 가 SSE 를 건너뛰고 즉시 GET 으로 fetch 할 수 있게 한다.
+    guide = await service.enqueue_guide_with_owner_check(
+        profile_id,
+        prescription_group_id,
+        current_account.id,
+    )
     return LifestyleGuidePendingResponse(id=guide.id, status=guide.status)
 
 
@@ -175,3 +184,33 @@ async def get_guide_challenges(
     """해당 가이드에서 만들어진 챌린지 목록."""
     challenges = await service.get_guide_challenges_with_owner_check(guide_id, current_account.id)
     return [ChallengeResponse.model_validate(c) for c in challenges]
+
+
+# ── POST /lifestyle-guides/{guide_id}/reveal-more-challenges ─────────────
+# 흐름: ownership + ready + revealed<15 검증
+#       -> revealed_challenge_count += 5 (단일 UPDATE, LLM 호출 X)
+#       -> 200 + 갱신된 가이드 반환
+# 정책: 가이드 생성 시 LLM 으로 한 번에 15개를 받아 DB 저장. 본 엔드포인트는
+#       *노출 카운트만* 늘려 사용자가 5개씩 점진적으로 챌린지를 보게 함.
+#       LLM 비용 0, 챌린지 일관성 보존, 한도 = 15.
+@router.post(
+    "/{guide_id}/reveal-more-challenges",
+    response_model=LifestyleGuideResponse,
+    summary="추천 챌린지 더 보기 (LLM 호출 X — 노출 카운트만 +5, 최대 15개)",
+)
+async def reveal_more_guide_challenges(
+    guide_id: UUID,
+    current_account: CurrentAccount,
+    service: LifestyleGuideServiceDep,
+) -> LifestyleGuideResponse:
+    """가이드 본문/챌린지 set 모두 그대로, 노출 카운트만 5개 늘린다.
+
+    - 가이드 생성 시점에 LLM 이 이미 15개를 모두 만들어 DB 에 저장돼 있다.
+      본 엔드포인트는 사용자에게 점진 노출하기 위한 단순 카운터 +5.
+    - 한도: 15. 초과 호출 시 409 ``REVEAL_LIMIT_REACHED``.
+    - FE 는 응답의 ``revealed_challenge_count`` 로 한도 표시 (5/10/15).
+      챌린지 list 는 ``GET /lifestyle-guides/{id}/challenges`` 의 앞 N 개만
+      렌더 (정렬 기준은 challenge_repo.get_by_guide_id 의 안정 정렬).
+    """
+    guide = await service.reveal_more_challenges_with_owner_check(guide_id, current_account.id)
+    return LifestyleGuideResponse.model_validate(guide)
