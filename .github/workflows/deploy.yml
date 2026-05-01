@@ -124,37 +124,66 @@ jobs:
             git reset --hard origin/main
             echo "Commit: $(git log -1 --oneline)"
 
-            echo "=== [2/7] Rotate logs (한 세대 백업 + 새 라이프사이클) ==="
-            # 직전 빌드 logs 는 logs.prev/ 로 한 세대 보존 (사후 분석).
-            # 그 이전 prev 는 삭제 — 항상 두 세대 (현재 + prev) 만 유지.
-            # 새 빌드 시작 시점에 logs/ 가 비워져 다음 컨테이너 up 직후부터
-            # 깨끗한 상태로 RotatingFileHandler 가 기록을 시작한다.
-            sudo rm -rf ~/AI_02_06/logs.prev
+            echo "=== [2/8] Rotate logs (압축 + 한 세대 보존) ==="
+            # 정책 (사용자 합의 2026-05-01):
+            # - deploy 시: 현재 logs/ → logs.prev.tar.gz 로 gzip 압축, 한 세대만
+            #   보존. 그 이전 archive 는 삭제. 새 logs/ 는 빈 상태로 시작 →
+            #   컨테이너 up 후 TimedRotatingFileHandler 가 새 라이프사이클.
+            # - 평상시 회전 (deploy 미발생 구간): Python TimedRotatingFileHandler
+            #   가 3시간마다 회전 + 백업 2개 유지 = 활성 1 + 백업 2 = 3개 파일.
+            #   가장 오래된 백업은 9시간 시점에 자동 삭제. cron 의존 없음.
+            # - JSON 텍스트 로그는 gzip 90% 이상 압축 → archive 약 12MB 수준.
+            sudo rm -f ~/AI_02_06/logs.prev.tar.gz
+            # 옛 정책 잔재 정리 — logs.prev/ 디렉터리 / logs.archive/ (cron 실험)
+            sudo rm -rf ~/AI_02_06/logs.prev ~/AI_02_06/logs.archive
             if [ -d ~/AI_02_06/logs ]; then
-              sudo mv ~/AI_02_06/logs ~/AI_02_06/logs.prev
+              sudo tar -C ~/AI_02_06 -czf ~/AI_02_06/logs.prev.tar.gz logs \
+                && sudo rm -rf ~/AI_02_06/logs \
+                || echo "WARN: logs archive failed — keeping logs/ as-is for safety"
             fi
             mkdir -p ~/AI_02_06/logs/fastapi ~/AI_02_06/logs/ai-worker
+            ls -lah ~/AI_02_06/logs.prev.tar.gz 2>/dev/null || echo "No previous archive (first deploy)"
 
-            echo "=== [3/7] Pull pre-built images from ghcr.io ==="
+            echo "=== [3/8] Pre-pull prune (옛 ghcr tag 누적 영구 차단) ==="
+            # 2026-05-01 EC2 사고 회귀 가드 — 그날 9개 이미지 20.45GB 누적으로
+            # 디스크 90% 도달 후 pull layer extract ENOSPC 로 실패. 원인은
+            # 기존 [Pull -> Prune] 순서가, pull 실패 시 prune 단계까지 도달
+            # 못해 옛 ghcr tag 이미지가 영구 누적된 것.
+            #
+            # 정책 — *임계 무관하게 매 배포마다* pull 전에 prune:
+            #   - 옛 ghcr tag (직전 배포의 fastapi/ai-worker) 가 untag 상태가
+            #     되어 사실상 항상 회수 가능
+            #   - ai-worker 한 세대만 ~3GB 해제이므로 누적 안 되는 게 핵심
+            #   - prune 자체는 회수할 게 없으면 수 초로 끝나 정상 운영에 부담 X
+            # named volume (postgres/redis 데이터) 은 보존 — running/referenced.
+            df -h /
+            BEFORE_USED=$(df --output=pcent / | tail -1 | tr -dc '0-9')
+            echo "Root disk used (before prune): ${BEFORE_USED}%"
+            docker image ls --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}' | head -20
+            docker system prune -af --volumes || true
+            # builder cache 는 system prune 으로도 빠지나, BuildKit 사용 시 별도
+            # 캐시 store 가 남는 경우가 있어 명시 정리.
+            docker builder prune -af || true
+            AFTER_USED=$(df --output=pcent / | tail -1 | tr -dc '0-9')
+            echo "Root disk used (after prune):  ${AFTER_USED}%"
+
+            echo "=== [4/8] Pull pre-built images from ghcr.io ==="
             docker compose -f docker-compose.prod.yml pull fastapi ai-worker
 
-            echo "=== [4/7] Prune unused docker resources (디스크 회복 강화) ==="
-            # docker system prune -af --volumes:
-            #   - 미사용 image (dangling + 옛 ghcr.io tag) 제거
-            #   - 정지된 컨테이너 + 그에 묶인 anonymous volume 제거
-            #   - 미사용 network + builder cache 제거
-            # named volume (postgres / redis 데이터) 은 보존 — running 또는 referenced 라 안전.
-            # ai-worker 가 압축 1GB / 해제 ~3GB 라 매 deploy 마다 정리 필수.
+            echo "=== [5/8] Post-pull prune (pull 직후 dangling 정리) ==="
+            # pull 직후 동일 repo 의 옛 tag 가 dangling 으로 남는 경우의 마지막 정리.
+            # 위 [3/8] 가 이미 비웠으므로 보통 no-op 이지만 안전망으로 한 번 더.
             docker system prune -af --volumes || true
+            df -h /
 
-            echo "=== [5/7] Stop + Start (no build) ==="
+            echo "=== [6/8] Stop + Start (no build) ==="
             docker compose -f docker-compose.prod.yml down || true
             docker compose -f docker-compose.prod.yml up -d --no-build
 
-            echo "=== [5.5/7] Wait for DB ready ==="
+            echo "=== [6.5/8] Wait for DB ready ==="
             sleep 30
 
-            echo "=== [6/7] Run migrations ==="
+            echo "=== [7/8] Run migrations ==="
             docker compose -f docker-compose.prod.yml exec -T fastapi aerich upgrade || {
               echo "Migration failed, checking status..."
               docker compose -f docker-compose.prod.yml exec -T fastapi aerich status
@@ -162,7 +191,7 @@ jobs:
             }
             echo "Migrations completed successfully"
 
-            echo "=== [7/7] Status ==="
+            echo "=== [8/8] Status ==="
             docker compose -f docker-compose.prod.yml ps
             echo "--- FastAPI Logs ---"
             docker compose -f docker-compose.prod.yml logs fastapi --tail=15 || true

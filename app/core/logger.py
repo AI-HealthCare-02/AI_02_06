@@ -1,18 +1,22 @@
 """Logging configuration module.
 
-콘솔 (stdout) + 파일 (RotatingFileHandler + JSON 구조화) 이중 출력.
+콘솔 (stdout) + 파일 (TimedRotatingFileHandler + JSON 구조화) 이중 출력.
 - 콘솔: 사람 읽기 형식 (`[ts] [LEVEL] [name:line] msg`) — docker logs / 개발자 직관용
 - 파일: JSON line — machine-readable, jq / log 분석 도구 호환
 
 파일 위치는 ``LOG_DIR`` 환경변수로 결정 (default ``/app/logs``). docker-compose
-의 volume 마운트로 호스트에 영속화. 매 빌드 시작 시 호스트의 ``~/logs`` 는
-삭제되고 (한 세대 prev 백업) 새 라이프사이클로 시작 — 본 모듈은 디렉토리만
-보장하면 충분하다.
+의 volume 마운트로 호스트에 영속화. 매 빌드 시작 시 호스트의 ``~/AI_02_06/logs`` 는
+``logs.prev.tar.gz`` 로 압축 백업되고 (한 세대) 새 라이프사이클로 시작 — 본 모듈
+은 디렉토리만 보장하면 충분하다.
+
+회전 정책 (사용자 합의 2026-05-01):
+- 시간 기반 회전 — 3시간마다 자동 회전 (``when='H', interval=3``)
+- 백업 2개 + 활성 1개 = 총 3개 파일 동시 존재
+- 가장 오래된 백업은 9시간 시점에 자동 삭제 → 평상시 9h retention
 
 CLAUDE.md §9 의 핵심 룰 준수:
 - 모듈별 logger (``getLogger(__name__)`` 호출자 측에서)
 - 구조화 (JSON) — 파일 핸들러 한정
-- rotating (10MB x 5)
 - 보안: 호출자가 PII / token / huge payload 를 message 에 넣지 않을 책임
 """
 
@@ -26,8 +30,10 @@ import sys
 
 _LOG_DIR_ENV = "LOG_DIR"
 _DEFAULT_LOG_DIR = "/app/logs"
-_FILE_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
-_FILE_BACKUP_COUNT = 5
+# 시간 기반 회전 — 3h x (활성 1 + 백업 2) = 9h 보존
+_ROTATE_WHEN = "H"
+_ROTATE_INTERVAL_HOURS = 3
+_ROTATE_BACKUP_COUNT = 2
 _CONSOLE_FORMAT = "[%(asctime)s] [%(levelname)s] [%(name)s:%(lineno)d] %(message)s"
 
 
@@ -89,18 +95,22 @@ def setup_logger(
 
     try:
         log_dir = _resolve_log_dir()
-        file_handler = logging.handlers.RotatingFileHandler(
+        file_handler = logging.handlers.TimedRotatingFileHandler(
             log_dir / f"{name}.log",
-            maxBytes=_FILE_MAX_BYTES,
-            backupCount=_FILE_BACKUP_COUNT,
+            when=_ROTATE_WHEN,
+            interval=_ROTATE_INTERVAL_HOURS,
+            backupCount=_ROTATE_BACKUP_COUNT,
             encoding="utf-8",
+            utc=True,
         )
+        # 백업 파일 이름에 ISO 타임스탬프 suffix (예: app.log.2026-05-01_15)
+        file_handler.suffix = "%Y-%m-%d_%H"
         file_handler.setFormatter(json_formatter)
         logger.addHandler(file_handler)
     except OSError:
         # 파일 시스템 권한 문제 등으로 파일 핸들러 생성 실패 시 콘솔만 유지.
         # 정확한 원인은 콘솔 logger 가 직접 emit (logger 자기 자신에 의존하지 않음).
-        logger.warning("Failed to attach RotatingFileHandler — console only", exc_info=True)
+        logger.warning("Failed to attach TimedRotatingFileHandler — console only", exc_info=True)
 
     return logger
 
