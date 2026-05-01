@@ -1,13 +1,28 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+// /ocr/result — OCR 결과 확인 + 수정 + 저장 (react-hook-form + zod 표준 적용).
+//
+// 흐름:
+//   1) draft_id 로 SSE 연결 → ai-worker 의 status='ready' 까지 폴링
+//   2) ready 도달 시 medicines 를 폼에 reset (useFieldArray)
+//   3) 사용자 인라인 수정 — 실시간 zod 검증 + 빨간 helper
+//   4) 저장 시 BE 의 confirm 또는 manual create 호출 (검증 통과만)
+
+import { useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Trash2 } from 'lucide-react'
+import { useFieldArray, useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
+import toast from 'react-hot-toast'
+
 import BottomNav from '@/components/layout/BottomNav'
 import api from '@/lib/api'
 import { streamSSE } from '@/lib/sseClient'
 import { useProfile } from '@/contexts/ProfileContext'
 import { useMedication } from '@/contexts/MedicationContext'
+import { medicationEditPatchSchema } from '@/schemas'
+import FormError from '@/components/form/FormError'
 
 const TERMINAL_ERROR_MESSAGES = {
   no_text: '이미지에서 텍스트를 찾지 못했어요.',
@@ -15,10 +30,14 @@ const TERMINAL_ERROR_MESSAGES = {
   failed: '처리 중 오류가 발생했어요.',
 }
 
-/**
- * SSE 연결을 ready/terminal 까지 자동 재연결하며 await for-of 로 소비.
- * timeout event 시 새 연결 — 무한 재시도 (cancel 또는 ready 까지).
- */
+// 처방전 메타 + 약품 배열 통합 schema. medicationEditPatchSchema 재사용.
+const ocrConfirmSchema = z.object({
+  prescription_date: z.string().optional(),
+  prescription_hospital: z.string().trim().max(128, '최대 128자까지 가능해요').optional(),
+  prescription_department: z.string().trim().max(64, '최대 64자까지 가능해요').optional(),
+  meds: z.array(medicationEditPatchSchema).min(1, '약품을 최소 1개 입력해주세요'),
+})
+
 async function* watchDraftStatus(draftId, profileId, signal) {
   const path = profileId
     ? `/api/v1/ocr/draft/${draftId}/stream?profile_id=${profileId}`
@@ -27,14 +46,15 @@ async function* watchDraftStatus(draftId, profileId, signal) {
     let timedOut = false
     for await (const ev of streamSSE(path, { signal })) {
       if (ev.event === 'update') yield ev.data
-      else if (ev.event === 'timeout') { timedOut = true; break }
-      else if (ev.event === 'error') throw new Error(ev.data?.detail || 'sse error')
+      else if (ev.event === 'timeout') {
+        timedOut = true
+        break
+      } else if (ev.event === 'error') throw new Error(ev.data?.detail || 'sse error')
     }
     if (!timedOut) return
   }
 }
 
-// 로딩 스켈레톤 UI
 function ResultSkeleton() {
   return (
     <div className="min-h-screen bg-gray-50 pb-32 animate-pulse">
@@ -58,6 +78,15 @@ function ResultSkeleton() {
   )
 }
 
+const EMPTY_MED = {
+  medicine_name: '',
+  dose_per_intake: '',
+  daily_intake_count: '',
+  total_intake_days: '',
+  intake_instruction: '',
+  category: '',
+}
+
 function OcrResultContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -65,157 +94,133 @@ function OcrResultContent() {
   const { selectedProfileId } = useProfile()
   const { refetchMedications } = useMedication()
 
-  const [isLoading, setIsLoading] = useState(true)
-  const [meds, setMeds] = useState([])
-  const [prescriptionDate, setPrescriptionDate] = useState(() => new Date().toISOString().split('T')[0])
-  const [prescriptionDepartment, setPrescriptionDepartment] = useState('')
-  const [prescriptionHospital, setPrescriptionHospital] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const {
+    control,
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm({
+    resolver: zodResolver(ocrConfirmSchema),
+    mode: 'onChange',
+    defaultValues: {
+      prescription_date: new Date().toISOString().split('T')[0],
+      prescription_hospital: '',
+      prescription_department: '',
+      meds: [],
+    },
+  })
+  const { fields, append, remove } = useFieldArray({ control, name: 'meds' })
+
+  // 첫 fetch 가 끝났는지 — false 일 때만 ResultSkeleton.
+  const initialized = fields.length > 0 || draftId === 'manual'
 
   useEffect(() => {
-    // [뒤로가기 기능] URL에 draft_id가 없으면 튕겨냅니다.
     if (!draftId) {
       router.push('/ocr')
       return
     }
-
     if (draftId === 'manual') {
-      setMeds([
-        {
-          medicine_name: '',
-          dose_per_intake: '',
-          daily_intake_count: '',
-          total_intake_days: '',
-          intake_instruction: ''
-        }
-      ])
-      setIsLoading(false)
+      reset({
+        prescription_date: new Date().toISOString().split('T')[0],
+        prescription_hospital: '',
+        prescription_department: '',
+        meds: [{ ...EMPTY_MED }],
+      })
       return
     }
 
-    // SSE 로 ai-worker 진행 상태를 수신. status='ready' 까지 isLoading=true 유지
-    // -> 사용자에게 ResultSkeleton 노출. terminal status 시 안내 + /ocr 복귀.
-    // (단발 GET 폐기 — 이미 ready 인 draft 도 SSE 가 첫 yield 즉시 보내므로 비용 동일)
     const abortController = new AbortController()
-
     const consumeStream = async () => {
       try {
         for await (const payload of watchDraftStatus(draftId, selectedProfileId, abortController.signal)) {
           const { status, medicines } = payload
           if (status === 'ready') {
-            setMeds(medicines || [])
-            setPrescriptionDate(medicines?.[0]?.dispensed_date || new Date().toISOString().split('T')[0])
-            // OCR 응답이 진료과를 추출했으면 첫 비어있지 않은 값을 처방전 단위로 채택
-            const firstDept = medicines?.find?.((m) => m?.department)?.department
-            if (firstDept) setPrescriptionDepartment(firstDept)
-            setIsLoading(false)
+            const firstDept = medicines?.find?.((m) => m?.department)?.department || ''
+            reset({
+              prescription_date:
+                medicines?.[0]?.dispensed_date || new Date().toISOString().split('T')[0],
+              prescription_hospital: '',
+              prescription_department: firstDept,
+              meds: (medicines || []).map((m) => ({
+                medicine_name: m.medicine_name || '',
+                dose_per_intake: m.dose_per_intake || '',
+                daily_intake_count: m.daily_intake_count ?? '',
+                total_intake_days: m.total_intake_days ?? '',
+                intake_instruction: m.intake_instruction || '',
+                category: m.category || '',
+              })),
+            })
             return
           }
           if (status in TERMINAL_ERROR_MESSAGES) {
-            alert(`${TERMINAL_ERROR_MESSAGES[status]} 다시 촬영해주세요.`)
+            toast.error(`${TERMINAL_ERROR_MESSAGES[status]} 다시 촬영해주세요.`)
             router.push('/ocr')
             return
           }
-          // status='pending' — 다음 update 대기 (스켈레톤 유지)
         }
       } catch (err) {
         if (abortController.signal.aborted) return
-        alert('데이터가 만료되었거나 불러올 수 없습니다. 다시 촬영해주세요.')
+        toast.error('데이터가 만료되었거나 불러올 수 없습니다. 다시 촬영해주세요.')
         router.push('/ocr')
       }
     }
-
     consumeStream()
     return () => abortController.abort()
-  }, [draftId, router, selectedProfileId])
+  }, [draftId, router, selectedProfileId, reset])
 
-  // 사용자가 텍스트를 수정할 때 상태 업데이트하는 함수
-  const handleInputChange = (index, field, value) => {
-    const updatedMeds = [...meds]
-    updatedMeds[index][field] = value
-    setMeds(updatedMeds)
-  }
-
-  // 약품 삭제 기능
-  const handleDelete = (index) => {
-    const updatedMeds = meds.filter((_, i) => i !== index)
-    setMeds(updatedMeds)
-  }
-
-  // 약품 직접 추가 기능
-  const handleAddMedicine = () => {
-    setMeds([
-      ...meds,
-      {
-        medicine_name: '',
-        dose_per_intake: '',
-        daily_intake_count: '',
-        total_intake_days: '',
-        intake_instruction: ''
-      }
-    ])
-  }
-
-  // 다시 촬영 — 현재 draft 를 백엔드에서 폐기 처리한 뒤 업로드 페이지로 이동.
-  // 폐기 실패해도 사용자 흐름은 막지 않음 (UX 우선, 24h 후 자동 정리됨).
   const handleRetake = async () => {
-    if (draftId) {
+    if (draftId && draftId !== 'manual') {
       try {
         await api.delete(`/api/v1/ocr/draft/${draftId}`, {
           params: selectedProfileId ? { profile_id: selectedProfileId } : undefined,
         })
       } catch {
-        // ignore — 사용자 흐름 차단하지 않음
+        // ignore
       }
     }
     router.push('/ocr')
   }
 
-  // 최종 확인 버튼 (Phase 3으로 연결될 부분)
-  const handleConfirm = async () => {
-    if (isSubmitting) return
-    if (meds.length === 0) {
-      alert('등록할 약이 없습니다.')
-      return
-    }
-
-    // 약품명 유효성 검사
-    const hasEmptyName = meds.some(med => !med.medicine_name || med.medicine_name.trim() === '')
-    if (hasEmptyName) {
-      alert('약품명을 입력해주세요.')
-      return
-    }
-
-    // 수동 추가 시 프로필 필수 (selectedProfileId 미설정 상태 방어)
-    if (draftId === 'manual' && !selectedProfileId) {
-      alert('프로필을 선택한 후 다시 시도해주세요.')
-      return
-    }
-
-    setIsSubmitting(true)
-    try {
-      // 처방일을 모든 약품에 공통 적용 + 빈 string → null sanitize
-      // (사용자가 직접 추가한 빈 행을 BE 의 int|None 검증이 거부하지 않도록)
-      const toIntOrNull = (v) => {
-        if (v === '' || v === null || v === undefined) return null
-        const n = parseInt(v, 10)
-        return Number.isNaN(n) ? null : n
+  const onInvalid = (formErrors) => {
+    const dig = (obj) => {
+      if (!obj) return null
+      if (typeof obj === 'object' && 'message' in obj && obj.message) return obj.message
+      for (const v of Object.values(obj)) {
+        const r = dig(v)
+        if (r) return r
       }
-      const toStrOrNull = (v) => (v === '' || v === undefined ? null : v)
-      const confirmedMedicines = meds.map(med => ({
-        ...med,
-        medicine_name: med.medicine_name?.trim() ?? '',
-        dose_per_intake: toStrOrNull(med.dose_per_intake),
-        daily_intake_count: toIntOrNull(med.daily_intake_count),
-        total_intake_days: toIntOrNull(med.total_intake_days),
-        intake_instruction: toStrOrNull(med.intake_instruction),
-        category: toStrOrNull(med.category),
-        // 처방전 단위 진료과 — 사용자 입력값을 모든 약품에 일괄 적용 (없으면 NULL = 미상)
-        department: toStrOrNull(prescriptionDepartment),
-        dispensed_date: prescriptionDate || null,
-      }))
+      return null
+    }
+    toast.error(dig(formErrors) || '입력값을 다시 확인해주세요.')
+  }
+
+  const onSubmit = async (values) => {
+    if (draftId === 'manual' && !selectedProfileId) {
+      toast.error('프로필을 선택한 후 다시 시도해주세요.')
+      return
+    }
+
+    const toIntOrNull = (v) => {
+      if (v === '' || v === null || v === undefined) return null
+      const n = parseInt(v, 10)
+      return Number.isNaN(n) ? null : n
+    }
+    const toStrOrNull = (v) => (v === '' || v === undefined ? null : v)
+    const confirmedMedicines = values.meds.map((med) => ({
+      ...med,
+      medicine_name: med.medicine_name?.trim() ?? '',
+      dose_per_intake: toStrOrNull(med.dose_per_intake),
+      daily_intake_count: toIntOrNull(med.daily_intake_count),
+      total_intake_days: toIntOrNull(med.total_intake_days),
+      intake_instruction: toStrOrNull(med.intake_instruction),
+      category: toStrOrNull(med.category),
+      department: toStrOrNull(values.prescription_department),
+      dispensed_date: values.prescription_date || null,
+    }))
+
+    try {
       if (draftId === 'manual') {
-        // 수동 추가: 순차 등록 (부분 실패 시 진행 상황 정확 보고)
         let succeeded = 0
         for (const med of confirmedMedicines) {
           const dailyCount = parseInt(med.daily_intake_count, 10) || 1
@@ -223,11 +228,10 @@ function OcrResultContent() {
           const startDate = med.dispensed_date || new Date().toISOString().split('T')[0]
 
           let intakeTimes = []
-          if (dailyCount === 1) intakeTimes = ["08:00"]
-          else if (dailyCount === 2) intakeTimes = ["08:00", "19:00"]
-          else if (dailyCount === 3) intakeTimes = ["08:00", "13:00", "19:00"]
+          if (dailyCount === 1) intakeTimes = ['08:00']
+          else if (dailyCount === 2) intakeTimes = ['08:00', '19:00']
+          else if (dailyCount === 3) intakeTimes = ['08:00', '13:00', '19:00']
           else {
-            // 4회 이상: 08~22시 사이를 균등 분할 (중복 시간 방지)
             const step = 14 / (dailyCount - 1)
             intakeTimes = Array.from({ length: dailyCount }, (_, i) => {
               const hour = Math.round(8 + i * step)
@@ -246,209 +250,216 @@ function OcrResultContent() {
             succeeded += 1
           } catch (err) {
             const remaining = confirmedMedicines.length - succeeded
-            alert(`${succeeded}개 저장 후 실패했습니다. 남은 ${remaining}개는 저장되지 않았습니다. 복약 목록에서 확인해 주세요.`)
+            toast.error(
+              `${succeeded}개 저장 후 실패했습니다. 남은 ${remaining}개는 저장되지 않았습니다.`,
+            )
             throw err
           }
         }
       } else {
-        // OCR 흐름: confirm — selectedProfileId 미전달 시 BE 가 SELF default
-        // hospital_name / department 는 처방전 그룹 메타로 한 번만 전달 (그룹 단위 적용)
-        await api.post('/api/v1/ocr/confirm', {
-          draft_id: draftId,
-          confirmed_medicines: confirmedMedicines,
-          hospital_name: prescriptionHospital.trim() || null,
-          department: prescriptionDepartment.trim() || null,
-        }, {
-          timeout: 60000,
-          params: selectedProfileId ? { profile_id: selectedProfileId } : undefined,
-        })
-
-        // confirm 직후 main 페이지의 활성 카드에서 즉시 제거되도록 마킹.
+        await api.post(
+          '/api/v1/ocr/confirm',
+          {
+            draft_id: draftId,
+            confirmed_medicines: confirmedMedicines,
+            hospital_name: values.prescription_hospital?.trim() || null,
+            department: values.prescription_department?.trim() || null,
+          },
+          {
+            timeout: 60000,
+            params: selectedProfileId ? { profile_id: selectedProfileId } : undefined,
+          },
+        )
         sessionStorage.setItem('ocr_consumed_draft_id', draftId)
       }
 
-      // BE 가 medications INSERT 한 직후 — MedicationContext refetch 로
-      // /medication 페이지가 새로고침 없이 즉시 새 약을 보이도록 한다.
       await refetchMedications()
-
-      alert('저장 완료! 복약 목록에서 확인해보세요.')
+      toast.success('저장 완료! 복약 목록에서 확인해보세요.')
       router.push('/medication')
-
-    } catch (error) {
-      alert('저장 중 오류가 발생했습니다.')
-      setIsSubmitting(false)
+    } catch {
+      toast.error('저장 중 오류가 발생했습니다.')
     }
   }
 
-  if (isLoading) return <ResultSkeleton />
+  if (!initialized) return <ResultSkeleton />
 
   return (
     <main className="min-h-screen bg-gray-50 pb-24">
-      {/* 상단 헤더 영역 — ← 는 메인으로, "다시 촬영" 은 /ocr 로 분리 */}
-      <div className="bg-white border-b border-gray-200 px-10 py-4 flex items-center gap-4">
-        <button
-          onClick={() => router.push('/main')}
-          className="text-gray-400 hover:text-black cursor-pointer text-xl"
-          aria-label="메인으로 이동"
-        >
-          ←
-        </button>
-        <div>
-          <h1 className="font-bold text-gray-900">처방전 확인 및 수정</h1>
-          <p className="text-xs text-gray-400">오탈자가 있다면 직접 수정해주세요</p>
-        </div>
-      </div>
-
-      <div className="max-w-3xl mx-auto px-10 py-8 space-y-4">
-        {/* 안내 배너 */}
-        <div className="bg-blue-50 rounded-2xl p-4 flex items-center gap-3">
-          <span className="text-2xl">!</span>
+      <form onSubmit={handleSubmit(onSubmit, onInvalid)}>
+        <div className="bg-white border-b border-gray-200 px-10 py-4 flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => router.push('/main')}
+            className="text-gray-400 hover:text-black cursor-pointer text-xl"
+            aria-label="메인으로 이동"
+          >
+            ←
+          </button>
           <div>
-            <p className="font-semibold text-blue-800 text-sm">확인해주세요!</p>
-            <p className="text-blue-600 text-xs">AI가 인식한 결과입니다. 틀린 글자는 터치해서 고칠 수 있어요.</p>
+            <h1 className="font-bold text-gray-900">처방전 확인 및 수정</h1>
+            <p className="text-xs text-gray-400">오탈자가 있다면 직접 수정해주세요</p>
           </div>
         </div>
 
-        {/* 처방일 (처방전 전체 공통) */}
-        <div className="bg-white rounded-2xl p-5 border border-gray-200 flex items-center justify-between gap-4">
-          <div>
-            <p className="text-sm font-bold text-gray-900">처방일</p>
-            <p className="text-xs text-gray-400 mt-0.5">처방전에 적힌 날짜를 확인해주세요</p>
-          </div>
-          <input
-            type="date"
-            value={prescriptionDate}
-            onChange={(e) => setPrescriptionDate(e.target.value)}
-            className="text-base font-bold text-gray-700 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50"
-          />
-        </div>
-
-        {/* 병원 (처방전 전체 공통) */}
-        <div className="bg-white rounded-2xl p-5 border border-gray-200 flex items-center justify-between gap-4">
-          <div>
-            <p className="text-sm font-bold text-gray-900">병원</p>
-            <p className="text-xs text-gray-400 mt-0.5">비워두면 &lsquo;미상&rsquo; 으로 등록됩니다 (나중에 수정 가능)</p>
-          </div>
-          <input
-            type="text"
-            value={prescriptionHospital}
-            onChange={(e) => setPrescriptionHospital(e.target.value)}
-            placeholder="예: 서울내과의원"
-            maxLength={128}
-            className="text-base font-bold text-gray-700 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50 w-56"
-          />
-        </div>
-
-        {/* 진료과 (처방전 전체 공통) — OCR 미인식 시 미상 가능, 사용자가 직접 입력 */}
-        <div className="bg-white rounded-2xl p-5 border border-gray-200 flex items-center justify-between gap-4">
-          <div>
-            <p className="text-sm font-bold text-gray-900">진료과</p>
-            <p className="text-xs text-gray-400 mt-0.5">비워두면 &lsquo;미상&rsquo; 으로 등록됩니다 (나중에 수정 가능)</p>
-          </div>
-          <input
-            type="text"
-            value={prescriptionDepartment}
-            onChange={(e) => setPrescriptionDepartment(e.target.value)}
-            placeholder="예: 내과"
-            maxLength={64}
-            className="text-base font-bold text-gray-700 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50 w-40"
-          />
-        </div>
-
-        {/* 약물 리스트 카드 (수정 가능한 Input UI 적용) */}
-        <div className="space-y-4 mb-10">
-          {meds.map((med, i) => (
-            <div key={i} className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ animationDelay: `${i * 100}ms` }}>
-              <div className="flex justify-between items-start mb-4 gap-4">
-                <input
-                  type="text"
-                  value={med.medicine_name || ''}
-                  onChange={(e) => handleInputChange(i, 'medicine_name', e.target.value)}
-                  className="font-bold text-lg text-gray-900 border-b-2 border-transparent hover:border-blue-200 focus:border-blue-500 focus:outline-none bg-transparent w-full transition-colors"
-                  placeholder="약품명 입력"
-                />
-                <button onClick={() => handleDelete(i)} className="text-gray-300 hover:text-red-400 mt-1 cursor-pointer">
-                  <Trash2 size={20} />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
-                  <p className="text-[10px] text-gray-500 mb-1 px-1">1회 복용량</p>
-                  <input
-                    type="text"
-                    value={med.dose_per_intake || ''}
-                    onChange={(e) => handleInputChange(i, 'dose_per_intake', e.target.value)}
-                    className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
-                    placeholder="예: 1정"
-                  />
-                </div>
-                <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
-                  <p className="text-[10px] text-gray-500 mb-1 px-1">1일 복용 횟수</p>
-                  <input
-                    type="number"
-                    value={med.daily_intake_count || ''}
-                    onChange={(e) => handleInputChange(i, 'daily_intake_count', Number(e.target.value))}
-                    className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
-                    placeholder="예: 3"
-                  />
-                </div>
-                <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
-                  <p className="text-[10px] text-gray-500 mb-1 px-1">총 복용 일수</p>
-                  <input
-                    type="number"
-                    value={med.total_intake_days || ''}
-                    onChange={(e) => handleInputChange(i, 'total_intake_days', Number(e.target.value))}
-                    className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
-                    placeholder="예: 5"
-                  />
-                </div>
-                <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
-                  <p className="text-[10px] text-gray-500 mb-1 px-1">복용 방법</p>
-                  <input
-                    type="text"
-                    value={med.intake_instruction || ''}
-                    onChange={(e) => handleInputChange(i, 'intake_instruction', e.target.value)}
-                    className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
-                    placeholder="예: 식후 30분"
-                  />
-                </div>
-              </div>
+        <div className="max-w-3xl mx-auto px-10 py-8 space-y-4">
+          <div className="bg-blue-50 rounded-2xl p-4 flex items-center gap-3">
+            <span className="text-2xl">!</span>
+            <div>
+              <p className="font-semibold text-blue-800 text-sm">확인해주세요!</p>
+              <p className="text-blue-600 text-xs">AI가 인식한 결과입니다. 틀린 글자는 터치해서 고칠 수 있어요.</p>
             </div>
-          ))}
+          </div>
 
-          {/* 약품 추가 버튼 */}
-          <button
-            onClick={handleAddMedicine}
-            className="w-full bg-white rounded-2xl p-4 border-2 border-dashed border-blue-300 text-blue-500 font-bold hover:bg-blue-50 hover:border-blue-400 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-sm"
-          >
-            <span className="text-xl">+</span> 직접 약품 추가하기
-          </button>
-        </div>
+          <div className="bg-white rounded-2xl p-5 border border-gray-200 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-bold text-gray-900">처방일</p>
+              <p className="text-xs text-gray-400 mt-0.5">처방전에 적힌 날짜를 확인해주세요</p>
+            </div>
+            <input
+              type="date"
+              {...register('prescription_date')}
+              className="text-base font-bold text-gray-700 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50"
+            />
+          </div>
 
-        {/* 하단 액션 버튼 */}
-        <div className="flex gap-3 pb-10">
-          <button
-            onClick={handleRetake}
-            className="flex-1 bg-white border border-gray-200 py-4 rounded-xl text-gray-500 text-sm font-bold cursor-pointer hover:bg-gray-50 transition-colors"
-          >
-            다시 촬영
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={isSubmitting}
-            className="flex-1 bg-gray-900 text-white py-4 rounded-xl font-semibold transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed enabled:hover:bg-gray-800 enabled:cursor-pointer">
-            {isSubmitting ? '저장 중...' : '수정 완료 및 저장'}
-          </button>
+          <div className="bg-white rounded-2xl p-5 border border-gray-200 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-bold text-gray-900">병원</p>
+              <p className="text-xs text-gray-400 mt-0.5">비워두면 &lsquo;미상&rsquo; 으로 등록됩니다 (나중에 수정 가능)</p>
+            </div>
+            <div>
+              <input
+                type="text"
+                {...register('prescription_hospital')}
+                placeholder="예: 서울내과의원"
+                maxLength={128}
+                className="text-base font-bold text-gray-700 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50 w-56"
+              />
+              <FormError name="prescription_hospital" errors={errors} />
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl p-5 border border-gray-200 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-bold text-gray-900">진료과</p>
+              <p className="text-xs text-gray-400 mt-0.5">비워두면 &lsquo;미상&rsquo; 으로 등록됩니다 (나중에 수정 가능)</p>
+            </div>
+            <div>
+              <input
+                type="text"
+                {...register('prescription_department')}
+                placeholder="예: 내과"
+                maxLength={64}
+                className="text-base font-bold text-gray-700 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50 w-40"
+              />
+              <FormError name="prescription_department" errors={errors} />
+            </div>
+          </div>
+
+          <div className="space-y-4 mb-10">
+            {fields.map((field, i) => (
+              <div
+                key={field.id}
+                className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 animate-in fade-in slide-in-from-bottom-2 duration-300"
+                style={{ animationDelay: `${i * 100}ms` }}
+              >
+                <div className="flex justify-between items-start mb-4 gap-4">
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      {...register(`meds.${i}.medicine_name`)}
+                      className="font-bold text-lg text-gray-900 border-b-2 border-transparent hover:border-blue-200 focus:border-blue-500 focus:outline-none bg-transparent w-full transition-colors"
+                      placeholder="약품명 입력"
+                    />
+                    <FormError name={`meds.${i}.medicine_name`} errors={errors} />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => remove(i)}
+                    className="text-gray-300 hover:text-red-400 mt-1 cursor-pointer"
+                  >
+                    <Trash2 size={20} />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
+                    <p className="text-[10px] text-gray-500 mb-1 px-1">1회 복용량</p>
+                    <input
+                      type="text"
+                      {...register(`meds.${i}.dose_per_intake`)}
+                      className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
+                      placeholder="예: 1정"
+                    />
+                  </div>
+                  <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
+                    <p className="text-[10px] text-gray-500 mb-1 px-1">1일 복용 횟수</p>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      {...register(`meds.${i}.daily_intake_count`)}
+                      className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
+                      placeholder="예: 3"
+                    />
+                    <FormError name={`meds.${i}.daily_intake_count`} errors={errors} />
+                  </div>
+                  <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
+                    <p className="text-[10px] text-gray-500 mb-1 px-1">총 복용 일수</p>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      {...register(`meds.${i}.total_intake_days`)}
+                      className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
+                      placeholder="예: 5"
+                    />
+                    <FormError name={`meds.${i}.total_intake_days`} errors={errors} />
+                  </div>
+                  <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
+                    <p className="text-[10px] text-gray-500 mb-1 px-1">복용 방법</p>
+                    <input
+                      type="text"
+                      {...register(`meds.${i}.intake_instruction`)}
+                      className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
+                      placeholder="예: 식후 30분"
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            <button
+              type="button"
+              onClick={() => append({ ...EMPTY_MED })}
+              className="w-full bg-white rounded-2xl p-4 border-2 border-dashed border-blue-300 text-blue-500 font-bold hover:bg-blue-50 hover:border-blue-400 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+            >
+              <span className="text-xl">+</span> 직접 약품 추가하기
+            </button>
+          </div>
+
+          <div className="flex gap-3 pb-10">
+            <button
+              type="button"
+              onClick={handleRetake}
+              className="flex-1 bg-white border border-gray-200 py-4 rounded-xl text-gray-500 text-sm font-bold cursor-pointer hover:bg-gray-50 transition-colors"
+            >
+              다시 촬영
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="flex-1 bg-gray-900 text-white py-4 rounded-xl font-semibold transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed enabled:hover:bg-gray-800 enabled:cursor-pointer"
+            >
+              {isSubmitting ? '저장 중...' : '수정 완료 및 저장'}
+            </button>
+          </div>
         </div>
-      </div>
+      </form>
 
       <BottomNav />
     </main>
   )
 }
 
-// Suspense로 감싸서 export (useSearchParams 필수)
 export default function OcrResultPage() {
   return (
     <Suspense fallback={<ResultSkeleton />}>
