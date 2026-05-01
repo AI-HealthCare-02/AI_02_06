@@ -127,8 +127,13 @@ services:
       - .env
     volumes:
       - ./logs/ai-worker:/app/logs
+      # ko-sroberta 모델 캐시 — image layer 에서 분리해 host named volume 으로.
+      # 컨테이너 첫 start 시 sentence-transformers 가 자동 다운로드 후 여기에
+      # 영속 저장. 이후 컨테이너 교체/배포 시 cache hit (다운로드 0회).
+      - hf_cache:/data/hf-cache
     environment:
       LOG_DIR: /app/logs
+      HF_HOME: /data/hf-cache
     networks:
       - frontend  # OpenAI / Kakao Local / CLOVA OCR 외부 호출
       - backend   # Redis
@@ -198,6 +203,11 @@ volumes:
     name: static_volume
   media_volume:
     name: media_volume
+  # huggingface 모델 (ko-sroberta 등) — image layer 에서 분리한 영속 캐시.
+  # 첫 컨테이너 start 에서 ~500MB 다운로드, 이후 매 배포마다 cache hit.
+  # EBS 영속이라 instance 재시작과 무관하게 보존.
+  hf_cache:
+    name: hf_cache
 
 networks:
   # 외부 통신 가능 — 인바운드(nginx 80/443) + 아웃바운드(fastapi·ai-worker 외부 API)

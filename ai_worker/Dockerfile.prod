@@ -27,11 +27,17 @@ COPY . .
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-# ko-sroberta 모델 pre-download
-ENV HF_HOME=/app/.cache/huggingface
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('jhgan/ko-sroberta-multitask')"
+# ko-sroberta 모델은 image layer 가 아니라 host volume 으로 분리.
+# - HF_HOME 은 docker-compose 의 hf_cache named volume 마운트 지점.
+# - 첫 컨테이너 start 시 sentence-transformers 가 알아서 다운로드 → 영속 저장.
+# - 두 번째 컨테이너 부터는 cache hit (다운로드 0회).
+# - 이미지 layer 에서 모델이 빠져 ai-worker 이미지 ~3GB → ~600MB (5분의 1).
+ENV HF_HOME=/data/hf-cache
+ENV TRANSFORMERS_CACHE=/data/hf-cache
+ENV SENTENCE_TRANSFORMERS_HOME=/data/hf-cache
 
-RUN chown -R appuser:appgroup /app
+# 마운트 지점 미리 생성 + 권한 부여 (named volume 이 비어있을 때 권한 보장)
+RUN mkdir -p /data/hf-cache && chown -R appuser:appgroup /app /data
 USER appuser
 
 # compose.prod.yml 이 Redis 기반 healthcheck 로 override. 여기선 기본만 정의.
