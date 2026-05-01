@@ -11,6 +11,50 @@ from app.core import config
 from app.dtos.lifestyle_guide import RecommendedChallenge
 from app.models.challenge import Challenge
 
+# 한 set 의 target_days 분배 (1·7·14·14·21). 사용자 노출 단위.
+_SLOT_PATTERN = (1, 7, 14, 14, 21)
+_SLOTS_PER_SET = len(_SLOT_PATTERN)
+
+
+def _assign_slot_order(
+    challenges: list[RecommendedChallenge],
+) -> list[RecommendedChallenge]:
+    """LLM 의 15개 챌린지를 set 단위 round-robin 으로 재배열.
+
+    각 set 의 노출 순서는 ``_SLOT_PATTERN`` (1·7·14·14·21) 을 따른다.
+    LLM 이 분배 규칙을 어겼으면(=각 target_days bucket 의 개수가 패턴과 다름)
+    안전하게 입력 순서를 그대로 반환 (fallback).
+
+    Args:
+        challenges: LLM 응답의 RecommendedChallenge 리스트.
+
+    Returns:
+        slot_index 순서로 재배열된 동일 객체 리스트.
+    """
+    if not challenges:
+        return []
+
+    # target_days 별 buckets — FIFO. LLM 출력 순서 그대로 보존.
+    buckets: dict[int, list[RecommendedChallenge]] = {}
+    for ch in challenges:
+        buckets.setdefault(ch.target_days, []).append(ch)
+
+    # 패턴 검증 — 각 day 마다 패턴이 요구하는 개수의 N배(=set 수) 가 있어야 함.
+    from collections import Counter
+
+    required_per_set = Counter(_SLOT_PATTERN)
+    sets_needed = len(challenges) // _SLOTS_PER_SET
+    if len(challenges) % _SLOTS_PER_SET != 0:
+        return list(challenges)
+    for day, count in required_per_set.items():
+        if len(buckets.get(day, [])) != count * sets_needed:
+            return list(challenges)
+
+    ordered: list[RecommendedChallenge] = []
+    for _ in range(sets_needed):
+        ordered.extend(buckets[day].pop(0) for day in _SLOT_PATTERN)
+    return ordered
+
 
 class ChallengeRepository:
     """Challenge database repository for health challenge management."""
@@ -68,28 +112,36 @@ class ChallengeRepository:
             deleted_at__isnull=True,
         ).all()
 
-    async def get_by_guide_id(self, guide_id: UUID) -> list[Challenge]:
-        """Get all challenges linked to a specific lifestyle guide.
+    async def get_by_guide_id(
+        self,
+        guide_id: UUID,
+        limit: int | None = None,
+    ) -> list[Challenge]:
+        """Get challenges linked to a specific lifestyle guide.
 
-        Returned order: target_days asc -> title 가나다 -> id (사용자 합의).
-        ORDER BY 없는 쿼리는 PostgreSQL 에서 row 순서가 undefined 라
-        화면이 매번 흔들리던 문제를 막기 위함.
+        Returned order:
+          1순위 ``slot_index`` asc (15개 챌린지 set 단위 round-robin 으로 미리 부여 —
+            5개씩 잘라도 1·7·14·14·21 분배가 항상 같은 비율).
+          2순위 (slot_index 가 NULL 인 legacy row 호환): target_days asc.
+          3·4순위 안정 정렬용 title 가나다 → id tiebreak.
 
         Args:
             guide_id: LifestyleGuide UUID.
+            limit: 가이드의 ``revealed_challenge_count`` 만큼만 반환하기 위한
+                옵션. None 이면 전체 (가이드 삭제 cascade / 관리 용도).
 
         Returns:
-            list[Challenge]: 기간 짧은 순 → 제목 가나다 → id tiebreak.
+            list[Challenge]: 정렬된 챌린지 (limit 적용 시 앞 N 개 — 5개씩 set 단위).
         """
-        return (
-            await Challenge
-            .filter(
-                guide_id=guide_id,
-                deleted_at__isnull=True,
-            )
-            .order_by("target_days", "title", "id")
-            .all()
-        )
+        # PostgreSQL 은 ORDER BY 컬럼이 NULL 일 때 기본 ASC NULLS LAST. legacy row
+        # 가 항상 신규 row(0~14) 뒤로 가게 두고, 그 안에서 target_days 로 보조 정렬.
+        query = Challenge.filter(
+            guide_id=guide_id,
+            deleted_at__isnull=True,
+        ).order_by("slot_index", "target_days", "title", "id")
+        if limit is not None:
+            query = query.limit(limit)
+        return await query.all()
 
     async def get_active_by_profile(self, profile_id: UUID) -> list[Challenge]:
         """Get active challenges for a profile.
@@ -145,26 +197,40 @@ class ChallengeRepository:
         guide_id: UUID,
         profile_id: UUID,
         challenges: list[RecommendedChallenge],
+        prescription_group_id: UUID | None = None,
     ) -> list[Challenge]:
         """Bulk create LLM-recommended challenges tied to a guide.
 
         All created challenges start with is_active=False (pending user activation).
 
+        ``slot_index`` 부여 정책 — "추천 챌린지 더 보기" 5개씩 노출 시에도 1·7·14·
+        14·21 기간 분배가 항상 같은 비율로 보이도록 set 단위 round-robin:
+          - target_days 로 buckets 분리 (1, 7, 14, 14, 21 의 멀티셋 가정).
+          - bucket 내 챌린지를 5개씩 묶어 set #0/#1/#2 로 분배.
+          - 각 set 안에서 1일·7일·14일·14일·21일 5개를 ``slot_index`` 0~4 로 부여.
+          - 다음 set 은 5~9, 그다음 set 은 10~14.
+        LLM 이 prompt 규칙을 어겨 분배가 비대칭이면 fallback 으로 입력 순서를 그대로 사용.
+
         Args:
             guide_id: Source LifestyleGuide UUID.
             profile_id: Owner profile UUID.
             challenges: Parsed recommended challenge list from LLM response.
+            prescription_group_id: 가이드와 함께 묶인 처방전 그룹 UUID (v3+).
+                ``/challenge`` 페이지에서 처방전 별 분류 view 를 위해 챌린지에도
+                동시에 기록한다. legacy 호환 위해 nullable.
 
         Returns:
-            list[Challenge]: List of created challenge instances.
+            list[Challenge]: List of created challenge instances (slot_index 순).
         """
         today = datetime.now(tz=config.TIMEZONE).date()
+        ordered = _assign_slot_order(challenges)
         created: list[Challenge] = []
-        for ch in challenges:
+        for slot_index, ch in enumerate(ordered):
             challenge = await Challenge.create(
                 id=uuid4(),
                 profile_id=profile_id,
                 guide_id=guide_id,
+                prescription_group_id=prescription_group_id,
                 category=ch.category,
                 title=ch.title,
                 description=ch.description,
@@ -174,6 +240,7 @@ class ChallengeRepository:
                 completed_dates=[],
                 challenge_status="IN_PROGRESS",
                 is_active=False,
+                slot_index=slot_index,
             )
             created.append(challenge)
         return created
