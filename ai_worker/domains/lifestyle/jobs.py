@@ -3,13 +3,15 @@
 본 모듈은 RQ task entry point 만 정의한다. 실제 LLM 호출은 도메인 안의
 ``guide_generator`` 가 담당, DB 영속화는 ``LifestyleGuideRepository`` 가 담당한다.
 
-흐름: pending guide 검증 -> [Tortoise lifecycle] 활성 약물 재조회
-       -> LLM 호출 -> 결과 파싱 -> guide UPDATE(content+ready)
-       -> 추천 챌린지 bulk INSERT
+흐름: pending guide 조회 -> [Tortoise lifecycle] 처방전 그룹 active 약물 재조회
+       -> Profile.health_survey 조회 -> LLM 호출 (약물+건강정보)
+       -> 결과 파싱 -> guide UPDATE(content+ready) -> 추천 챌린지 bulk INSERT
+       (챌린지에도 prescription_group_id 동시 기록 → /challenge 페이지 분류용)
 """
 
 import asyncio
 import os
+from uuid import UUID
 
 from openai import AsyncOpenAI
 from tortoise import Tortoise
@@ -23,6 +25,7 @@ from app.models.medication import Medication
 from app.repositories.challenge_repository import ChallengeRepository
 from app.repositories.lifestyle_guide_repository import LifestyleGuideRepository
 from app.repositories.medication_repository import MedicationRepository
+from app.repositories.profile_repository import ProfileRepository
 
 logger = get_logger(__name__)
 
@@ -51,23 +54,49 @@ def process_lifestyle_guide_task(guide_id: str, profile_id: str) -> bool:
 
 
 async def _run_pipeline(guide_id: str, profile_id: str) -> bool:
-    """Tortoise lifecycle 한 번 안에서 활성 약물 재조회 + LLM + UPDATE 까지."""
+    """Tortoise lifecycle 한 번 안에서 처방전 그룹 active 약물 + 건강정보 + LLM."""
     await Tortoise.init(config=TORTOISE_ORM)
     try:
         med_repo = MedicationRepository()
         guide_repo = LifestyleGuideRepository()
         challenge_repo = ChallengeRepository()
+        profile_repo = ProfileRepository()
 
-        meds = await med_repo.get_active_by_profile(profile_id)
+        guide = await guide_repo.get_by_id(UUID(guide_id))
+        if guide is None:
+            logger.warning("[GUIDE] pending guide vanished guide_id=%s", guide_id)
+            return True
+
+        # v3: 처방전 그룹 단위. 옛 호출 (group_id NULL) 은 fallback 으로 프로필 전체.
+        group_id = getattr(guide, "prescription_group_id", None)
+        if group_id is not None:
+            meds = await med_repo.get_active_by_prescription_group(group_id)
+        else:
+            meds = await med_repo.get_active_by_profile(UUID(profile_id))
+
         if not meds:
-            logger.warning("[GUIDE] no active meds at worker time profile_id=%s", profile_id)
+            logger.warning(
+                "[GUIDE] no active meds at worker time profile_id=%s group_id=%s",
+                profile_id,
+                group_id,
+            )
             await guide_repo.mark_terminal(guide_id, LifestyleGuideStatusValue.NO_ACTIVE_MEDS)
             return True
 
+        profile = await profile_repo.get_by_id(UUID(profile_id))
+        health_survey = profile.health_survey if profile else None
+
         med_dicts = [_med_to_dict(m) for m in meds]
         client = _build_openai_client()
-        parsed = await generate_guide_payload(med_dicts, client)
-        await _persist_ready(guide_repo, challenge_repo, guide_id, profile_id, parsed)
+        parsed = await generate_guide_payload(med_dicts, health_survey, client)
+        await _persist_ready(
+            guide_repo,
+            challenge_repo,
+            guide_id,
+            profile_id,
+            parsed,
+            prescription_group_id=group_id,
+        )
         return True
     finally:
         await Tortoise.close_connections()
@@ -79,8 +108,10 @@ async def _persist_ready(
     guide_id: str,
     profile_id: str,
     parsed: LlmGuideResponse,
+    *,
+    prescription_group_id: UUID | None,
 ) -> None:
-    """LLM 결과를 guide UPDATE + 추천 챌린지 bulk INSERT."""
+    """LLM 결과를 guide UPDATE + 추천 챌린지 bulk INSERT (group_id 동시 기록)."""
     content = parsed.model_dump(exclude={"recommended_challenges"})
     updated = await guide_repo.mark_ready(guide_id, content)
     if updated == 0:
@@ -90,11 +121,13 @@ async def _persist_ready(
         guide_id=guide_id,
         profile_id=profile_id,
         challenges=parsed.recommended_challenges,
+        prescription_group_id=prescription_group_id,
     )
     logger.info(
-        "[GUIDE] worker complete guide_id=%s challenges=%d",
+        "[GUIDE] worker complete guide_id=%s challenges=%d group_id=%s",
         guide_id,
         len(parsed.recommended_challenges),
+        prescription_group_id,
     )
 
 

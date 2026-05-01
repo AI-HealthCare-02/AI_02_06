@@ -9,12 +9,19 @@ import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/Header'
 import BottomNav from '@/components/layout/BottomNav'
 import EmptyState from '@/components/common/EmptyState'
-import api, { showError } from '@/lib/api'
+import { showError } from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
 import { useLifestyleGuide } from '@/contexts/LifestyleGuideContext'
 import { useChallenge, useChallengeStart, useChallengeCheck } from '@/contexts/ChallengeContext'
+import { usePrescriptionGroup } from '@/contexts/PrescriptionGroupContext'
 import StartChallengeModal from '@/components/common/StartChallengeModal'
+import PrescriptionPickerModal from '@/components/lifestyle/PrescriptionPickerModal'
+import SymptomLogForm from '@/components/lifestyle/SymptomLogForm'
 import toast from 'react-hot-toast'
+
+// "추천 챌린지 더 보기" 한도 — BE 와 동일 (LifestyleGuide.revealed_challenge_count
+// 의 최대값). 사용자에게는 "최대 15개" 카피로 노출.
+const MAX_REVEALED_CHALLENGES = 15
 
 // 가이드 생성 SSE / terminal error mapping 은 LifestyleGuideContext 로 이동 완료.
 
@@ -113,102 +120,7 @@ function summarizePrescribedRange(snapshot) {
   return first === last ? first : `${first} ~ ${last}`
 }
 
-// ── 증상 로그 폼 컴포넌트 ──────────────────────────────────────────────────────
-// '증상 트래킹' 탭에서만 렌더링되는 일일 증상 기록 입력 폼
-// - POST /api/v1/daily-logs 로 {profile_id, log_date, symptoms[], note} 전송
-// - 409 충돌 시 "오늘 기록이 이미 있습니다." 안내 (하루 1회 제한)
-function SymptomLogForm({ profileId, onSaved }) {
-  // 선택 가능한 증상 프리셋 태그 목록
-  const PRESET_SYMPTOMS = [
-    '어지러움', '두통', '구역질', '복통', '설사', '변비',
-    '피로감', '수면 장애', '식욕 부진', '발진', '심계항진',
-  ]
-
-  const [selected, setSelected] = useState([])
-  const [note, setNote] = useState('')
-  const [isSaving, setIsSaving] = useState(false)
-  const today = new Date().toISOString().split('T')[0]
-
-  // 프리셋 태그 토글: 선택된 항목이면 제거, 아니면 추가
-  const toggle = (symptom) => {
-    setSelected((prev) =>
-      prev.includes(symptom) ? prev.filter((s) => s !== symptom) : [...prev, symptom]
-    )
-  }
-
-  const handleSave = async () => {
-    if (!profileId) return
-    setIsSaving(true)
-    try {
-      await api.post('/api/v1/daily-logs', {
-        profile_id: profileId,
-        log_date: today,
-        symptoms: selected,
-        note: note || null,
-      })
-      toast.success('증상 기록이 저장되었습니다.')
-      setSelected([])
-      setNote('')
-      onSaved?.()
-    } catch (err) {
-      // 409: 당일 중복 기록 방지
-      if (err.response?.status === 409) {
-        showError('오늘 기록이 이미 있습니다.')
-      } else {
-        showError('저장에 실패했습니다.')
-      }
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  return (
-    <div className="mt-4 space-y-4">
-      <div>
-        <p className="text-xs font-bold text-gray-500 mb-2">오늘의 증상 선택</p>
-        <div className="flex flex-wrap gap-2">
-          {PRESET_SYMPTOMS.map((s) => (
-            <button
-              key={s}
-              onClick={() => toggle(s)}
-              className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${
-                selected.includes(s)
-                  ? 'bg-orange-500 text-white border-orange-500'
-                  : 'bg-white text-gray-500 border-gray-200 hover:border-orange-300'
-              }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <p className="text-xs font-bold text-gray-500 mb-1">메모 (선택)</p>
-        <textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="오늘 몸 상태를 자유롭게 적어보세요"
-          maxLength={512}
-          rows={3}
-          className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:border-orange-300"
-        />
-      </div>
-
-      <button
-        onClick={handleSave}
-        disabled={isSaving}
-        className={`w-full py-3 rounded-xl text-sm font-bold transition-colors ${
-          isSaving
-            ? 'bg-gray-100 text-gray-400 cursor-wait'
-            : 'bg-orange-500 text-white hover:bg-orange-600 cursor-pointer'
-        }`}
-      >
-        {isSaving ? '저장 중...' : '오늘 증상 기록하기'}
-      </button>
-    </div>
-  )
-}
+// ── 증상 로그 폼은 components/lifestyle/SymptomLogForm.jsx 로 추출됨 (PR-B 표준 폼) ──
 
 // ── 챌린지 배너 컴포넌트 ────────────────────────────────────────────────────────
 // 화면 하단에 고정되는 배너로, 현재 선택된 탭 카테고리에 해당하는 챌린지 1개를 표시
@@ -317,13 +229,20 @@ export default function LifestyleGuidePage() {
     isLoading: guidesLoading,
     generateGuide,
     deleteGuide,
+    revealMoreChallenges,
   } = useLifestyleGuide()
   const { challengesByGuide } = useChallenge()
+  // 처방전 그룹 list — "+ 새 가이드" 차단 / 모달 후보 list 의 SSOT.
+  const { groups: prescriptionGroups, isLoading: groupsLoading } = usePrescriptionGroup()
   // 챌린지 시작/체크 모두 hook 으로 단일 정책. 페이지는 derived 만 책임.
   const { startTarget, isStarting, requestStart, cancelStart, confirmStart } = useChallengeStart()
   const { checkingId, checkToday } = useChallengeCheck()
 
   const [isGenerating, setIsGenerating] = useState(false)
+  // "+ 새 가이드" 클릭 시 처방전 선택 모달 노출 여부.
+  const [isPickerOpen, setIsPickerOpen] = useState(false)
+  // 챌린지 더 보기 처리 중 중복 클릭 방지.
+  const [isRevealing, setIsRevealing] = useState(false)
   const [selectedGuide, setSelectedGuide] = useState(null)   // 현재 본문에 표시되는 가이드
   // 사용자가 칩으로 명시 선택한 가이드 id — set 되어 있으면 sticky.
   // null 일 때만 자동으로 latestGuide 를 따라간다 (auto-follow).
@@ -401,41 +320,58 @@ export default function LifestyleGuidePage() {
     (c) => c.category === activeTab && c.challenge_status !== 'DELETED'
   ) || null
 
-  // ── 가이드 생성 (RQ + SSE) ──
-  // 1) POST /api/v1/lifestyle-guides/generate → 즉시 202 + {id, status:'pending'}
-  // 2) pending placeholder 를 selectedGuide + guides 에 삽입 (스켈레톤 렌더 유도)
-  // 3) GET /lifestyle-guides/{id}/stream SSE 로 status 변화 수신
-  // 4) ready 도달 시 받은 payload 로 guides/selectedGuide 교체
-  // 5) terminal error 시 안내 + placeholder 제거
-  const handleGenerate = async () => {
+  // 처방전 그룹 list 중 *복용 중 약 1건 이상* 인 그룹만 가이드 생성 후보.
+  // 빈 list 면 "+ 새 가이드" 클릭 시 toast + /ocr 이동.
+  const eligibleGroups = (prescriptionGroups || []).filter((g) => g.has_active_medication)
+  const hasEligibleGroup = eligibleGroups.length > 0
+
+  // "+ 새 가이드" 버튼 클릭 — 처방전 0개면 toast + /ocr, 아니면 모달 오픈.
+  const handleClickNewGuide = () => {
     if (!profileId) {
       showError('프로필을 먼저 선택해주세요.')
       return
     }
     if (isGenerating) return
+    if (groupsLoading) return
+    if (!hasEligibleGroup) {
+      showError('처방전이 등록되어야 맞춤 가이드 생성이 가능합니다.')
+      router.push('/ocr')
+      return
+    }
+    setIsPickerOpen(true)
+  }
+
+  // ── 가이드 생성 (처방전 단위 RQ + SSE) ──
+  // 흐름: 모달에서 group 선택 -> POST /lifestyle-guides/generate?group_id=...
+  //       -> 즉시 202 + pending guide_id (또는 dedupe hit 시 ready)
+  //       -> Context 가 placeholder 삽입 + SSE update + ready 시 챌린지 sync
+  const handleConfirmPickGroup = async (prescriptionGroupId) => {
+    setIsPickerOpen(false)
+    if (isGenerating) return
     setIsGenerating(true)
-    // 새 가이드 생성 시 auto-follow 모드로 회귀 — ready 도달 시 자동 본문 전환
     setUserPickedGuideId(null)
     const abortController = new AbortController()
     try {
-      // Context 의 generateGuide 가 placeholder 삽입 + SSE update + ready 자동 처리.
-      // 사용자가 생성 중 placeholder 를 직접 삭제한 경우 result === null 로 silent.
-      const result = await generateGuide(profileId, abortController.signal)
+      const result = await generateGuide(profileId, prescriptionGroupId, abortController.signal)
       if (!result) return
       if (result.deduped) {
-        toast.success('동일 처방전 가이드가 이미 있어 그대로 보여드려요.')
+        toast.success('동일 처방전 + 건강정보 가이드가 이미 있어 그대로 보여드려요.')
       } else {
         toast.success('새 가이드가 생성되었습니다!')
       }
     } catch (err) {
-      // BE 409 + detail.code=NO_ACTIVE_MEDICATIONS → 토스트 + 처방전 등록 페이지 자동 이동
       const detail = err.response?.data?.detail
+      // BE 409: 그룹 active 약 0건 → 처방전 페이지 이동 안내
       if (err.response?.status === 409 && detail?.code === 'NO_ACTIVE_MEDICATIONS') {
-        showError(detail.message || '처방전이 등록되어야 맞춤 가이드 생성이 가능합니다.')
-        router.push(detail.redirect_to || '/ocr')
+        showError(detail.message || '이 처방전엔 복용 중인 약이 없어 가이드를 만들 수 없어요.')
+        router.push(detail.redirect_to || '/medication')
         return
       }
-      showError(err.parsed?.message || err.message || '가이드 생성에 실패했습니다. 잠시 후 다시 시도해주세요.')
+      showError(
+        err.parsed?.message ||
+          err.message ||
+          '가이드 생성에 실패했습니다. 잠시 후 다시 시도해주세요.',
+      )
     } finally {
       abortController.abort()
       setIsGenerating(false)
@@ -513,7 +449,7 @@ export default function LifestyleGuidePage() {
             {isGenerating ? '🤖 AI가 분석 중입니다...' : ''}
           </p>
           <button
-            onClick={handleGenerate}
+            onClick={handleClickNewGuide}
             disabled={isGenerating || !profileId}
             className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
               isGenerating || !profileId
@@ -530,11 +466,20 @@ export default function LifestyleGuidePage() {
           <>
             <EmptyState
               title="아직 생활습관 가이드가 없어요"
-              message="위 버튼을 눌러 AI 맞춤 가이드를 받아보세요"
+              message={
+                hasEligibleGroup
+                  ? '위 버튼을 눌러 AI 맞춤 가이드를 받아보세요'
+                  : '처방전을 먼저 등록하면 맞춤 가이드를 받을 수 있어요'
+              }
             />
-            <p className="text-center text-sm font-bold text-red-500 -mt-2">
-              처방전이 등록되어야 맞춤 가이드 생성이 됩니다
-            </p>
+            {!hasEligibleGroup && !groupsLoading && (
+              <button
+                onClick={() => router.push('/ocr')}
+                className="mx-auto block px-5 py-2.5 rounded-xl text-sm font-bold bg-gray-900 text-white hover:bg-gray-700 cursor-pointer"
+              >
+                처방전 등록하러 가기
+              </button>
+            )}
           </>
         )}
 
@@ -720,9 +665,58 @@ export default function LifestyleGuidePage() {
             </div>
 
             {/* 이 가이드의 전체 챌린지 목록 (배너 외) */}
-            {guideChallenges.length > 0 && (
+            {guideChallenges.length > 0 && (() => {
+              // BE 가 한 번에 만들어둔 15개 중 사용자에게 노출된 수.
+              // 응답에 필드가 없는 옛 row(DB 마이그레이션 #26 이전) 는 5 로 fallback.
+              const revealed = selectedGuide.revealed_challenge_count ?? 5
+              const reachedLimit = revealed >= MAX_REVEALED_CHALLENGES
+              return (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-50 p-4">
-                <p className="text-xs font-bold text-gray-400 mb-3">🎯 이 가이드에서 생성된 챌린지</p>
+                <div className="flex items-center justify-between mb-3 gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-gray-400">🎯 이 가이드에서 생성된 챌린지</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5 break-keep">
+                      한 가이드에서 최대 {MAX_REVEALED_CHALLENGES}개까지 추천받을 수 있어요 ({revealed}/{MAX_REVEALED_CHALLENGES})
+                    </p>
+                  </div>
+                  {!isViewingHistory && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (isRevealing) return
+                        if (reachedLimit) {
+                          showError(`더 이상 추천받을 수 없어요. 최대 ${MAX_REVEALED_CHALLENGES}개까지 추천받을 수 있어요.`)
+                          return
+                        }
+                        setIsRevealing(true)
+                        try {
+                          await revealMoreChallenges(selectedGuide.id)
+                          toast.success('추천 챌린지 5개를 추가로 보여드려요!')
+                        } catch (err) {
+                          const detail = err.response?.data?.detail
+                          if (err.response?.status === 409 && detail?.code === 'REVEAL_LIMIT_REACHED') {
+                            showError(detail.message || `최대 ${MAX_REVEALED_CHALLENGES}개까지 추천받을 수 있어요.`)
+                          } else {
+                            showError('챌린지 더 보기를 처리하지 못했어요. 잠시 후 다시 시도해주세요.')
+                          }
+                        } finally {
+                          setIsRevealing(false)
+                        }
+                      }}
+                      disabled={reachedLimit || isRevealing}
+                      title={reachedLimit ? `최대 ${MAX_REVEALED_CHALLENGES}개까지 추천받을 수 있어요.` : undefined}
+                      className={`shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border transition-colors ${
+                        reachedLimit
+                          ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                          : isRevealing
+                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-wait'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 cursor-pointer'
+                      }`}
+                    >
+                      {isRevealing ? '...' : '추천 챌린지 더 보기'}
+                    </button>
+                  )}
+                </div>
                 <div className="space-y-2">
                   {isLoadingChallenges ? (
                     <div className="animate-pulse space-y-2">
@@ -799,7 +793,8 @@ export default function LifestyleGuidePage() {
                   )}
                 </div>
               </div>
-            )}
+              )
+            })()}
           </>
         )}
       </div>
@@ -817,6 +812,15 @@ export default function LifestyleGuidePage() {
           onConfirm={handleConfirmStart}
           onClose={cancelStart}
           isLoading={isStarting}
+        />
+      )}
+
+      {/* ── 처방전 선택 모달 ("+ 새 가이드" 클릭 시) ── */}
+      {isPickerOpen && (
+        <PrescriptionPickerModal
+          onConfirm={handleConfirmPickGroup}
+          onClose={() => setIsPickerOpen(false)}
+          isLoading={isGenerating}
         />
       )}
     </main>

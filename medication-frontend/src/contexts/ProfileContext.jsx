@@ -1,8 +1,24 @@
 'use client'
 
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+// Profile 도메인 — TanStack Query adapter (PR-B 마이그레이션).
+//
+// 외부 API 시그니처 100% 호환:
+//   profiles, selectedProfile, selectedProfileId, isLoading,
+//   updateProfile, createProfile, deleteProfile,
+//   setSelectedProfileId, refetchProfiles, RELATION_LABELS, RELATION_GENDER_DEFAULT.
+//
+// 변경 핵심:
+// - list GET 을 useQuery 로 교체 (staleTime 5분 — 거의 안 바뀜).
+// - mutation 은 useMutation, onSuccess 에서 list cache 직접 patch.
+// - profile 삭제 시 그 profile 의 prescription-groups / lifestyle-guides /
+//   challenges 캐시 invalidate (BE cascade 와 동기화).
+
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+
 import api from '@/lib/api'
+import { qk, STALE } from '@/queries/keys'
 
 const ProfileContext = createContext(null)
 
@@ -33,126 +49,127 @@ export const RELATION_GENDER_DEFAULT = {
   WIFE: 'FEMALE',
 }
 
-/**
- * Profile 단일 진실 (single source of truth).
- *
- * 두 갱신 경로:
- *  1) BE 응답 기반 — updateProfile / createProfile / deleteProfile
- *     mutation 함수가 응답을 받자마자 setProfiles 로 in-place 갱신.
- *     별도 refetch 없음.
- *  2) FE 동작 기반 — setSelectedProfileId
- *     사용자 UI 조작 (드롭다운 선택 등) 시 네트워크 호출 없이 바로 변경.
- *
- * selectedProfileId 정합성은 profiles 변경 시 useEffect 가 자동 처리.
- * (삭제된 프로필이 selected 였다면 SELF 로 fallback)
- */
 export function ProfileProvider({ children }) {
   const pathname = usePathname()
   const isPublic = PUBLIC_PATHS.includes(pathname) || pathname.startsWith('/auth/')
+  const qc = useQueryClient()
 
-  const [profiles, setProfiles] = useState([])
   const [selectedProfileId, setSelectedProfileIdState] = useState(null)
-  const [isLoading, setIsLoading] = useState(true)
 
-  // ── 초기 로드 (첫 mount 1회) ─────────────────────────────────
-  const fetchProfiles = useCallback(async () => {
-    try {
-      const res = await api.get('/api/v1/profiles')
-      setProfiles(res.data || [])
-    } catch (err) {
-      console.error('프로필 조회 실패:', err)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
+  // ── 1) list query ─────────────────────────────────────────────────
+  // public path 에서는 enabled=false → fetch 0회 (인증 없는 라우트에서 401 노이즈 방지).
+  const listQuery = useQuery({
+    queryKey: qk.profile.list(),
+    enabled: !isPublic,
+    staleTime: STALE.profile,
+    queryFn: async () => {
+      const { data } = await api.get('/api/v1/profiles')
+      return data || []
+    },
+  })
+  const profiles = listQuery.data || []
+  // 첫 로드 + public path 모두에서 일관된 isLoading.
+  const isLoading = isPublic ? false : listQuery.isLoading
 
-  useEffect(() => {
-    if (isPublic) {
-      setIsLoading(false)
-      return
-    }
-    fetchProfiles()
-  }, [isPublic, fetchProfiles])
-
-  // ── selectedProfileId 정합성 자동 검증 ──────────────────────────
-  // profiles 가 바뀔 때마다 (fetch / 추가 / 삭제 등) 자동으로 검증·정리.
+  // ── selectedProfileId 정합성 자동 검증 ────────────────────────────
   useEffect(() => {
     if (profiles.length === 0) {
       if (selectedProfileId !== null) {
         setSelectedProfileIdState(null)
-        localStorage.removeItem(STORAGE_KEY)
+        if (typeof window !== 'undefined') localStorage.removeItem(STORAGE_KEY)
       }
       return
     }
-    // 현재 selected 가 유효하면 유지
-    if (selectedProfileId && profiles.find(p => p.id === selectedProfileId)) return
-    // localStorage 의 saved 가 유효하면 복원
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved && profiles.find(p => p.id === saved)) {
+    if (selectedProfileId && profiles.find((p) => p.id === selectedProfileId)) return
+    const saved = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null
+    if (saved && profiles.find((p) => p.id === saved)) {
       setSelectedProfileIdState(saved)
       return
     }
-    // fallback: SELF 또는 첫 프로필
-    const fallback = profiles.find(p => p.relation_type === 'SELF') || profiles[0]
+    const fallback = profiles.find((p) => p.relation_type === 'SELF') || profiles[0]
     setSelectedProfileIdState(fallback.id)
-    localStorage.setItem(STORAGE_KEY, fallback.id)
+    if (typeof window !== 'undefined') localStorage.setItem(STORAGE_KEY, fallback.id)
   }, [profiles, selectedProfileId])
 
-  // ── 경로 1: BE 응답 기반 mutation ────────────────────────────
-  // 모두 응답 데이터로 setProfiles 직접 갱신 — refetch 없음.
+  // ── 2) mutations — 응답으로 cache 직접 patch ──────────────────────
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, patch }) => {
+      const { data } = await api.patch(`/api/v1/profiles/${id}`, patch)
+      return data
+    },
+    onSuccess: (updated) => {
+      qc.setQueryData(qk.profile.list(), (prev = []) =>
+        prev.map((p) => (p.id === updated.id ? updated : p)),
+      )
+      qc.setQueryData(qk.profile.detail(updated.id), updated)
+    },
+  })
 
-  const updateProfile = useCallback(async (id, patch) => {
-    const { data: updated } = await api.patch(`/api/v1/profiles/${id}`, patch)
-    setProfiles(prev => prev.map(p => (p.id === id ? updated : p)))
-    return updated
-  }, [])
+  const createMutation = useMutation({
+    mutationFn: async (input) => {
+      const { data } = await api.post('/api/v1/profiles', input)
+      return data
+    },
+    onSuccess: (created) => {
+      qc.setQueryData(qk.profile.list(), (prev = []) => [...prev, created])
+    },
+  })
 
-  const createProfile = useCallback(async (input) => {
-    const { data: created } = await api.post('/api/v1/profiles', input)
-    setProfiles(prev => [...prev, created])
-    return created
-  }, [])
+  const deleteMutation = useMutation({
+    mutationFn: async (id) => {
+      const target = profiles.find((p) => p.id === id)
+      if (target?.relation_type === 'SELF') {
+        throw new Error('본인 프로필은 삭제할 수 없습니다. 계정 탈퇴 메뉴를 이용해주세요.')
+      }
+      await api.delete(`/api/v1/profiles/${id}`)
+      return id
+    },
+    onSuccess: (id) => {
+      qc.setQueryData(qk.profile.list(), (prev = []) => prev.filter((p) => p.id !== id))
+      qc.removeQueries({ queryKey: qk.profile.detail(id) })
+      // BE cascade — 그 profile 의 처방전 / medication / 가이드 / 챌린지 / 챗 / OCR 까지 정리됨.
+      qc.invalidateQueries({ queryKey: qk.prescriptionGroups.all() })
+      qc.invalidateQueries({ queryKey: qk.medications.all() })
+      qc.invalidateQueries({ queryKey: qk.lifestyleGuides.all() })
+      qc.invalidateQueries({ queryKey: qk.challenges.all() })
+      qc.invalidateQueries({ queryKey: qk.chatSessions.all() })
+      qc.invalidateQueries({ queryKey: qk.ocrDraft.all() })
+      qc.invalidateQueries({ queryKey: qk.dailyLogs.all() })
+    },
+  })
 
-  const deleteProfile = useCallback(async (id) => {
-    // SELF 프로필은 계정 자체와 묶여 있어 삭제 금지 (가족 관리 카드에서 잘못
-    // 호출되어도 사전 차단). 계정 탈퇴는 별도 mypage flow 사용.
-    const target = profiles.find(p => p.id === id)
-    if (target?.relation_type === 'SELF') {
-      throw new Error('본인 프로필은 삭제할 수 없습니다. 계정 탈퇴 메뉴를 이용해주세요.')
-    }
-    await api.delete(`/api/v1/profiles/${id}`)
-    setProfiles(prev => prev.filter(p => p.id !== id))
-    // selectedId 정합성은 위 useEffect 가 자동 처리
-  }, [profiles])
-
-  // ── 경로 2: FE 동작 기반 ─────────────────────────────────────
+  // 외부 호환 API.
+  const updateProfile = useCallback(
+    (id, patch) => updateMutation.mutateAsync({ id, patch }),
+    [updateMutation],
+  )
+  const createProfile = useCallback((input) => createMutation.mutateAsync(input), [createMutation])
+  const deleteProfile = useCallback((id) => deleteMutation.mutateAsync(id), [deleteMutation])
+  const refetchProfiles = useCallback(() => listQuery.refetch(), [listQuery])
 
   const setSelectedProfileId = useCallback((id) => {
     setSelectedProfileIdState(id)
-    localStorage.setItem(STORAGE_KEY, id)
+    if (typeof window !== 'undefined') localStorage.setItem(STORAGE_KEY, id)
   }, [])
 
   // ── computed ───────────────────────────────────────────────
-  const selectedProfile = profiles.find(p => p.id === selectedProfileId) || null
+  const selectedProfile = profiles.find((p) => p.id === selectedProfileId) || null
 
   return (
-    <ProfileContext.Provider value={{
-      // 읽기
-      profiles,
-      selectedProfile,
-      selectedProfileId,
-      isLoading,
-      // 경로 1 (BE 응답 기반 mutation — 응답 후 자동 state 갱신)
-      updateProfile,
-      createProfile,
-      deleteProfile,
-      // 경로 2 (FE 동작 기반)
-      setSelectedProfileId,
-      // 비상용 (full refetch)
-      refetchProfiles: fetchProfiles,
-      // 라벨
-      RELATION_LABELS,
-    }}>
+    <ProfileContext.Provider
+      value={{
+        profiles,
+        selectedProfile,
+        selectedProfileId,
+        isLoading,
+        updateProfile,
+        createProfile,
+        deleteProfile,
+        setSelectedProfileId,
+        refetchProfiles,
+        RELATION_LABELS,
+      }}
+    >
       {children}
     </ProfileContext.Provider>
   )

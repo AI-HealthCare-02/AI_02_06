@@ -10,10 +10,12 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Search, X, ChevronRight, Plus, Building2, Calendar, Hospital } from 'lucide-react'
+import { Search, X, ChevronRight, Plus, Building2, Calendar, Hospital, Trash2 } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 import BottomNav from '@/components/layout/BottomNav'
 import EmptyState from '@/components/common/EmptyState'
+import { showError } from '@/lib/api'
 import {
   PRESCRIPTION_SORT,
   PRESCRIPTION_STATUS,
@@ -50,7 +52,7 @@ function GroupCardSkeleton() {
   )
 }
 
-function PrescriptionCard({ group, onClick }) {
+function PrescriptionCard({ group, onClick, onDelete, isDeleting }) {
   const dateLabel = formatDate(group.dispensed_date)
   const hospital = group.hospital_name || '병원 미상'
   const dept = group.department || '진료과 미상'
@@ -58,11 +60,26 @@ function PrescriptionCard({ group, onClick }) {
   const statusStyle = group.has_active_medication
     ? 'bg-blue-50 text-blue-600 border-blue-100'
     : 'bg-gray-100 text-gray-500 border-gray-200'
+
+  // 카드 전체를 <button> 으로 두면 그 안에 삭제 <button> 을 넣을 수 없다 (nested button
+  // HTML 위반). 카드 wrapper 는 div role="button" + keyboard handler 로 대체.
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      onClick()
+    }
+  }
+
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
-      className="w-full text-left bg-white rounded-2xl border border-gray-100 hover:border-gray-300 transition-colors p-4 flex items-center gap-3 cursor-pointer"
+      onKeyDown={handleKeyDown}
+      aria-busy={isDeleting || undefined}
+      className={`w-full text-left bg-white rounded-2xl border border-gray-100 hover:border-gray-300 transition-colors p-4 flex items-center gap-3 cursor-pointer ${
+        isDeleting ? 'opacity-50 pointer-events-none' : ''
+      }`}
     >
       <div className="flex-1 min-w-0 space-y-1.5">
         <div className="flex items-center gap-2 text-xs">
@@ -82,8 +99,26 @@ function PrescriptionCard({ group, onClick }) {
           <span className="text-[11px] text-gray-400">약 {group.medications_count}개</span>
         </div>
       </div>
+
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          onDelete()
+        }}
+        disabled={isDeleting}
+        title="처방전 삭제"
+        aria-label="처방전 삭제"
+        className={`shrink-0 w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
+          isDeleting
+            ? 'text-gray-300 cursor-wait'
+            : 'text-gray-300 hover:text-red-500 hover:bg-red-50 cursor-pointer'
+        }`}
+      >
+        <Trash2 size={16} />
+      </button>
       <ChevronRight size={18} className="text-gray-300 shrink-0" />
-    </button>
+    </div>
   )
 }
 
@@ -100,11 +135,40 @@ export default function MedicationPage() {
     setSearch,
     setStatusFilter,
     refetchGroups,
+    deleteGroup,
   } = usePrescriptionGroup()
+  // 처방전 그룹 mutation 의 onSuccess 가 가이드/챌린지 도메인 키를 함께 invalidate
+  // 하므로 호출자 측에서 refetchGuides / refetchChallenges 를 부를 필요 없음.
 
   // 검색 input toggle + 입력 버퍼 (즉시 적용보다 사용자 경험 위해 enter 또는 blur 시 적용)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [searchDraft, setSearchDraft] = useState('')
+  // 삭제 중 카드 비활성용 — 동시 클릭 방지.
+  const [deletingId, setDeletingId] = useState(null)
+
+  // 처방전 삭제 — confirm 후 deleteGroup. BE 가 그룹 + medication + 가이드 cascade 처리.
+  // 챌린지는 가이드 cascade 정책에 따라 활성/완료는 보존, 미시작은 soft delete.
+  const handleDeleteGroup = async (group) => {
+    const dateLabel = group.dispensed_date ? formatDate(group.dispensed_date) : '이 처방전'
+    const hospitalLabel = group.hospital_name ? ` · ${group.hospital_name}` : ''
+    const ok = window.confirm(
+      `${dateLabel}${hospitalLabel} 처방전을 삭제할까요?\n\n` +
+        '이 처방전의 약품과 연결된 가이드도 함께 정리됩니다.\n' +
+        '진행 중·완료된 챌린지는 그대로 보존됩니다.',
+    )
+    if (!ok) return
+    setDeletingId(group.id)
+    try {
+      await deleteGroup(group.id)
+      toast.success('처방전이 삭제되었습니다. 연결된 가이드도 정리됐어요.')
+    } catch (err) {
+      if (err.response?.status !== 401) {
+        showError(err.parsed?.message || '처방전 삭제에 실패했습니다.')
+      }
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   useEffect(() => {
     setSearchDraft(search)
@@ -240,6 +304,8 @@ export default function MedicationPage() {
                 key={g.id}
                 group={g}
                 onClick={() => router.push(`/medication/groups/${g.id}`)}
+                onDelete={() => handleDeleteGroup(g)}
+                isDeleting={deletingId === g.id}
               />
             ))}
           </div>

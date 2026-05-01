@@ -96,6 +96,16 @@ class LifestyleGuide(models.Model):
         description="SHA-256 hex of canonical input (medications + survey + prompt_ver)",
     )
 
+    # 가이드 생성 시 LLM 으로 한 번에 15개 챌린지를 받아 DB 에 저장하고,
+    # 사용자에게는 5개씩 점진 노출. 이 컬럼은 *현재까지 노출한 챌린지 수*.
+    # 초기값 5 (가이드 ready 시점에 첫 5개 노출 상태). "추천 챌린지 더 보기"
+    # 클릭 시 +5 (단일 UPDATE, LLM 호출 X). 15 도달 시 더 이상 더보기 불가.
+    # — 이 정책은 LLM 비용 절감 + 챌린지 일관성 보존 목적.
+    revealed_challenge_count = fields.IntField(
+        default=5,
+        description="현재까지 사용자에게 노출한 챌린지 개수 (5 → 10 → 15)",
+    )
+
     created_at = fields.DatetimeField(auto_now_add=True)
     processed_at = fields.DatetimeField(null=True, description="Terminal-status set time")
 

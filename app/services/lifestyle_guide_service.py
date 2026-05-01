@@ -34,37 +34,51 @@ from app.models.medication import Medication
 from app.repositories.challenge_repository import ChallengeRepository
 from app.repositories.lifestyle_guide_repository import LifestyleGuideRepository
 from app.repositories.medication_repository import MedicationRepository
+from app.repositories.prescription_group_repository import PrescriptionGroupRepository
 from app.repositories.profile_repository import ProfileRepository
 
 logger = logging.getLogger(__name__)
 
 _GUIDE_JOB_REF = "ai_worker.domains.lifestyle.jobs.process_lifestyle_guide_task"
 
+# 가이드 생성 시 LLM 으로 한 번에 받아 DB 에 저장하는 챌린지 총 개수.
+# 사용자에겐 5개씩 점진 노출 — `revealed_challenge_count` 가 5 → 10 → 15 으로
+# 증가. 매 "더 보기" 클릭은 단일 UPDATE 만 발생, LLM 호출 0회.
+_TOTAL_CHALLENGES = 15
+_REVEAL_STEP = 5
+
 # SSE long-polling — nginx default proxy_read_timeout(60s) 안에 close
 _STREAM_MAX_SECONDS = 50
 _STREAM_TICK_SECONDS = 0.5
 
-# 프롬프트 / 분배 규칙 변경 시 bump — 기존 ready 가이드 fingerprint 가 stale
-# 처리되어 새 LLM 호출이 강제된다. 본 사이클에서 1일 챌린지 강제 + 일관성
-# instruction 도입하며 v2 로 bump.
-_GUIDE_PROMPT_VERSION = "v2"
+# 프롬프트 / 분배 규칙 / fingerprint 입력 변경 시 bump — 기존 ready 가이드의
+# fingerprint 가 stale 처리되어 새 LLM 호출 강제된다.
+# v2: 1일 챌린지 강제 + 일관성 instruction (Phase B 도입 시점)
+# v3: 처방전 그룹 단위 + health_survey fingerprint 합산 + 챌린지 15개 한 번에 생성
+#     (사용자 점진 노출 정책). 카테고리는 5개 유지 (symptom = 예상 증상/모니터링).
+_GUIDE_PROMPT_VERSION = "v3"
 
 
-def _compute_input_fingerprint(snapshot: list[dict]) -> str:
-    """가이드 입력 fingerprint — 동일 입력 dedupe 키.
-
-    현재는 약물 set (medicine_name 정렬) + 프롬프트 버전만 사용.
-    추후 설문조사가 프롬프트에 들어가면 canonical 설문 JSON 도 합산.
+def _compute_input_fingerprint(snapshot: list[dict], health_survey: dict | None) -> str:
+    """가이드 입력 fingerprint — 같은 (약물 set + 건강정보) 면 같은 가이드.
 
     Args:
-        snapshot: medication snapshot dict list (LLM 프롬프트 입력과 동일 source).
+        snapshot: medication snapshot dict list (해당 처방전 그룹의 active meds).
+        health_survey: ``Profile.health_survey`` JSONField 의 dict 값 (또는 None).
+            나이/성별/알레르기/운동/흡연/키/몸무게/기저질환 등 사용자가 입력한
+            모든 키가 dedupe 키에 영향. 사용자가 설문 한 필드라도 수정하면
+            fingerprint 가 달라져 새 가이드를 받을 수 있다.
 
     Returns:
-        SHA-256 hex (64 chars) — DB 저장 + 동등 비교 용.
+        SHA-256 hex (64 chars).
     """
     names = sorted((m.get("medicine_name") or "") for m in snapshot)
     payload = json.dumps(
-        {"prompt_ver": _GUIDE_PROMPT_VERSION, "medications": names},
+        {
+            "prompt_ver": _GUIDE_PROMPT_VERSION,
+            "medications": names,
+            "health": health_survey or {},
+        },
         ensure_ascii=False,
         sort_keys=True,
     )
@@ -97,51 +111,74 @@ class LifestyleGuideService:
         self.guide_repo = LifestyleGuideRepository()
         self.challenge_repo = ChallengeRepository()
         self.profile_repo = ProfileRepository()
+        self.prescription_group_repo = PrescriptionGroupRepository()
 
         redis_url = os.environ.get("REDIS_URL", "redis://redis:6379")
         self._queue = Queue("ai", connection=make_sync_redis(redis_url))
 
-    # ── 가이드 생성 (RQ producer + Phase B dedupe) ─────────────────────────
-    # 흐름: 활성 약물 조회 -> snapshot 직렬화 -> input fingerprint 계산
+    # ── 가이드 생성 (RQ producer + 처방전 단위 + 건강정보 fingerprint dedupe) ──
+    # 흐름: 처방전 그룹 검증 -> 그 group 의 active medications + Profile.health_survey
+    #       -> fingerprint = sha256(약물 + 건강정보 + 프롬프트버전)
     #       -> 동일 fingerprint ready 가이드 존재 시 즉시 그것 반환 (LLM 호출 X)
-    #       -> 없으면 pending row INSERT + RQ enqueue -> pending guide 반환
-    async def enqueue_guide_generation(self, profile_id: UUID) -> LifestyleGuide:
-        """활성 약물을 snapshot 으로 묶어 pending guide + RQ task 를 등록.
+    #       -> 없으면 pending row INSERT (prescription_group_id 채움) + RQ enqueue
+    async def enqueue_guide_generation(
+        self,
+        profile_id: UUID,
+        prescription_group_id: UUID,
+    ) -> LifestyleGuide:
+        """처방전 그룹 단위로 가이드 생성을 등록한다.
 
-        같은 입력 fingerprint 의 ready 가이드가 이미 있으면 그것을 그대로
-        반환하여 LLM 호출 없이 즉시 동일 가이드를 응답한다 (Phase B dedupe).
+        같은 (그룹의 약물 set + Profile 건강정보) 면 같은 fingerprint → 기존
+        ready 가이드 즉시 반환 (LLM 호출 X). 다르면 pending row 만들고 RQ enqueue.
 
         Args:
-            profile_id: 가이드 받을 프로필 UUID.
+            profile_id: 가이드 소유 프로필.
+            prescription_group_id: 가이드를 만들 처방전 그룹.
 
         Returns:
             ``LifestyleGuide``. 신규 enqueue 시 status='pending', dedupe hit
-            시 status='ready'. 프론트는 status 보고 SSE 연결 / 즉시 표시 결정.
+            시 status='ready'.
 
         Raises:
-            HTTPException 409: 활성 약물(복용 중 처방약) 미등록 시.
+            HTTPException 404/403: 그룹 존재 X / 소유자 불일치.
+            HTTPException 409 (NO_ACTIVE_MEDICATIONS): 그룹에 active 약 없음.
         """
-        meds = await self.medication_repo.get_active_by_profile(profile_id)
+        group = await self.prescription_group_repo.get_by_id(prescription_group_id)
+        if not group:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Prescription group not found.",
+            )
+        if str(group.profile_id) != str(profile_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied to this prescription group.",
+            )
+
+        meds = await self.medication_repo.get_active_by_prescription_group(prescription_group_id)
         if not meds:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
                     "code": "NO_ACTIVE_MEDICATIONS",
-                    "message": "처방전이 등록되어야 맞춤 가이드 생성이 가능합니다. 처방전을 먼저 등록해주세요.",
-                    "redirect_to": "/ocr",
+                    "message": "이 처방전엔 복용 중인 약이 없어 가이드를 만들 수 없어요.",
+                    "redirect_to": "/medication",
                 },
             )
 
-        snapshot = [_med_to_dict(m) for m in meds]
-        fingerprint = _compute_input_fingerprint(snapshot)
+        profile = await self.profile_repo.get_by_id(profile_id)
+        health_survey = profile.health_survey if profile else None
 
-        # Phase B dedupe — 같은 입력의 ready 가이드가 있으면 그것을 즉시 반환
+        snapshot = [_med_to_dict(m) for m in meds]
+        fingerprint = _compute_input_fingerprint(snapshot, health_survey)
+
         existing = await self.guide_repo.get_ready_by_fingerprint(profile_id, fingerprint)
         if existing is not None:
             logger.info(
-                "[GUIDE] dedupe hit guide_id=%s profile_id=%s fingerprint=%s",
+                "[GUIDE] dedupe hit guide_id=%s profile_id=%s group_id=%s fingerprint=%s",
                 existing.id,
                 profile_id,
+                prescription_group_id,
                 fingerprint[:12],
             )
             return existing
@@ -150,12 +187,14 @@ class LifestyleGuideService:
             profile_id=profile_id,
             medication_snapshot=snapshot,
             input_fingerprint=fingerprint,
+            prescription_group_id=prescription_group_id,
         )
         self._queue.enqueue(_GUIDE_JOB_REF, str(guide.id), str(profile_id))
         logger.info(
-            "[GUIDE] enqueued guide_id=%s profile_id=%s meds=%d fingerprint=%s",
+            "[GUIDE] enqueued guide_id=%s profile_id=%s group_id=%s meds=%d fingerprint=%s",
             guide.id,
             profile_id,
+            prescription_group_id,
             len(meds),
             fingerprint[:12],
         )
@@ -231,11 +270,21 @@ class LifestyleGuideService:
     async def enqueue_guide_with_owner_check(
         self,
         profile_id: UUID,
+        prescription_group_id: UUID,
         account_id: UUID,
     ) -> LifestyleGuide:
-        """생성 요청 — ownership 검증 후 enqueue. pending guide 반환."""
+        """생성 요청 — profile 소유 확인 후 처방전 단위 enqueue.
+
+        Args:
+            profile_id: 가이드 받을 프로필 UUID.
+            prescription_group_id: 가이드를 만들 처방전 그룹 UUID.
+            account_id: 인증된 호출자 계정 UUID.
+
+        Returns:
+            ``LifestyleGuide`` — pending 또는 dedupe hit 의 ready.
+        """
         await self._verify_profile_ownership(profile_id, account_id)
-        return await self.enqueue_guide_generation(profile_id)
+        return await self.enqueue_guide_generation(profile_id, prescription_group_id)
 
     async def get_guide_with_owner_check(self, guide_id: UUID, account_id: UUID) -> LifestyleGuide:
         """Fetch one guide with ownership check.
@@ -340,6 +389,63 @@ class LifestyleGuideService:
             await self._cascade_delete_guide(g)
         return len(guides)
 
+    # ── "추천 챌린지 더 보기" (LLM 호출 X — 단일 UPDATE) ───────────────────
+    # 흐름: ownership 확인 -> ready 검증 -> revealed < 15 검증
+    #       -> revealed_challenge_count += 5 (단일 UPDATE) -> 갱신된 가이드 반환
+    # 정책: 가이드 생성 시 LLM 으로 한 번에 15개를 받아 DB 저장. 사용자에게는
+    #       5개씩 점진 노출. "더 보기" 는 노출 카운트만 늘리므로 비용 0,
+    #       챌린지 일관성 보존, 한도 검증 단순.
+    async def reveal_more_challenges_with_owner_check(
+        self,
+        guide_id: UUID,
+        account_id: UUID,
+    ) -> LifestyleGuide:
+        """가이드의 노출 챌린지 수를 5개 더 늘려 반환 (LLM 호출 없음).
+
+        Args:
+            guide_id: 대상 가이드 UUID.
+            account_id: 인증된 호출자 계정 UUID.
+
+        Returns:
+            ``LifestyleGuide`` — ``revealed_challenge_count`` 가 +5 된 상태.
+
+        Raises:
+            HTTPException 404/403: 가이드 미존재 / 소유자 불일치.
+            HTTPException 409 (GUIDE_NOT_READY): 가이드가 ready 상태가 아님.
+            HTTPException 409 (REVEAL_LIMIT_REACHED): 이미 15개 모두 노출됨.
+        """
+        guide = await self.get_guide_with_owner_check(guide_id, account_id)
+        if guide.status != LifestyleGuideStatus.READY.value:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "GUIDE_NOT_READY",
+                    "message": "가이드가 아직 준비되지 않아 추천을 더 받을 수 없어요.",
+                },
+            )
+        if guide.revealed_challenge_count >= _TOTAL_CHALLENGES:
+            limit_msg = f"더 이상 추천받을 수 없어요. 한 가이드에서 최대 {_TOTAL_CHALLENGES}개까지 추천받을 수 있어요."
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "REVEAL_LIMIT_REACHED",
+                    "message": limit_msg,
+                    "total": _TOTAL_CHALLENGES,
+                    "revealed": guide.revealed_challenge_count,
+                },
+            )
+        new_revealed = min(guide.revealed_challenge_count + _REVEAL_STEP, _TOTAL_CHALLENGES)
+        await self.guide_repo.set_revealed_challenge_count(guide.id, new_revealed)
+        guide.revealed_challenge_count = new_revealed
+        logger.info(
+            "[GUIDE] reveal more guide_id=%s account_id=%s revealed=%d/%d",
+            guide_id,
+            account_id,
+            new_revealed,
+            _TOTAL_CHALLENGES,
+        )
+        return guide
+
     async def get_guide_challenges_with_owner_check(
         self,
         guide_id: UUID,
@@ -347,12 +453,17 @@ class LifestyleGuideService:
     ) -> list[Challenge]:
         """List challenges associated with a guide after ownership check.
 
+        가이드에 연결된 챌린지는 LLM 으로 한 번에 15개가 만들어져 있고, 사용자가
+        본 메서드로 받는 list 는 ``guide.revealed_challenge_count`` (5/10/15) 만큼.
+        "추천 챌린지 더 보기" 가 카운트를 늘리면 다음 호출에서 더 많은 챌린지가
+        반환된다.
+
         Args:
             guide_id: Source guide UUID.
             account_id: Requesting account UUID.
 
         Returns:
-            Challenges linked to the guide (may be empty).
+            Challenges linked to the guide (앞 ``revealed_challenge_count`` 개).
 
         Raises:
             HTTPException: 404 if guide missing, 403 if owned by another account.
@@ -361,7 +472,10 @@ class LifestyleGuideService:
         if not guide:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lifestyle guide not found.")
         await self._verify_guide_ownership(guide, account_id)
-        return await self.challenge_repo.get_by_guide_id(guide.id)
+        return await self.challenge_repo.get_by_guide_id(
+            guide.id,
+            limit=guide.revealed_challenge_count,
+        )
 
 
 def _to_sse_payload(guide: LifestyleGuide) -> dict[str, Any]:
@@ -372,6 +486,7 @@ def _to_sse_payload(guide: LifestyleGuide) -> dict[str, Any]:
         "status": guide.status,
         "content": guide.content or {},
         "medication_snapshot": guide.medication_snapshot or [],
+        "revealed_challenge_count": getattr(guide, "revealed_challenge_count", 5),
         "created_at": guide.created_at.isoformat() if guide.created_at else None,
         "processed_at": guide.processed_at.isoformat() if guide.processed_at else None,
     }

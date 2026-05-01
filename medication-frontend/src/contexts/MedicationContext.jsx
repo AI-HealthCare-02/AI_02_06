@@ -1,123 +1,143 @@
 'use client'
 
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+// Medication 도메인 — TanStack Query adapter (PR-B 마이그레이션).
+//
+// 외부 API 시그니처 100% 호환:
+//   medications, activeMedications, completedMedications, isLoading,
+//   updateMedication, deleteMedication, deleteMedications, deactivateMedication,
+//   getDrugInfo, refetchMedications.
+//
+// 변경 핵심:
+// - list GET 을 useQuery (staleTime 30초, profile 전환 시 새 key 로 자동 refetch).
+// - drug-info 는 useQuery 캐시 (medication 별 query key) — 마운트 후 lazy fetch.
+// - mutation onSuccess 에서 list cache patch + prescription-groups 키 invalidate
+//   (active count 변화 → 그룹의 has_active_medication 라벨 동기화).
+
+import { createContext, useCallback, useContext } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+
 import api from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
+import { qk, STALE } from '@/queries/keys'
 
 const MedicationContext = createContext(null)
 
-/**
- * Medication 단일 진실.
- *
- * - 전체 medications 를 한 번 fetch 후 client-side filter 로 active/completed 분리.
- *   탭 전환 시 추가 GET 없음.
- * - selectedProfileId 변경 시 자동 refetch (Profile 전환 → 약 목록 자동 갱신).
- * - mutation (update / delete / deactivate) 은 응답으로 setMedications 직접 갱신.
- * - drug-info 는 별도 lazy cache. mutation 시 해당 id 의 drug-info 캐시 무효화.
- */
 export function MedicationProvider({ children }) {
   const { selectedProfileId } = useProfile()
-  const [medications, setMedications] = useState([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [drugInfoCache, setDrugInfoCache] = useState({})
+  const qc = useQueryClient()
 
-  const fetchMedications = useCallback(async (profileId) => {
-    if (!profileId) return
-    setIsLoading(true)
-    try {
-      const res = await api.get(`/api/v1/medications?profile_id=${profileId}`)
-      setMedications(res.data || [])
-    } catch (err) {
-      console.error('약품 조회 실패:', err)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
+  // ── 1) list query ─────────────────────────────────────────────────
+  const listQuery = useQuery({
+    queryKey: qk.medications.list(selectedProfileId),
+    enabled: !!selectedProfileId,
+    staleTime: STALE.medications,
+    queryFn: async () => {
+      const { data } = await api.get(`/api/v1/medications?profile_id=${selectedProfileId}`)
+      return data || []
+    },
+  })
+  const medications = listQuery.data || []
+  const isLoading = listQuery.isLoading
 
-  // profile 전환 → medications 자동 재로드 + drug-info 캐시 초기화
-  useEffect(() => {
-    if (!selectedProfileId) {
-      setMedications([])
-      setDrugInfoCache({})
-      return
-    }
-    fetchMedications(selectedProfileId)
-    setDrugInfoCache({})
-  }, [selectedProfileId, fetchMedications])
+  // ── 2) mutations ──────────────────────────────────────────────────
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, patch }) => {
+      const { data } = await api.patch(`/api/v1/medications/${id}`, patch)
+      return data
+    },
+    onSuccess: (updated, { id }) => {
+      qc.setQueryData(qk.medications.list(selectedProfileId), (prev = []) =>
+        prev.map((m) => (m.id === id ? updated : m)),
+      )
+      // medicine_name 변경 시 drug-info 도 stale → invalidate.
+      qc.invalidateQueries({ queryKey: qk.medications.detail(id) })
+      // active 변화 가능성 → prescription-groups 라벨 동기화.
+      qc.invalidateQueries({ queryKey: qk.prescriptionGroups.all() })
+    },
+  })
 
-  // ── 응답 기반 mutation ──────────────────────────────
-  const updateMedication = useCallback(async (id, patch) => {
-    const { data: updated } = await api.patch(`/api/v1/medications/${id}`, patch)
-    setMedications(prev => prev.map(m => (m.id === id ? updated : m)))
-    // medicine_name 등 변경 시 drug-info 도 stale → 무효화
-    setDrugInfoCache(prev => {
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
-    return updated
-  }, [])
+  const deleteMutation = useMutation({
+    mutationFn: async (id) => {
+      await api.delete(`/api/v1/medications/${id}`)
+      return id
+    },
+    onSuccess: (id) => {
+      qc.setQueryData(qk.medications.list(selectedProfileId), (prev = []) =>
+        prev.filter((m) => m.id !== id),
+      )
+      qc.removeQueries({ queryKey: qk.medications.detail(id) })
+      qc.invalidateQueries({ queryKey: qk.prescriptionGroups.all() })
+    },
+  })
 
-  const deleteMedication = useCallback(async (id) => {
-    await api.delete(`/api/v1/medications/${id}`)
-    setMedications(prev => prev.filter(m => m.id !== id))
-    setDrugInfoCache(prev => {
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
-  }, [])
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (ids) => {
+      await Promise.all(ids.map((id) => api.delete(`/api/v1/medications/${id}`)))
+      return ids
+    },
+    onSuccess: (ids) => {
+      const idSet = new Set(ids)
+      qc.setQueryData(qk.medications.list(selectedProfileId), (prev = []) =>
+        prev.filter((m) => !idSet.has(m.id)),
+      )
+      ids.forEach((id) => qc.removeQueries({ queryKey: qk.medications.detail(id) }))
+      qc.invalidateQueries({ queryKey: qk.prescriptionGroups.all() })
+    },
+  })
 
-  const deleteMedications = useCallback(async (ids) => {
-    await Promise.all(ids.map(id => api.delete(`/api/v1/medications/${id}`)))
-    const idSet = new Set(ids)
-    setMedications(prev => prev.filter(m => !idSet.has(m.id)))
-    setDrugInfoCache(prev => {
-      const next = { ...prev }
-      ids.forEach(id => delete next[id])
-      return next
-    })
-  }, [])
-
-  const deactivateMedication = useCallback(async (id) => {
-    return updateMedication(id, { is_active: false })
-  }, [updateMedication])
-
-  // ── drug-info lazy cache (LLM 결과, 컴포넌트 생명주기 초월) ────────
-  const getDrugInfo = useCallback(async (medId) => {
-    if (drugInfoCache[medId]) return drugInfoCache[medId]
-    const { data } = await api.get(`/api/v1/medications/${medId}/drug-info`)
-    setDrugInfoCache(prev => ({ ...prev, [medId]: data }))
-    return data
-  }, [drugInfoCache])
-
-  // ── computed selectors ──────────────────────────────
-  const activeMedications = medications.filter(m => m.is_active)
-  const completedMedications = medications.filter(m => !m.is_active)
-
-  // refetchMedications stable ref
-  const refetchMedications = useCallback(
-    () => fetchMedications(selectedProfileId),
-    [fetchMedications, selectedProfileId],
+  // 외부 호환 API.
+  const updateMedication = useCallback(
+    (id, patch) => updateMutation.mutateAsync({ id, patch }),
+    [updateMutation],
+  )
+  const deleteMedication = useCallback((id) => deleteMutation.mutateAsync(id), [deleteMutation])
+  const deleteMedications = useCallback(
+    (ids) => bulkDeleteMutation.mutateAsync(ids),
+    [bulkDeleteMutation],
+  )
+  const deactivateMedication = useCallback(
+    (id) => updateMutation.mutateAsync({ id, patch: { is_active: false } }),
+    [updateMutation],
   )
 
+  // ── drug-info lazy cache (medication 별 query key) ────────────────
+  // 호출자가 promise 를 직접 await — fetchQuery 로 dedupe + cache 보장.
+  const getDrugInfo = useCallback(
+    async (medId) => {
+      return qc.fetchQuery({
+        queryKey: qk.medications.detail(medId),
+        // drug-info 는 LLM 결과라 변동 거의 없음 → 5분 staleTime.
+        staleTime: 5 * 60 * 1000,
+        queryFn: async () => {
+          const { data } = await api.get(`/api/v1/medications/${medId}/drug-info`)
+          return data
+        },
+      })
+    },
+    [qc],
+  )
+
+  // ── computed selectors ──────────────────────────────
+  const activeMedications = medications.filter((m) => m.is_active)
+  const completedMedications = medications.filter((m) => !m.is_active)
+
+  const refetchMedications = useCallback(() => listQuery.refetch(), [listQuery])
+
   return (
-    <MedicationContext.Provider value={{
-      // 읽기
-      medications,
-      activeMedications,
-      completedMedications,
-      isLoading,
-      // mutation (응답 기반)
-      updateMedication,
-      deleteMedication,
-      deleteMedications,
-      deactivateMedication,
-      // drug-info
-      getDrugInfo,
-      // 비상
-      refetchMedications,
-    }}>
+    <MedicationContext.Provider
+      value={{
+        medications,
+        activeMedications,
+        completedMedications,
+        isLoading,
+        updateMedication,
+        deleteMedication,
+        deleteMedications,
+        deactivateMedication,
+        getDrugInfo,
+        refetchMedications,
+      }}
+    >
       {children}
     </MedicationContext.Provider>
   )

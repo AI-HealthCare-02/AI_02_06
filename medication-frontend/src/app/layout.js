@@ -4,6 +4,7 @@ import "./globals.css";
 import Navigation from '@/components/layout/Navigation'
 import BottomNav from '@/components/layout/BottomNav'
 import GlobalAuthGuard from '@/components/auth/AuthGuard'
+import QueryProvider from '@/providers/QueryProvider'
 import { ProfileProvider } from '@/contexts/ProfileContext'
 import { MedicationProvider } from '@/contexts/MedicationContext'
 import { PrescriptionGroupProvider } from '@/contexts/PrescriptionGroupContext'
@@ -48,25 +49,27 @@ export default function RootLayout({ children }) {
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
       <body className="min-h-full flex flex-col">
-        <GlobalAuthGuard>
-          <ProfileProvider>
-            <MedicationProvider>
-              <PrescriptionGroupProvider>
-              <ChallengeProvider>
-                <LifestyleGuideProvider>
-                  <OcrDraftProvider>
-                    <ChatSessionProvider>
-                      <Navigation />
-                      {children}
-                      <BottomNav />
-                    </ChatSessionProvider>
-                  </OcrDraftProvider>
-                </LifestyleGuideProvider>
-              </ChallengeProvider>
-              </PrescriptionGroupProvider>
-            </MedicationProvider>
-          </ProfileProvider>
-        </GlobalAuthGuard>
+        <QueryProvider>
+          <GlobalAuthGuard>
+            <ProfileProvider>
+              <MedicationProvider>
+                <PrescriptionGroupProvider>
+                  <ChallengeProvider>
+                    <LifestyleGuideProvider>
+                      <OcrDraftProvider>
+                        <ChatSessionProvider>
+                          <Navigation />
+                          {children}
+                          <BottomNav />
+                        </ChatSessionProvider>
+                      </OcrDraftProvider>
+                    </LifestyleGuideProvider>
+                  </ChallengeProvider>
+                </PrescriptionGroupProvider>
+              </MedicationProvider>
+            </ProfileProvider>
+          </GlobalAuthGuard>
+        </QueryProvider>
         <Toaster
           position="top-center"
           toastOptions={{

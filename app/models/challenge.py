@@ -80,6 +80,16 @@ class Challenge(models.Model):
 
     started_date = fields.DateField(description="챌린지 시작 날짜")
 
+    # 가이드 1개당 LLM 이 한 번에 만든 15개 챌린지를 5개씩 점진 노출하기 위한
+    # 정렬 키. 0~4 = 첫 노출 set, 5~9 = "더 보기" 1회, 10~14 = "더 보기" 2회.
+    # 각 set 안에는 1일 1개 / 7일 1개 / 14일 2개 / 21일 1개 분배가 함께 들어가
+    # 사용자가 매 노출마다 동일 기간 분포를 받는다. 옛 row(마이그레이션 #27 이전)
+    # 는 NULL — 이전 정렬 (target_days asc) 으로 fallback.
+    slot_index = fields.IntField(
+        null=True,
+        description="가이드 내 챌린지 노출 순서 (0~14, NULL = legacy)",
+    )
+
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)
     deleted_at = fields.DatetimeField(null=True)
