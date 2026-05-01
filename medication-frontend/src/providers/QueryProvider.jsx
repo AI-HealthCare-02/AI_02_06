@@ -23,9 +23,12 @@ export default function QueryProvider({ children }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            // 60초 안에는 같은 키 재방문 시 cache hit (GET 0회). 그 후 refetch.
-            // 너무 길면 stale 데이터 노출, 너무 짧으면 GET 폭증 — 균형값.
+            // 도메인별 staleTime 은 query hook 에서 override. 기본값 60s 는 일반적인
+            // server-state 의 안전한 fallback.
             staleTime: 60 * 1000,
+            // gc time — 캐시에서 분리된 후 메모리에서 제거되기까지의 시간.
+            // 사용자가 라우트 왔다갔다 할 때 5분 안에는 재마운트 시 instant.
+            gcTime: 5 * 60 * 1000,
             // 창 포커스 복귀에 따른 자동 refetch — 사용자 의도와 어긋나는 경우가 많아 off.
             refetchOnWindowFocus: false,
             retry: (failureCount, error) => {
