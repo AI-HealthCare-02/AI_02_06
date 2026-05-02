@@ -8,8 +8,8 @@ HNSW 인덱스를 4,000 dimensions 까지 지원하므로 3072d 임베딩에 ANN
 
 본 마이그레이션의 안전성 근거:
 - 16-bit float 양자화는 cosine 유사도에서 실용상 무시 가능한 정밀도 손실
-- 308,748 chunks × halfvec 변환은 pgvector 내장 cast 사용 (재임베딩 0)
-- 변환 시간: 약 30~120초 (테이블 ACCESS EXCLUSIVE 잠금)
+- 308,748 chunks 는 pgvector 내장 cast 로 즉시 변환 (재임베딩 0)
+- 변환 시간: 약 30~120초 (ACCESS EXCLUSIVE 잠금)
 
 DDL 변경 요약:
 1. embedding 컬럼 vector(3072) -> halfvec(3072)
@@ -20,6 +20,10 @@ DDL 변경 요약:
         ON medicine_chunk
         USING hnsw (embedding halfvec_cosine_ops)
         WITH (m = 16, ef_construction = 64);
+
+본 PR 의 MODELS_STATE 는 28번을 binary cp 로 그대로 보존 — 모델 변경 0
+케이스 + zlib Adler32 체크섬 무결성 100% 보장 (수동 텍스트 복사 시
+줄바꿈/공백 한 글자라도 변형되면 깨짐).
 """
 
 from tortoise import BaseDBAsyncClient
@@ -55,9 +59,11 @@ async def downgrade(db: BaseDBAsyncClient) -> str:
 
 # ── MODELS_STATE ────────────────────────────────────────────────────
 # 본 마이그레이션은 raw SQL 만 변경하고 Tortoise 모델 클래스는 그대로
-# (medicine_chunk.embedding 은 모델 측 raw column 처리). 모델 변경 0 인
-# 케이스 -> 직전 28번의 MODELS_STATE 를 그대로 복사 (수학적으로 정확).
-# memory/feedback_migration_scenario_a_only.md 의 raw SQL only 정책 준수.
+# (medicine_chunk.embedding 은 모델에서 fields.TextField, 실제 컬럼 타입
+# 만 vector(N) 으로 raw SQL 적용). 따라서 이전 #18 의 스냅샷을 그대로
+# 재사용해도 모델 정합성 유지. 다음 aerich migrate 진입 시 본 PR 의 후속
+# 모델 변경 (예: medicine_chunk.content_tsv 모델 컬럼 추가) 이 있으면 그때
+# 새 MODELS_STATE 갱신.
 MODELS_STATE = (
     "eJztfXlz2zqy71dB6Z+Ra7xIsmTLqjevSrGdxDfejpdZ7vGUQpGQxBuK1CGpJDq35n3214"
     "2FBDeZ1Eo7mpo6sUg0AHZjafzQy/9Wxo5BLe+wS11TH1U65H8rtjam8EfszT6paJNJ+Bwf"
@@ -172,7 +178,7 @@ MODELS_STATE = (
     "N48vL3NoXEU6G9Om51jXRiVduecepBFXV+LSAYXHerHQT6+lRg8MxlbDrKugwnfEsU04Rv"
     "NRNsczOhiGOVyj9aDsq77Rj5TZph1Y9Du1QvdhwmdQ6Bxtjk1Lc01/Jowj4iydXxGrR0uI"
     "B33MmG/wnU3jL50fZMZYSMYgeHNiUdmnqmPzHCEeb3KfOO6L7UG7rmaRHyNqE80m3Yenq/"
-    "Prq0J/6pRCLSwDCcuzAgLGizPyA4aZ82PvkDyN6Iut9JjtBgTzsogbEtOjBuYF+cq9rKun"
+    "PrS0J/6pRCLSwDCcuzAgLGizPyA4aZ82PvkDyN6Iut9JjtBgTzsogbEtOjBuYF+cq9rKun"
     "J+29r6Q/w0/S7KlmvdiPv12TsTl0ZXRFOlnC6TnCig75+AWzrQi3cmYjXr27JReX15dPl0"
     "TEOAhcaanIgMLGi/xJfG3I+eYMSGRECbEF6azxWY/Nvw55nPYPuPhATsDvOGuBQ97EMn3k"
     "hO98g5cWDJPALRbZjMlOPppo4h7w98DX3CH15eUOs1MdwY5FWZqcgfkTb94skxpB7hWoOU"
