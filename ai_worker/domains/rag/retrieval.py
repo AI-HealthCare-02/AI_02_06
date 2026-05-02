@@ -1,17 +1,16 @@
-"""RAG retrieval — Tortoise-open 상태에서 medicine_chunk hybrid 검색.
+"""RAG retrieval — medicine_chunk hybrid 검색 (vector + tsvector RRF).
 
-ai-worker 의 Router LLM tool 호출 (``search_medicine_knowledge_base``) 분기
-에서 호출된다. 호출자는 Tortoise lifecycle 을 직접 관리해야 한다 — 본 모듈은
-이미 init 된 Tortoise connection 을 사용한다 (lifestyle/ocr 패턴과 동일).
+ai-worker 의 fan-out tool 호출 (``search_medicine_knowledge_base`` x N) 분기에서
+호출된다. 호출자는 Tortoise lifecycle 을 직접 관리한다.
 
-흐름: query 임베딩 -> HybridRetriever.retrieve -> chunk 직렬화
+흐름: query 임베딩 (OpenAI 3-large) -> HybridRetriever.retrieve (RRF) -> chunk 직렬화
 """
 
 import logging
 from typing import Any
 
-from ai_worker.domains.rag.embedding_provider import EMBEDDING_DIMENSIONS, encode_text
 from app.dtos.rag import SearchFilters, SearchResult
+from app.services.rag.openai_embedding import EMBEDDING_DIMENSIONS, encode_query
 from app.services.rag.retrievers.hybrid import HybridRetriever
 
 logger = logging.getLogger(__name__)
@@ -23,10 +22,7 @@ class _UnusedEmbeddingProvider:
     """HybridRetriever 의 ``embedding_provider`` 인자 형식 만족용 stub.
 
     ``HybridRetriever.retrieve()`` 는 provider 를 호출하지 않고
-    ``query_embedding`` 인자로 받은 사전계산 벡터만 사용한다. ai-worker 측에서는
-    임베딩이 ``encode_text`` 로 이미 산출되므로 provider 가 실제로 필요 없다.
-    Protocol 형식만 유지하기 위한 더미 — encode_* 호출 시 명시적으로 실패시켜
-    잘못된 사용 패턴을 빠르게 드러낸다.
+    ``query_embedding`` 인자로 받은 사전계산 벡터만 사용한다.
     """
 
     @property
@@ -35,11 +31,11 @@ class _UnusedEmbeddingProvider:
 
     async def encode_single(self, text: str) -> list[float]:
         del text
-        raise NotImplementedError("worker-side retrieval uses encode_text directly")
+        raise NotImplementedError("worker-side retrieval uses encode_query directly")
 
     async def encode_batch(self, texts: list[str]) -> list[list[float]]:
         del texts
-        raise NotImplementedError("worker-side retrieval uses encode_text directly")
+        raise NotImplementedError("worker-side retrieval uses encode_query directly")
 
 
 # ── RAG retrieval (Router LLM tool dispatch) ────────────────────────
@@ -62,7 +58,7 @@ async def retrieve_medicine_chunks(query: str, max_results: int = DEFAULT_MAX_RE
         logger.warning("[RAG dispatch] empty query, returning empty chunks")
         return {"chunks": [], "note": "empty query"}
 
-    embedding = await encode_text(cleaned)
+    embedding = await encode_query(cleaned)
     retriever = HybridRetriever(embedding_provider=_UnusedEmbeddingProvider())
     results = await retriever.retrieve(
         query=cleaned,

@@ -1,21 +1,15 @@
 """RQ-backed adapters for the tool-calling subsystem (FastAPI side).
 
-Mirrors the ``RQEmbeddingProvider`` pattern from RAG: FastAPI never holds
-the OpenAI client nor the actual tool execution — it only enqueues an
+FastAPI never holds the actual tool execution — it only enqueues an
 AI-Worker RQ job and polls the result with ``asyncio.sleep`` so the event
 loop stays free.
 
-Two entry points:
-
-- ``route_intent_via_rq(messages, queue)`` → ``RouteResult``
-    Enqueues ``route_intent_job``. The worker returns the raw OpenAI
-    assistant message dict; this adapter hands it to
-    ``parse_router_response`` so the caller gets a domain DTO.
+Entry points (RAG 4단 파이프라인 진입 후 Router LLM 폐기):
 
 - ``run_tool_calls_via_rq(calls, queue)`` → ``{tool_call_id: result}``
-    Enqueues ``run_tool_calls_job``. The worker already aggregates the
-    parallel results into a pickle-safe dict, so no post-processing is
-    needed. Empty ``calls`` short-circuits to ``{}`` without enqueueing.
+    fan-out 으로 만든 search_medicine_knowledge_base tool_calls 를 병렬 실행.
+- ``generate_chat_response_via_rq(messages, system_prompt, queue)``
+    2nd LLM (4o) 호출.
 
 Failures map to two dedicated exceptions — ``ToolTimeoutError`` (poll
 deadline exceeded) and ``ToolJobError`` (RQ status transitioned to
@@ -27,17 +21,12 @@ import logging
 import time
 from typing import Any
 
-from app.dtos.tools import RouteResult
-from app.services.tools.router import parse_router_response
-
 logger = logging.getLogger(__name__)
 
-ROUTE_INTENT_JOB_REF = "ai_worker.domains.tool_calling.jobs.route_intent_job"
 RUN_TOOL_CALLS_JOB_REF = "ai_worker.domains.tool_calling.jobs.run_tool_calls_job"
 GENERATE_CHAT_RESPONSE_JOB_REF = "ai_worker.domains.rag.jobs.generate_chat_response_job"
 
 _DEFAULT_POLL_INTERVAL_SEC = 0.1
-_DEFAULT_ROUTE_TIMEOUT_SEC = 30.0
 _DEFAULT_RUN_TIMEOUT_SEC = 30.0
 _DEFAULT_GENERATE_TIMEOUT_SEC = 60.0  # LLM call; matches rq_llm.py
 
@@ -92,35 +81,6 @@ async def _await_result(
             raise ToolTimeoutError(f"Tool job did not finish within {timeout}s")
 
         await asyncio.sleep(poll_interval)
-
-
-async def route_intent_via_rq(
-    *,
-    messages: list[dict[str, Any]],
-    queue: Any,
-    poll_interval: float = _DEFAULT_POLL_INTERVAL_SEC,
-    timeout: float = _DEFAULT_ROUTE_TIMEOUT_SEC,  # noqa: ASYNC109 — poll deadline; see _await_result
-) -> "RouteResult":
-    """Enqueue ``route_intent_job`` and return the parsed ``RouteResult``.
-
-    Args:
-        messages: Chronological chat history (latest user turn last).
-        queue: ``rq.Queue`` instance (or a duck-typed stub in tests).
-        poll_interval: Seconds between status polls.
-        timeout: Max wait in seconds.
-
-    Returns:
-        Domain-level ``RouteResult`` — either ``kind="text"`` or
-        ``kind="tool_calls"`` per ``parse_router_response``.
-
-    Raises:
-        ToolTimeoutError: Polling deadline exceeded.
-        ToolJobError: Worker returned a failed status.
-    """
-    logger.info("[ToolCalling] enqueue route_intent_job messages=%d", len(messages))
-    job = queue.enqueue(ROUTE_INTENT_JOB_REF, messages)
-    assistant_message = await _await_result(job, poll_interval=poll_interval, timeout=timeout)
-    return parse_router_response(assistant_message)
 
 
 async def run_tool_calls_via_rq(

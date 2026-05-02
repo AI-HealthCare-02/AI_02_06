@@ -31,17 +31,6 @@ COPY --chown=appuser:appgroup . .
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-# ko-sroberta 모델은 image layer 가 아니라 host volume 으로 분리.
-# - HF_HOME 은 docker-compose 의 hf_cache named volume 마운트 지점.
-# - 첫 컨테이너 start 시 sentence-transformers 가 알아서 다운로드 → 영속 저장.
-# - 두 번째 컨테이너 부터는 cache hit (다운로드 0회).
-ENV HF_HOME=/data/hf-cache
-ENV TRANSFORMERS_CACHE=/data/hf-cache
-ENV SENTENCE_TRANSFORMERS_HOME=/data/hf-cache
-
-# /data 마운트 지점만 미리 생성 + 권한 — /app 은 위 COPY --chown 이 처리하므로
-# 여기선 /data 디렉터리 1~2개 만 chown (layer 0B).
-RUN mkdir -p /data/hf-cache && chown -R appuser:appgroup /data
 USER appuser
 
 # compose.prod.yml 이 Redis 기반 healthcheck 로 override. 여기선 기본만 정의.

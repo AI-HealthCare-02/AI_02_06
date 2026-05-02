@@ -1,29 +1,12 @@
 """RAG RQ jobs — FastAPI 가 ``ai`` 큐로 enqueue 하는 진입점.
 
-옵션 C 이후의 두 RQ task (``rewrite_query_job`` 폐기됨):
+RAG 4단 파이프라인 (PLAN feature/RAG) 에서 1개의 RQ task 만 노출:
 
-- ``embed_text_job`` → ``embedding_provider.encode_text``
 - ``generate_chat_response_job`` → ``response_generator.generate_response``
 
-각 job 함수 안에서 implementation 모듈을 lazy import 하는 이유:
-worker process 의 cold start latency (sentence-transformers / torch /
-transformers 같은 무거운 의존성 로드) 를 첫 task 시점까지 미루기 위함.
-CLAUDE.md §8.5 의 lazy import 금지 정책 예외 (성능 critical path).
+이전 ``embed_text_job`` (ko-sroberta) 는 폐기. query 측 임베딩은 FastAPI 의
+``app.services.rag.openai_embedding`` 이 직접 OpenAI API 호출.
 """
-
-
-async def embed_text_job(text: str) -> list[float]:
-    """[RQ Task] 쿼리 임베딩 (768차원 L2-정규화 벡터).
-
-    Args:
-        text: 임베딩 대상 문자열.
-
-    Returns:
-        768차원 float 리스트.
-    """
-    from ai_worker.domains.rag.embedding_provider import encode_text
-
-    return await encode_text(text)
 
 
 async def generate_chat_response_job(
