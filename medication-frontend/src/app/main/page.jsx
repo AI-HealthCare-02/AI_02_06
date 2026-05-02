@@ -10,7 +10,6 @@ import { useMedication } from '@/contexts/MedicationContext'
 import { useChallenge } from '@/contexts/ChallengeContext'
 import { useOcrDraft, useOcrEntryNavigator } from '@/contexts/OcrDraftContext'
 import TodaySchedule from '@/components/medication/TodaySchedule'
-import { set } from 'zod/v4'
 
 // ── 히어로 배경 이미지 슬라이드쇼 ────────────────────────────────────────────
 // 흐름: 3초 타이머 → 다음 이미지 인덱스로 순환 → CSS transition으로 페이드
@@ -159,7 +158,6 @@ function MainPageContent() {
   const { selectedProfileId, selectedProfile } = useProfile()
   // 4 Context 가 모든 server state 를 단일 진실로 관리 — 자체 fetch 0
   const { activeMedications: medications } = useMedication()
-  console.log('medications:', medications)
   const { activeChallenges } = useChallenge()
   const { activeDrafts, removeDraftLocally, refetchDrafts } = useOcrDraft()
   const goToOcrFlow = useOcrEntryNavigator()
@@ -207,8 +205,7 @@ function MainPageContent() {
         const response = await api.get(`/api/v1/daily-logs`, {
           params: { 
             profile_id: selectedProfileId,
-            start_date: today,
-            end_date: today
+            data: today
           }
         })
         if (response.data && response.data.length > 0) {
