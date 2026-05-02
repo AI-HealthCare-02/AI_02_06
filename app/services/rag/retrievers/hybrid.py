@@ -147,7 +147,10 @@ class HybridRetriever:
             ``(sql, params)`` ready for ``connection.execute_query_dict``.
         """
         vector_str = f"[{','.join(map(str, query_embedding))}]"
-        where_conditions: list[str] = ["(mc.embedding <=> $1) < $2"]
+        # 마이그 29번 이후 embedding 컬럼은 halfvec(3072). query 측 vector 문자열을
+        # halfvec 으로 명시적 캐스팅 — 타입 일치로 HNSW 인덱스 (halfvec_cosine_ops)
+        # 가 정확히 적용된다.
+        where_conditions: list[str] = ["(mc.embedding <=> $1::halfvec(3072)) < $2"]
         params: list = [vector_str, 1 - similarity_threshold]
         idx = 3
         if filters.medicine_names:
@@ -167,7 +170,7 @@ class HybridRetriever:
             mc.model_version,
             mc.created_at AS chunk_created_at,
             mc.updated_at AS chunk_updated_at,
-            (mc.embedding <=> $1) AS distance,
+            (mc.embedding <=> $1::halfvec(3072)) AS distance,
             mi.id AS mi_id,
             mi.item_seq,
             mi.medicine_name,
