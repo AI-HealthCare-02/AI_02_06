@@ -13,8 +13,13 @@ PLAN.md (feature/RAG) §4 D1 결정 — tenacity 가 아닌 자체 구현 채택
 (Kakao API, OpenAI Embedding API). RAG retrieval 자체는 DB 라 retry 불필요.
 """
 
+import asyncio
 from collections.abc import Awaitable, Callable
+import functools
+import logging
 from typing import TypeVar
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -36,15 +41,40 @@ def retry_async(
 
     Returns:
         decorated async function. 모든 시도 실패 시 마지막 예외 propagate.
-
-    Raises:
-        NotImplementedError: 본 stub 단계에서는 미구현. Phase 3 에서 채움.
     """
-    del max_attempts, initial_backoff, max_backoff, retryable
 
     def decorator(func: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
-        del func
-        msg = "retry_async 는 Phase 3 [Implement] 에서 채움"
-        raise NotImplementedError(msg)
+        @functools.wraps(func)
+        async def wrapper(*args: object, **kwargs: object) -> T:
+            backoff = initial_backoff
+            last_exc: BaseException | None = None
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    return await func(*args, **kwargs)
+                except retryable as exc:
+                    last_exc = exc
+                    if attempt >= max_attempts:
+                        logger.warning(
+                            "[retry] %s exhausted %d/%d attempts: %s",
+                            func.__name__,
+                            attempt,
+                            max_attempts,
+                            type(exc).__name__,
+                        )
+                        raise
+                    logger.info(
+                        "[retry] %s attempt %d/%d failed (%s) — sleep %.2fs",
+                        func.__name__,
+                        attempt,
+                        max_attempts,
+                        type(exc).__name__,
+                        backoff,
+                    )
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, max_backoff)
+            # unreachable — loop returns or raises
+            raise last_exc if last_exc is not None else RuntimeError("retry_async unreachable")
+
+        return wrapper
 
     return decorator

@@ -22,17 +22,20 @@ def format_rag_context(chunks: list[dict[str, Any]], cap: int = 15, max_content_
         max_content_chars: 각 chunk content 의 최대 char 수. 기본 1500.
 
     Returns:
-        markdown 섹션. 예시:
-
-            [약: 타이레놀] [drug_interaction]: 와파린과 병용 시 INR 상승...
-            [약: 와파린] [drug_interaction]: 아세트아미노펜 병용 시 출혈 위험...
-            ...
-
-        빈 chunks 면 빈 문자열.
-
-    Raises:
-        NotImplementedError: 본 stub 단계에서는 미구현.
+        markdown 섹션. 빈 chunks 면 빈 문자열.
     """
-    del chunks, cap, max_content_chars
-    msg = "format_rag_context 는 Phase 3 [Implement] 에서 채움"
-    raise NotImplementedError(msg)
+    if not chunks:
+        return ""
+
+    lines: list[str] = []
+    for chunk in chunks[:cap]:
+        name = chunk.get("medicine_name", "")
+        section = chunk.get("section", "")
+        content = chunk.get("content", "")
+        if len(content) > max_content_chars:
+            content = content[:max_content_chars] + "..."
+        # 줄바꿈을 단일 공백으로 collapse — 한 chunk = 한 줄 가독성
+        content_one_line = " ".join(content.split())
+        lines.append(f"[약: {name}] [{section}]: {content_one_line}")
+
+    return "\n".join(lines)

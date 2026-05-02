@@ -1,18 +1,9 @@
 """Unit tests for app.services.tools.context_format — RAG chunks → markdown 섹션.
 
-Phase 2 [Test] (Red): stub 단계라 모든 케이스가 NotImplementedError.
-Phase 3 [Implement] 에서 실 포맷 검증으로 전환.
-
-PLAN.md §4.1 — F1 결정의 4가지 검증:
-- chunks 리스트 → '[약: name] [section]: content' N줄
-- 빈 chunks → 빈 문자열
-- top-K cap (15) 초과 시 자르기
-- 각 content 1500자 truncate
+PLAN.md §4.1 — F1 결정의 4가지 검증. Phase 3 [Implement] Green.
 """
 
 from __future__ import annotations
-
-import pytest
 
 from app.services.tools.context_format import format_rag_context
 
@@ -33,29 +24,35 @@ SAMPLE_CHUNKS = [
 
 
 class TestFormatRagContext:
-    """format_rag_context 단위 테스트 (Red 상태)."""
+    """format_rag_context 단위 테스트."""
 
     def test_basic_format(self) -> None:
         """기본 케이스 — 2 chunks → 2줄 markdown."""
-        with pytest.raises(NotImplementedError):
-            format_rag_context(SAMPLE_CHUNKS)
+        result = format_rag_context(SAMPLE_CHUNKS)
+        lines = result.split("\n")
+        assert len(lines) == 2
+        assert lines[0].startswith("[약: 타이레놀] [drug_interaction]:")
+        assert "와파린과 병용" in lines[0]
+        assert lines[1].startswith("[약: 와파린] [drug_interaction]:")
 
     def test_empty_chunks(self) -> None:
         """빈 chunks → 빈 문자열."""
-        with pytest.raises(NotImplementedError):
-            format_rag_context([])
+        assert format_rag_context([]) == ""
 
     def test_cap_applied(self) -> None:
         """20 chunks 입력 + cap=15 → 15 줄로 잘림."""
         chunks = [
             {"medicine_name": f"약{i}", "section": "overview", "content": "내용", "score": 0.5} for i in range(20)
         ]
-        with pytest.raises(NotImplementedError):
-            format_rag_context(chunks, cap=15)
+        result = format_rag_context(chunks, cap=15)
+        assert len(result.split("\n")) == 15
 
     def test_long_content_truncated(self) -> None:
-        """content 가 1500 자 초과 → truncate."""
+        """content 가 1500 자 초과 → truncate + '...' suffix."""
         long = "가" * 5000
         chunks = [{"medicine_name": "약", "section": "overview", "content": long, "score": 0.9}]
-        with pytest.raises(NotImplementedError):
-            format_rag_context(chunks, max_content_chars=1500)
+        result = format_rag_context(chunks, max_content_chars=1500)
+        # prefix '[약: 약] [overview]: ' + 1500 char + '...' suffix 정도
+        assert "..." in result
+        # 본문 길이가 5000 보다 훨씬 짧아져야 함
+        assert len(result) < 2500

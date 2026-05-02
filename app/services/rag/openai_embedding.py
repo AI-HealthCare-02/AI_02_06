@@ -16,10 +16,40 @@ ai_worker 측의 embed_text_job 과 분리:
 batch 입력 지원 (fanout_queries N 개를 한 번에 임베딩).
 """
 
+import logging
+
 from openai import AsyncOpenAI
+
+from app.core.config import config
+
+logger = logging.getLogger(__name__)
 
 EMBEDDING_MODEL = "text-embedding-3-large"
 EMBEDDING_DIMENSIONS = 3072
+
+_client: AsyncOpenAI | None = None
+_initialised: bool = False
+
+
+def _get_client() -> AsyncOpenAI | None:
+    """AsyncOpenAI 싱글톤 — config.OPENAI_API_KEY 가 없으면 None.
+
+    ai_worker.core.openai_client 와 동일 패턴 — 매 호출마다 재할당 X.
+    """
+    global _client, _initialised
+
+    if _initialised:
+        return _client
+
+    api_key = config.OPENAI_API_KEY
+    if not api_key:
+        logger.warning("OPENAI_API_KEY 미설정 — encode_query 비활성")
+        _initialised = True
+        return None
+
+    _client = AsyncOpenAI(api_key=api_key)
+    _initialised = True
+    return _client
 
 
 async def encode_query(query: str) -> list[float]:
@@ -29,36 +59,43 @@ async def encode_query(query: str) -> list[float]:
         query: 사용자 query 또는 fanout_query 문자열.
 
     Returns:
-        3072 float 의 list. cosine 유사도 비교용 L2 정규화는 OpenAI 측 자동.
-
-    Raises:
-        NotImplementedError: 본 stub 단계에서는 미구현.
+        3072 float 의 list. 빈 query 또는 client 부재 시 영벡터.
     """
-    del query
-    msg = "encode_query 는 Phase 3 [Implement] 에서 AsyncOpenAI.embeddings.create 호출로 채움"
-    raise NotImplementedError(msg)
+    if not query:
+        return [0.0] * EMBEDDING_DIMENSIONS
+
+    client = _get_client()
+    if client is None:
+        return [0.0] * EMBEDDING_DIMENSIONS
+
+    response = await client.embeddings.create(
+        model=EMBEDDING_MODEL,
+        input=query,
+        dimensions=EMBEDDING_DIMENSIONS,
+    )
+    return list(response.data[0].embedding)
 
 
 async def encode_queries_batch(queries: list[str]) -> list[list[float]]:
-    """여러 query 를 batch 로 한 번에 임베딩.
-
-    fanout_queries N 개를 단일 OpenAI API 호출로 처리해 latency 최소화.
+    """여러 query 를 batch 로 한 번에 임베딩 (단일 OpenAI API 호출).
 
     Args:
         queries: query 문자열 list. 빈 list 면 빈 list 반환.
 
     Returns:
-        각 query 에 대응하는 3072d 임베딩 list 의 list.
-
-    Raises:
-        NotImplementedError: 본 stub 단계에서는 미구현.
+        각 query 에 대응하는 3072d 임베딩 list 의 list. queries 와 같은 길이.
     """
-    del queries
-    msg = "encode_queries_batch 는 Phase 3 [Implement] 에서 batch input 으로 채움"
-    raise NotImplementedError(msg)
+    if not queries:
+        return []
 
+    client = _get_client()
+    if client is None:
+        return [[0.0] * EMBEDDING_DIMENSIONS for _ in queries]
 
-def _get_client() -> AsyncOpenAI | None:
-    """AsyncOpenAI 싱글톤 — Phase 3 에서 ai_worker.core.openai_client 패턴 재사용."""
-    msg = "client factory 는 Phase 3 [Implement] 에서 채움"
-    raise NotImplementedError(msg)
+    response = await client.embeddings.create(
+        model=EMBEDDING_MODEL,
+        input=queries,
+        dimensions=EMBEDDING_DIMENSIONS,
+    )
+    # response.data 는 input 순서 그대로 반환 (OpenAI 명세 보장)
+    return [list(d.embedding) for d in response.data]
