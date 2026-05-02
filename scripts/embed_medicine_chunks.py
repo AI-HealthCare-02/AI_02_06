@@ -272,13 +272,15 @@ async def process_medicines(
     batch_size: int,
     concurrency: int,
     resume_from: int,
+    medicine_ids: list[int] | None = None,
 ) -> None:
     """모든 medicine_info 를 순회하며 청킹 + 임베딩 + INSERT.
 
     Args:
         batch_size: medicine_info 페이지 크기.
         concurrency: 동시 medicine 처리 병렬도 (OpenAI 호출 병렬 = 이 값).
-        resume_from: 시작 medicine_info.id (재시작용).
+        resume_from: 시작 medicine_info.id (재시작용). medicine_ids 지정 시 무시.
+        medicine_ids: 특정 ID 만 처리 (None 이면 resume_from 이후 모두).
     """
     api_key = config.OPENAI_API_KEY
     if not api_key:
@@ -286,13 +288,18 @@ async def process_medicines(
         raise SystemExit(msg)
     client = AsyncOpenAI(api_key=api_key)
 
-    total = await MedicineInfo.filter(id__gte=resume_from).count()
+    if medicine_ids is not None:
+        total = len(medicine_ids)
+        scope_desc = f"ids={len(medicine_ids)}"
+    else:
+        total = await MedicineInfo.filter(id__gte=resume_from).count()
+        scope_desc = f"resume_from={resume_from}"
     logger.info(
-        "Embedding %d medicines (batch=%d, concurrency=%d, resume_from=%d, model=%s, dim=%d)",
+        "Embedding %d medicines (batch=%d, concurrency=%d, %s, model=%s, dim=%d)",
         total,
         batch_size,
         concurrency,
-        resume_from,
+        scope_desc,
         EMBEDDING_MODEL,
         EMBEDDING_DIMENSIONS,
     )
@@ -327,7 +334,13 @@ async def process_medicines(
 
     offset = 0
     while True:
-        page = await MedicineInfo.filter(id__gte=resume_from).order_by("id").offset(offset).limit(batch_size).all()
+        if medicine_ids is not None:
+            ids_page = medicine_ids[offset : offset + batch_size]
+            if not ids_page:
+                break
+            page = await MedicineInfo.filter(id__in=ids_page).order_by("id").all()
+        else:
+            page = await MedicineInfo.filter(id__gte=resume_from).order_by("id").offset(offset).limit(batch_size).all()
         if not page:
             break
 
@@ -385,16 +398,44 @@ def parse_args() -> argparse.Namespace:
         help="동시 medicine 처리 병렬도 (default: 5). OpenAI rate limit 따라 조정",
     )
     parser.add_argument("--resume-from", type=int, default=0, help="시작 medicine_info.id (재시작용)")
+    parser.add_argument(
+        "--medicine-ids",
+        type=str,
+        default=None,
+        help="콤마 구분 medicine_info.id 목록 — 이 인자가 있으면 resume-from 무시하고 해당 ID 만 처리 (예: 1,5,12,42)",
+    )
+    parser.add_argument(
+        "--name-like",
+        type=str,
+        default=None,
+        help="콤마 구분 ILIKE 패턴 (medicine_name + item_eng_name 매칭)",
+    )
     return parser.parse_args()
 
 
 async def main_async(args: argparse.Namespace) -> None:
     await Tortoise.init(config=TORTOISE_ORM)
     try:
+        ids: list[int] | None = None
+        if args.medicine_ids:
+            ids = [int(x.strip()) for x in args.medicine_ids.split(",") if x.strip()]
+            logger.info("ID 목록 모드 — %d medicines", len(ids))
+        elif args.name_like:
+            patterns = [p.strip() for p in args.name_like.split(",") if p.strip()]
+            from tortoise.expressions import Q
+
+            cond = Q()
+            for p in patterns:
+                cond |= Q(medicine_name__ilike=p) | Q(item_eng_name__ilike=p)
+            matched = await MedicineInfo.filter(cond).values_list("id", flat=True)
+            ids = list(matched)
+            logger.info("name-like 매칭 — %d medicines (patterns=%s)", len(ids), patterns)
+
         await process_medicines(
             batch_size=args.batch,
             concurrency=args.concurrency,
             resume_from=args.resume_from,
+            medicine_ids=ids,
         )
     finally:
         await Tortoise.close_connections()
