@@ -81,6 +81,20 @@ async def retrieve_medicine_chunks(
         len(results),
         len(serialized),
     )
+    # ── 진단 로그 (diag/2nd-llm-input-output-logging) ─────────────────
+    # 흐름: 각 chunk 의 medicine + section + content preview 그대로 dump
+    for i, c in enumerate(serialized):
+        logger.info(
+            "[RAG-Diag] query=%r chunk[%d/%d] medicine=%r section=%r score=%s content[%dchars]=%r",
+            cleaned[:60],
+            i + 1,
+            len(serialized),
+            c.get("medicine_name"),
+            c.get("section"),
+            c.get("score"),
+            len(c.get("content") or ""),
+            (c.get("content") or "")[:300],
+        )
     return {"chunks": serialized}
 
 

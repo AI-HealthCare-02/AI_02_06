@@ -131,6 +131,16 @@ async def classify_intent(
         *messages,
     ]
 
+    # ── 진단 로그 (diag/2nd-llm-input-output-logging) ─────────────────
+    # 흐름: 4o-mini IntentClassifier 호출 직전 input dump
+    logger.info(
+        "[Intent-Diag] INPUT medical_context[%dchars]=%r messages_count=%d last_user=%r",
+        len(medical_context or ""),
+        medical_context or "",
+        len(messages),
+        (messages[-1].get("content") if messages else "")[:300],
+    )
+
     completion = await client.beta.chat.completions.parse(
         model=_MODEL,
         messages=full_messages,  # type: ignore[arg-type]
@@ -144,4 +154,12 @@ async def classify_intent(
             intent=IntentType.AMBIGUOUS,
             direct_answer="질문을 정확히 이해하지 못했어요. 다시 한번 말씀해주세요.",
         )
+    logger.info(
+        "[Intent-Diag] OUTPUT intent=%s direct_answer=%r fanout=%s referent_resolution=%s filters=%s",
+        parsed.intent.value,
+        parsed.direct_answer,
+        parsed.fanout_queries,
+        parsed.referent_resolution,
+        parsed.filters.model_dump() if parsed.filters else None,
+    )
     return parsed
