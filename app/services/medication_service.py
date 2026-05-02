@@ -4,6 +4,7 @@ This module provides business logic for medication management operations
 including creation, updates, and ownership verification.
 """
 
+from dataclasses import dataclass
 import logging
 from uuid import UUID
 
@@ -12,16 +13,33 @@ from tortoise.transactions import in_transaction
 
 from app.dtos.drug_info import DrugInfoResponse, PrecautionSection
 from app.dtos.medication import MedicationBulkDeleteResponse, MedicationCreate, MedicationUpdate, PrescriptionDateItem
+from app.dtos.recall import RecallAlertDTO, RecallStatusDTO
 from app.models.medication import Medication
 from app.models.prescription_group import PrescriptionGroupSource
+from app.repositories.drug_recall_repository import DrugRecallRepository
 from app.repositories.medication_repository import MedicationRepository
 from app.repositories.medicine_info_repository import MedicineInfoRepository
 from app.repositories.prescription_group_repository import PrescriptionGroupRepository
 from app.repositories.profile_repository import ProfileRepository
 from app.services.lifestyle_guide_service import LifestyleGuideService
+from app.services.recall_alert_builder import build_alert, build_status
 from app.services.recall_notification_service import check_and_alert_on_medication_save
 
 logger = logging.getLogger(__name__)
+
+
+# ── 마이페이지 batch 응답 wrapper (§A.6.1) ────────────────────────────
+# medication 모델 자체엔 recall_status 컬럼이 없고 응답 시점에만 필요한
+# 메타 정보라 dataclass 로 묶어 전달한다. router 가 unpack 후 응답 스키마
+# 에 반영.
+
+
+@dataclass
+class MedicationWithRecallStatus:
+    """Service-level pair of (medication row, recall_status payload)."""
+
+    medication: Medication
+    recall_status: RecallStatusDTO | None
 
 
 class MedicationService:
@@ -115,6 +133,55 @@ class MedicationService:
         """
         await self._verify_profile_ownership(profile_id, account_id)
         return await self.repository.get_all_by_profile(profile_id)
+
+    # ── §A.2.2: 마이페이지 batch lookup (recall_status 첨부) ────────────
+    # 흐름: 소유 확인 -> medication 리스트 조회
+    #       -> drug_recall_repo.find_recalls_for_medications (단일 쿼리)
+    #       -> medication 마다 build_status 로 라벨 페이로드 생성
+    # N+1 회피: repository 쿼리 1회 + 메모리 그룹핑.
+
+    async def list_medications_with_recall_status_with_owner_check(
+        self,
+        profile_id: UUID,
+        account_id: UUID,
+    ) -> list[MedicationWithRecallStatus]:
+        """List a profile's medications, each paired with its recall_status.
+
+        Args:
+            profile_id: Profile UUID.
+            account_id: Account UUID for ownership check.
+
+        Returns:
+            list[MedicationWithRecallStatus]: One entry per medication row.
+                ``recall_status`` is ``None`` when no recall matches.
+        """
+        await self._verify_profile_ownership(profile_id, account_id)
+        medications = await self.repository.get_all_by_profile(profile_id)
+        if not medications:
+            return []
+
+        drug_recall_repo = DrugRecallRepository()
+        grouping = await drug_recall_repo.find_recalls_for_medications(medications)
+        return [
+            MedicationWithRecallStatus(
+                medication=med,
+                recall_status=build_status(grouping.get(med.id, [])),
+            )
+            for med in medications
+        ]
+
+    async def _build_recall_alert_for(self, medication: Medication) -> RecallAlertDTO | None:
+        """등록 시점 모달 페이로드 빌더 — find_by_item_seq_or_name → build_alert.
+
+        Returns:
+            ``RecallAlertDTO`` 또는 매칭 없을 시 ``None``.
+        """
+        drug_recall_repo = DrugRecallRepository()
+        rows = await drug_recall_repo.find_by_item_seq_or_name(
+            item_seq=getattr(medication, "item_seq", None),
+            product_name=getattr(medication, "medicine_name", None),
+        )
+        return build_alert(rows)
 
     async def get_active_medications(self, profile_id: UUID) -> list[Medication]:
         """Get active medications for a profile.
@@ -244,6 +311,21 @@ class MedicationService:
             await check_and_alert_on_medication_save(medication)
         except Exception:
             logger.exception("[F3] recall hook failed for medication=%s", getattr(medication, "id", "?"))
+
+        # ── §A.2.1: 등록 직후 회수 모달 페이로드 첨부 ──────────────────
+        # 흐름: drug_recall_repo.find_by_item_seq_or_name -> build_alert
+        #       -> medication 객체에 recall_alert 속성 attach
+        # MedicationResponse 의 from_attributes=True 가 자동 매핑한다.
+        # ORM 미초기화 같은 환경 문제로 매칭이 실패해도 medication 등록
+        # 자체는 망치지 않도록 격리한다 (recall_alert=None 으로 fallback).
+        try:
+            medication.recall_alert = await self._build_recall_alert_for(medication)
+        except Exception:
+            logger.exception(
+                "[recall] alert builder failed for medication=%s",
+                getattr(medication, "id", "?"),
+            )
+            medication.recall_alert = None
 
         return medication
 
