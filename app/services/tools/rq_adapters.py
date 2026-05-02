@@ -27,7 +27,7 @@ RUN_TOOL_CALLS_JOB_REF = "ai_worker.domains.tool_calling.jobs.run_tool_calls_job
 GENERATE_CHAT_RESPONSE_JOB_REF = "ai_worker.domains.rag.jobs.generate_chat_response_job"
 
 _DEFAULT_POLL_INTERVAL_SEC = 0.1
-_DEFAULT_RUN_TIMEOUT_SEC = 30.0
+_DEFAULT_RUN_TIMEOUT_SEC = 60.0  # batch 임베딩 후 RAG fan-out 7개 ~5초; cold start / rate limit 마진 포함
 _DEFAULT_GENERATE_TIMEOUT_SEC = 60.0  # LLM call; matches rq_llm.py
 
 

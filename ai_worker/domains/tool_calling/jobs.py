@@ -24,6 +24,7 @@ from tortoise import Tortoise
 from ai_worker.domains.rag.retrieval import retrieve_medicine_chunks
 from app.db.databases import TORTOISE_ORM
 from app.dtos.tools import KakaoPlace
+from app.services.rag.openai_embedding import encode_queries_batch
 from app.services.tools.maps.hospital_search import (
     DEFAULT_RADIUS_M,
     HospitalCategory,
@@ -48,7 +49,9 @@ _MEDICINE_KNOWLEDGE_TOOL_NAME = "search_medicine_knowledge_base"
 
 # ── tool_calls 병렬 dispatch (RQ Task) ──────────────────────────────
 # 흐름: 빈 calls 단축 -> RAG 포함 여부에 따라 Tortoise lifecycle
-#       -> asyncio.gather 로 dispatch 병행 -> 결과 merge -> lifecycle close
+#       -> RAG 쿼리 batch 임베딩 사전 계산 (1회 OpenAI API 호출)
+#       -> asyncio.gather 로 dispatch 병행 (사전계산 임베딩 주입)
+#       -> 결과 merge -> lifecycle close
 async def run_tool_calls_job(calls: list[dict[str, Any]]) -> dict[str, Any]:
     """[RQ Task] 모든 tool_call 을 병행 실행해 ``{tool_call_id: result}`` 반환.
 
@@ -59,6 +62,11 @@ async def run_tool_calls_job(calls: list[dict[str, Any]]) -> dict[str, Any]:
     Returns:
         성공 결과는 ``{"places": [...]}`` (병원/약국) 또는
         ``{"chunks": [...]}`` (의학 지식), 실패는 ``{"error": str}``.
+
+    Note:
+        fan-out 으로 만들어진 search_medicine_knowledge_base x N 호출의
+        쿼리들은 dispatch 진입 전 batch 임베딩 1회로 묶어 처리한다.
+        OpenAI 임베딩 API 호출 N -> 1 (응답 속도 + 비용 최적화).
     """
     if not calls:
         return {}
@@ -68,7 +76,11 @@ async def run_tool_calls_job(calls: list[dict[str, Any]]) -> dict[str, Any]:
     if needs_db:
         await Tortoise.init(config=TORTOISE_ORM)
     try:
-        results = await asyncio.gather(*[_dispatch(call) for call in calls], return_exceptions=False)
+        embeddings_by_call_id = await _batch_embed_rag_queries(calls)
+        results = await asyncio.gather(
+            *[_dispatch(call, embeddings_by_call_id) for call in calls],
+            return_exceptions=False,
+        )
     finally:
         if needs_db:
             await Tortoise.close_connections()
@@ -80,6 +92,26 @@ async def run_tool_calls_job(calls: list[dict[str, Any]]) -> dict[str, Any]:
 def _needs_tortoise(calls: list[dict[str, Any]]) -> bool:
     """``calls`` 안에 DB 접근이 필요한 tool 이 하나라도 있는지."""
     return any(call.get("name") == _MEDICINE_KNOWLEDGE_TOOL_NAME for call in calls)
+
+
+# ── fan-out 쿼리 batch 임베딩 (OpenAI N→1 최적화) ─────────────────────
+# 흐름: search_medicine_knowledge_base 호출 추출 -> query 추출
+#       -> encode_queries_batch 1회 호출 -> tool_call_id ↔ embedding 매핑
+async def _batch_embed_rag_queries(calls: list[dict[str, Any]]) -> dict[str, list[float]]:
+    """RAG 검색 쿼리들을 1회 batch 호출로 임베딩한다.
+
+    Returns:
+        ``{tool_call_id: embedding}`` 매핑. RAG 호출이 없으면 빈 dict.
+        빈 query 가 섞여 있어도 batch 응답 순서가 보장되므로 그대로 매핑.
+    """
+    rag_calls = [c for c in calls if c.get("name") == _MEDICINE_KNOWLEDGE_TOOL_NAME]
+    if not rag_calls:
+        return {}
+
+    queries = [(c.get("arguments") or {}).get("query", "").strip() for c in rag_calls]
+    embeddings = await encode_queries_batch(queries)
+    logger.info("[ToolCalling] batch embed: %d queries -> 1 OpenAI call", len(queries))
+    return {call["tool_call_id"]: embedding for call, embedding in zip(rag_calls, embeddings, strict=True)}
 
 
 def _log_run_start(calls: list[dict[str, Any]]) -> None:
@@ -97,8 +129,18 @@ def _log_run_done(merged: dict[str, dict[str, Any]]) -> None:
     logger.info("[ToolCalling] run_tool_calls_job done ok=%d errors=%d", len(merged) - error_count, error_count)
 
 
-async def _dispatch(call: dict[str, Any]) -> dict[str, Any]:
-    """단일 call dict 를 적절한 함수로 라우팅. 예외는 결과 dict 로 직렬화."""
+async def _dispatch(
+    call: dict[str, Any],
+    embeddings_by_call_id: dict[str, list[float]] | None = None,
+) -> dict[str, Any]:
+    """단일 call dict 를 적절한 함수로 라우팅. 예외는 결과 dict 로 직렬화.
+
+    Args:
+        call: tool_call dict (``tool_call_id``, ``name``, ``arguments`` ...).
+        embeddings_by_call_id: ``run_tool_calls_job`` 이 사전 batch 임베딩한
+            ``{tool_call_id: embedding}`` 매핑. RAG 호출이 본 매핑에 있으면
+            OpenAI 임베딩 API skip.
+    """
     name = call.get("name", "")
     try:
         if name == "search_hospitals_by_keyword":
@@ -106,7 +148,7 @@ async def _dispatch(call: dict[str, Any]) -> dict[str, Any]:
         if name == "search_hospitals_by_location":
             return await _run_location(call)
         if name == _MEDICINE_KNOWLEDGE_TOOL_NAME:
-            return await _run_medicine_knowledge(call)
+            return await _run_medicine_knowledge(call, embeddings_by_call_id or {})
         if name == "check_user_medications_recall":
             return await _run_user_recall(call)
         if name == "check_manufacturer_recalls":
@@ -117,11 +159,20 @@ async def _dispatch(call: dict[str, Any]) -> dict[str, Any]:
     return {"error": f"unknown function: {name}"}
 
 
-async def _run_medicine_knowledge(call: dict[str, Any]) -> dict[str, Any]:
-    """RAG retrieval 을 실행한다 (Tortoise lifecycle 은 호출자가 관리)."""
+async def _run_medicine_knowledge(
+    call: dict[str, Any],
+    embeddings_by_call_id: dict[str, list[float]],
+) -> dict[str, Any]:
+    """RAG retrieval 을 실행한다 (Tortoise lifecycle 은 호출자가 관리).
+
+    호출자가 batch 임베딩한 결과가 ``embeddings_by_call_id`` 에 있으면
+    그것을 그대로 retrieve_medicine_chunks 에 주입 — OpenAI 임베딩 API
+    개별 호출 (N→1) 절약.
+    """
     arguments = call.get("arguments") or {}
     query = arguments.get("query", "")
-    return await retrieve_medicine_chunks(query=query)
+    precomputed = embeddings_by_call_id.get(call.get("tool_call_id", ""))
+    return await retrieve_medicine_chunks(query=query, precomputed_embedding=precomputed)
 
 
 # Kakao API 외부 호출은 retry decorator 적용 — 일시적 ConnectionError /

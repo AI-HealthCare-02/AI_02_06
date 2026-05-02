@@ -39,15 +39,23 @@ class _UnusedEmbeddingProvider:
 
 
 # ── RAG retrieval (Router LLM tool dispatch) ────────────────────────
-# 흐름: 빈 쿼리 차단 -> 임베딩 -> HybridRetriever 검색 -> chunk 직렬화
-async def retrieve_medicine_chunks(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> dict[str, Any]:
+# 흐름: 빈 쿼리 차단 -> 임베딩 (사전계산 우선) -> HybridRetriever 검색 -> chunk 직렬화
+async def retrieve_medicine_chunks(
+    query: str,
+    max_results: int = DEFAULT_MAX_RESULTS,
+    *,
+    precomputed_embedding: list[float] | None = None,
+) -> dict[str, Any]:
     """Query 를 임베딩하고 hybrid 검색해 chunk 직렬화 결과를 반환한다.
 
     Tortoise 가 이미 init 된 상태에서 호출되어야 한다 (호출자의 lifecycle 관리).
 
     Args:
-        query: Router LLM 이 history 풀어 만든 검색 질의.
+        query: 검색 질의 (fan-out 으로 만들어진 1개 쿼리).
         max_results: 반환 SearchResult 상한 (실제 chunk 수는 result 당 N 청크).
+        precomputed_embedding: 호출자가 batch 임베딩으로 사전 계산한 3072d 벡터.
+            전달 시 OpenAI 임베딩 API 호출을 skip — fan-out N 개 쿼리를
+            1회 batch 로 묶어 응답 속도/비용 최적화에 사용.
 
     Returns:
         ``{"chunks": [{"medicine_name", "section", "content", "score"}, ...]}``
@@ -58,7 +66,7 @@ async def retrieve_medicine_chunks(query: str, max_results: int = DEFAULT_MAX_RE
         logger.warning("[RAG dispatch] empty query, returning empty chunks")
         return {"chunks": [], "note": "empty query"}
 
-    embedding = await encode_query(cleaned)
+    embedding = precomputed_embedding if precomputed_embedding is not None else await encode_query(cleaned)
     retriever = HybridRetriever(embedding_provider=_UnusedEmbeddingProvider())
     results = await retriever.retrieve(
         query=cleaned,
