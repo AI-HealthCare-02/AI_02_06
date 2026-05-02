@@ -315,7 +315,7 @@ class HybridRetriever:
         WHERE {where_clause}
         ORDER BY ts_rank(mc.content_tsv, plainto_tsquery('simple', $1)) DESC
         LIMIT ${idx}
-        """  # noqa: S608
+        """  # noqa: S608  # nosec B608
         params.append(limit)
         return sql, params
 
