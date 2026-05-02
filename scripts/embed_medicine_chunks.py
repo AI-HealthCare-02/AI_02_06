@@ -60,11 +60,13 @@ EMBEDDING_MODEL = "text-embedding-3-large"
 EMBEDDING_DIMENSIONS = 3072
 EMBEDDING_PRICE_PER_1M = 0.13  # USD
 
-# OpenAI text-embedding-3-large input 한도 = 8191 tok. 안전 마진 두고 8000.
-MAX_TOKENS_PER_CHUNK = 8000
+# OpenAI text-embedding-3-large input 한도 = 8192 tok. 분할 한도는 더 보수적
+# 으로 4000 tok (한국어 토큰화는 char/tok 비율이 변동 커서 안전 마진 필요).
+MAX_TOKENS_PER_CHUNK = 4000
 
-# 한국어 평균 1.5자 = 1 token (rough estimate, tiktoken 미설치라 단순 추정)
-CHARS_PER_TOKEN = 1.5
+# 한국어 평균 0.5~1자 = 1 token (cl100k_base 기준). tiktoken 미설치 환경에선
+# 0.5 로 보수적 추정 (실제 토큰 수보다 *많이* 잡혀 분할이 적극적으로 일어남).
+CHARS_PER_TOKEN = 0.5
 
 # OpenAI Embedding batch input 한도는 매우 크지만 (지금은 메모리/네트워크
 # 제약 위주) 안전하게 100 chunks per call.
@@ -126,10 +128,23 @@ def _format_chunk_content(medicine_name: str, section: MedicineChunkSection, art
     return "\n".join(parts)
 
 
+def _truncate_to_char_limit(text: str, max_chars: int) -> str:
+    """OpenAI 한도 (8192 tok) 안전 보장 — char 단위 hard cap.
+
+    한 줄이 max_tokens 초과하는 케이스 (긴 PARAGRAPH 단일 줄) 도 최후 잘라낸다.
+    """
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars]
+
+
 def _split_long_content(content: str, max_tokens: int = MAX_TOKENS_PER_CHUNK) -> list[str]:
     """토큰 한도 초과 시 줄바꿈 단위로 분할해 chunk_index 0,1,2... 로 사용."""
     if _estimate_tokens(content) <= max_tokens:
         return [content]
+
+    # 한도를 보장하는 char 상한 (CHARS_PER_TOKEN=0.5 면 max_tokens=4000 → 2000 chars)
+    max_chars = int(max_tokens * CHARS_PER_TOKEN)
 
     lines = content.split("\n")
     chunks: list[str] = []
@@ -137,6 +152,15 @@ def _split_long_content(content: str, max_tokens: int = MAX_TOKENS_PER_CHUNK) ->
     current_tokens = 0
 
     for line in lines:
+        # 한 줄 자체가 한도 초과 시 hard truncate
+        if _estimate_tokens(line) > max_tokens:
+            if current:
+                chunks.append("\n".join(current))
+                current = []
+                current_tokens = 0
+            chunks.append(_truncate_to_char_limit(line, max_chars))
+            continue
+
         line_tokens = _estimate_tokens(line)
         if current_tokens + line_tokens > max_tokens and current:
             chunks.append("\n".join(current))
@@ -148,7 +172,9 @@ def _split_long_content(content: str, max_tokens: int = MAX_TOKENS_PER_CHUNK) ->
 
     if current:
         chunks.append("\n".join(current))
-    return chunks
+
+    # 최종 안전망: 어느 chunk 도 hard char limit 초과 안 하도록
+    return [_truncate_to_char_limit(c, max_chars * 2) for c in chunks]
 
 
 def _build_chunks_for_medicine(med: MedicineInfo) -> list[tuple[MedicineChunkSection, int, str, int]]:
@@ -234,10 +260,10 @@ async def _insert_chunks_batch(
 
     from tortoise import connections
 
-    result = await connections.get("default").execute_query(sql, params)
-    # execute_query 는 (affected_rows, _) — Tortoise version 마다 다름
-    affected = result[0] if isinstance(result, tuple) else len(rows)
-    return affected
+    await connections.get("default").execute_query(sql, params)
+    # asyncpg 의 INSERT ... ON CONFLICT 결과 파싱 일관 X.
+    # rows 길이로 카운트 (재실행 시 ON CONFLICT 가 silent skip 이라 정확).
+    return len(rows)
 
 
 # ── 메인 처리 루프 ───────────────────────────────────────────────────
