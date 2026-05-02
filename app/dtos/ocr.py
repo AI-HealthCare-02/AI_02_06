@@ -42,7 +42,12 @@ class ExtractedMedicine(BaseModel):
     daily_intake_count: int | None = Field(None, description="1일 복용 횟수 (예: 3)")
     total_intake_days: int | None = Field(None, description="총 복용 일수 (예: 5, daily_intake_count와 다른 값)")
     intake_instruction: str | None = Field(None, description="복용 시점 지시사항 (예: 식후 30분, 취침 전)")
-
+    # =========================================================================
+    # [AI OCR 파이프라인 트래킹 추가]
+    # =========================================================================
+    raw_ocr_name: str | None = Field(None, description="OCR이 인식한 날것의 텍스트")
+    is_llm_corrected: bool = Field(False, description="LLM을 통해 교정되었는지 여부")
+    match_score: float | None = Field(None, description="퍼지/LLM 신뢰도 점수 (0.0~1.0)")
 
 class OcrExtractResponse(BaseModel):
     """OCR extraction enqueue response — 즉시 200 응답.
