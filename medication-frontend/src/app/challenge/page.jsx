@@ -366,8 +366,8 @@ export default function ChallengePage() {
                         disabled={isStarting}
                         className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors shrink-0
                           ${isStarting
-                            ? 'bg-blue-300 text-white cursor-wait'
-                            : 'bg-blue-500 text-white hover:bg-blue-600 cursor-pointer'}`}
+                            ? 'bg-gray-100 text-gray-400 cursor-wait'
+                            : 'bg-gray-900 text-white hover:bg-gray-800 active:scale-95 shadow-sm'}`}
                       >
                         {isStarting && startTarget?.id === item.id ? '처리중...' : '시작하기'}
                       </button>
