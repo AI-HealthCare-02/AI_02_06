@@ -18,11 +18,14 @@ batch 입력 지원 (fanout_queries N 개를 한 번에 임베딩).
 
 import logging
 
-from openai import AsyncOpenAI
+from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, RateLimitError
 
 from app.core.config import config
+from app.services.tools.retry import retry_async
 
 logger = logging.getLogger(__name__)
+
+_RETRYABLE = (APIConnectionError, APITimeoutError, RateLimitError, ConnectionError, TimeoutError)
 
 EMBEDDING_MODEL = "text-embedding-3-large"
 EMBEDDING_DIMENSIONS = 3072
@@ -52,6 +55,27 @@ def _get_client() -> AsyncOpenAI | None:
     return _client
 
 
+@retry_async(retryable=_RETRYABLE)
+async def _embed_one(client: AsyncOpenAI, query: str) -> list[float]:
+    response = await client.embeddings.create(
+        model=EMBEDDING_MODEL,
+        input=query,
+        dimensions=EMBEDDING_DIMENSIONS,
+    )
+    return list(response.data[0].embedding)
+
+
+@retry_async(retryable=_RETRYABLE)
+async def _embed_batch(client: AsyncOpenAI, queries: list[str]) -> list[list[float]]:
+    response = await client.embeddings.create(
+        model=EMBEDDING_MODEL,
+        input=queries,
+        dimensions=EMBEDDING_DIMENSIONS,
+    )
+    # response.data 는 input 순서 그대로 반환 (OpenAI 명세 보장)
+    return [list(d.embedding) for d in response.data]
+
+
 async def encode_query(query: str) -> list[float]:
     """단일 query 를 3072d 임베딩 벡터로 변환.
 
@@ -68,12 +92,7 @@ async def encode_query(query: str) -> list[float]:
     if client is None:
         return [0.0] * EMBEDDING_DIMENSIONS
 
-    response = await client.embeddings.create(
-        model=EMBEDDING_MODEL,
-        input=query,
-        dimensions=EMBEDDING_DIMENSIONS,
-    )
-    return list(response.data[0].embedding)
+    return await _embed_one(client, query)
 
 
 async def encode_queries_batch(queries: list[str]) -> list[list[float]]:
@@ -92,10 +111,4 @@ async def encode_queries_batch(queries: list[str]) -> list[list[float]]:
     if client is None:
         return [[0.0] * EMBEDDING_DIMENSIONS for _ in queries]
 
-    response = await client.embeddings.create(
-        model=EMBEDDING_MODEL,
-        input=queries,
-        dimensions=EMBEDDING_DIMENSIONS,
-    )
-    # response.data 는 input 순서 그대로 반환 (OpenAI 명세 보장)
-    return [list(d.embedding) for d in response.data]
+    return await _embed_batch(client, queries)

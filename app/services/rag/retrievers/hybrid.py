@@ -1,9 +1,9 @@
-"""Hybrid retriever combining pgvector similarity and keyword matching.
+"""Hybrid retriever — pgvector cosine + tsvector BM25 RRF 융합.
 
-Queries `medicine_chunk` for dense embedding similarity (pgvector cosine),
-joins parent `medicine_info` rows, groups chunks under their parent
-medicine, and combines the top-1 chunk score with a keyword-overlap score
-against `medicine_name + category` for final ranking.
+PLAN.md (feature/RAG) §3 C2 결정:
+- 1차 RRF (intra-query): vector rank ↔ BM25 rank 병합 (Cormack k=60)
+- 가중합 (vector_weight 0.7 + keyword 0.3) 폐기 → RRF 표준 알고리즘 사용
+- tsvector 검색은 28번 마이그의 content_tsv 컬럼 + GIN 인덱스 활용
 """
 
 import logging
@@ -15,6 +15,7 @@ from app.dtos.rag import ChunkMatch, SearchFilters, SearchResult
 from app.models.medicine_chunk import MedicineChunk
 from app.models.medicine_info import MedicineInfo
 from app.services.rag.protocols import EmbeddingProvider
+from app.services.rag.retrievers.rrf import rrf_intra_query
 
 logger = logging.getLogger(__name__)
 
@@ -37,28 +38,23 @@ _STOP_WORDS: frozenset[str] = frozenset({
 
 
 class HybridRetriever:
-    """Retriever combining pgvector similarity with keyword scoring.
+    """Retriever — pgvector cosine + tsvector BM25 RRF 융합.
 
-    Weights are normalized so vector_weight + keyword_weight == 1.0.
+    PLAN.md (feature/RAG) §3 C2 — Cormack et al. 2009 표준 RRF (k=60).
     """
 
     def __init__(
         self,
         embedding_provider: EmbeddingProvider,
-        vector_weight: float = 0.7,
-        keyword_weight: float = 0.3,
     ) -> None:
         """Initialize hybrid retriever.
 
         Args:
-            embedding_provider: Provider used for query embedding.
-            vector_weight: Weight for vector similarity score.
-            keyword_weight: Weight for keyword matching score.
+            embedding_provider: Provider used for query embedding (인터페이스만,
+                실 query 임베딩은 caller 가 사전 계산하여 ``query_embedding``
+                인자로 넘김).
         """
         self.embedding_provider = embedding_provider
-        total = vector_weight + keyword_weight
-        self.vector_weight = vector_weight / total
-        self.keyword_weight = keyword_weight / total
 
     async def retrieve(
         self,
@@ -67,46 +63,44 @@ class HybridRetriever:
         filters: SearchFilters,
         limit: int,
     ) -> list[SearchResult]:
-        """Retrieve ranked medicine results for a query.
+        """Retrieve ranked medicine results for a query (1차 RRF).
 
         Args:
-            query: Original query text for keyword scoring.
+            query: Original query text — tsvector 검색 입력으로 사용.
             query_embedding: Pre-computed query embedding vector.
             filters: Metadata filters to apply.
             limit: Maximum number of SearchResult entries to return.
 
         Returns:
-            SearchResult list sorted by final_score descending. Each result
-            carries its parent MedicineInfo plus every chunk that surfaced
-            for that medicine (in matched_chunks).
+            SearchResult list — RRF score 내림차순 + limit 개. 각 result 의
+            ``vector_score``/``keyword_score`` 는 raw 값, ``final_score`` 는
+            RRF score.
         """
-        vector_results = await self._vector_search(query_embedding, filters, limit * 3)
-        if not vector_results:
+        # 후보군 — vector / bm25 각각 limit*3 개 회수 후 RRF 로 줄임
+        candidate_limit = limit * 3
+        vector_groups = await self._vector_search(query_embedding, filters, candidate_limit)
+        bm25_groups = await self._bm25_search(query, filters, candidate_limit)
+
+        if not vector_groups and not bm25_groups:
             return []
 
-        query_keywords = self.extract_keywords(query)
-        results: list[SearchResult] = []
+        # 1차 RRF — chunk_id 기준 vector + bm25 rank 병합
+        vector_hits = [
+            {"chunk_id": cm.chunk.id, "medicine": med, "match": cm} for med, matches in vector_groups for cm in matches
+        ]
+        bm25_hits = [
+            {"chunk_id": cm.chunk.id, "medicine": med, "match": cm} for med, matches in bm25_groups for cm in matches
+        ]
+        merged = rrf_intra_query(vector_hits, bm25_hits)
+        logger.info(
+            "[RAG] RRF intra-query merged %d unique chunks (vec=%d bm25=%d)",
+            len(merged),
+            len(vector_hits),
+            len(bm25_hits),
+        )
 
-        for medicine, chunk_matches in vector_results:
-            top_chunk_score = chunk_matches[0].vector_score if chunk_matches else 0.0
-            keyword_score = self.calculate_keyword_score(
-                query_keywords=query_keywords,
-                medicine_name=medicine.medicine_name,
-                category=medicine.category,
-            )
-            final_score = self.vector_weight * top_chunk_score + self.keyword_weight * keyword_score
-            results.append(
-                SearchResult(
-                    medicine=medicine,
-                    matched_chunks=chunk_matches,
-                    vector_score=top_chunk_score,
-                    keyword_score=keyword_score,
-                    final_score=final_score,
-                )
-            )
-
-        results.sort(key=lambda r: r.final_score, reverse=True)
-        return results[:limit]
+        # medicine 단위 grouping (RRF score 합산)
+        return self._group_by_medicine(merged, limit)
 
     async def _vector_search(
         self,
@@ -246,64 +240,120 @@ class HybridRetriever:
             grouped[mid][1].append(ChunkMatch(chunk=chunk, vector_score=vector_score))
         return [grouped[mid] for mid in order]
 
-    def calculate_keyword_score(
+    async def _bm25_search(
         self,
-        query_keywords: list[str],
-        medicine_name: str,
-        category: str | None,
-    ) -> float:
-        """Keyword overlap score against medicine_name + category.
+        query: str,
+        filters: SearchFilters,
+        limit: int,
+    ) -> list[tuple[MedicineInfo, list[ChunkMatch]]]:
+        """Tsvector 풀텍스트 검색 — content_tsv @@ plainto_tsquery + ts_rank.
 
-        Name hits count twice as much as category hits. Returns 0.0 when
-        no query keywords, and is bounded to [0.0, 1.0].
-
-        Args:
-            query_keywords: Keywords extracted from the user query.
-            medicine_name: Parent medicine's medicine_name.
-            category: Parent medicine's category (nullable on the main schema).
-
-        Returns:
-            Score in [0.0, 1.0].
+        28번 마이그의 ``content_tsv`` 컬럼 + GIN 인덱스 활용. RRF 의 BM25 source.
+        한국어 query 는 simple config 의 단어 토큰화를 사용 (mecab-ko 미설치).
         """
-        if not query_keywords:
-            return 0.0
+        normalized = self._normalize_query_for_tsquery(query)
+        if not normalized:
+            return []
 
-        name_lower = medicine_name.lower()
-        category_lower = (category or "").lower()
-        matches = 0
-        for keyword in query_keywords:
-            kw_lower = keyword.lower()
-            if kw_lower in name_lower:
-                matches += 2  # Name hits weighted higher
-            if category_lower and kw_lower in category_lower:
-                matches += 1
+        sql, params = self._build_bm25_search_sql(normalized, filters, limit)
+        rows = await connections.get("default").execute_query_dict(sql, params)
+        logger.info("[RAG] tsvector(bm25): %d rows query=%r", len(rows), normalized[:50])
+        # ts_rank 점수를 vector_score 자리에 그대로 넣음 (ChunkMatch 가 단일 score 필드만 보유)
+        raw_hits = [self._row_to_hit(row) for row in rows]
+        return self._group_chunks_by_medicine(raw_hits)
 
-        max_possible = len(query_keywords) * 3
-        return min(matches / max_possible, 1.0)
-
-    def extract_keywords(self, query: str) -> list[str]:
-        """Extract meaningful Korean/alphanumeric keywords from a query.
-
-        Strips trailing Korean particles (은/는/이/가/을/를 ...) so that
-        '타이레놀의' reduces to '타이레놀' before lexical matching.
-
-        Args:
-            query: User query string.
-
-        Returns:
-            Keyword list with stopwords and single-char tokens removed.
-        """
+    @staticmethod
+    def _normalize_query_for_tsquery(query: str) -> str:
+        """한국어 query → plainto_tsquery 입력. stopword 제거 + 공백 결합."""
         words = re.findall(r"[가-힣a-zA-Z0-9]+", query)
-        keywords: list[str] = []
-        for raw in words:
-            if raw.lower() in _STOP_WORDS or len(raw) <= 1:
-                continue
-            keywords.append(self._strip_trailing_particle(raw))
-        return keywords
+        kept = [w for w in words if w.lower() not in _STOP_WORDS and len(w) > 1]
+        return " ".join(kept)
 
-    def _strip_trailing_particle(self, word: str) -> str:
-        """Remove a known particle suffix when the stem would remain >= 2 chars."""
-        for particle in _STOP_WORDS:
-            if word.endswith(particle) and len(word) - len(particle) >= 2:
-                return word[: -len(particle)]
-        return word
+    @staticmethod
+    def _build_bm25_search_sql(
+        normalized_query: str,
+        filters: SearchFilters,
+        limit: int,
+    ) -> tuple[str, list]:
+        """Tsvector @@ plainto_tsquery + ts_rank ORDER BY rank DESC LIMIT N."""
+        where_conditions: list[str] = ["mc.content_tsv @@ plainto_tsquery('simple', $1)"]
+        params: list = [normalized_query]
+        idx = 2
+        if filters.medicine_names:
+            where_conditions.append(f"mi.medicine_name = ANY(${idx})")
+            params.append(filters.medicine_names)
+            idx += 1
+        where_clause = " AND ".join(where_conditions)
+
+        sql = f"""
+        SELECT
+            mc.id AS chunk_id,
+            mc.medicine_info_id,
+            mc.section,
+            mc.chunk_index,
+            mc.content,
+            mc.token_count,
+            mc.model_version,
+            mc.created_at AS chunk_created_at,
+            mc.updated_at AS chunk_updated_at,
+            (1 - ts_rank(mc.content_tsv, plainto_tsquery('simple', $1))) AS distance,
+            mi.id AS mi_id,
+            mi.item_seq,
+            mi.medicine_name,
+            mi.item_eng_name,
+            mi.entp_name,
+            mi.category,
+            mi.efficacy,
+            mi.side_effects,
+            mi.precautions,
+            mi.atc_code,
+            mi.ee_doc_url,
+            mi.ud_doc_url,
+            mi.nb_doc_url
+        FROM medicine_chunk mc
+        INNER JOIN medicine_info mi ON mi.id = mc.medicine_info_id
+        WHERE {where_clause}
+        ORDER BY ts_rank(mc.content_tsv, plainto_tsquery('simple', $1)) DESC
+        LIMIT ${idx}
+        """  # noqa: S608
+        params.append(limit)
+        return sql, params
+
+    def _group_by_medicine(
+        self,
+        merged: list[dict],
+        limit: int,
+    ) -> list[SearchResult]:
+        """RRF 결과 (chunk 단위) → medicine 단위 SearchResult 로 grouping.
+
+        같은 medicine 의 chunk RRF score 를 합산해 final_score 로 사용.
+        """
+        by_medicine: dict[int, dict] = {}
+        for item in merged:
+            medicine: MedicineInfo = item["medicine"]
+            mid = medicine.id
+            if mid not in by_medicine:
+                by_medicine[mid] = {
+                    "medicine": medicine,
+                    "chunks": [],
+                    "score_sum": 0.0,
+                }
+            by_medicine[mid]["chunks"].append(item["match"])
+            by_medicine[mid]["score_sum"] += item.get("rrf_score", 0.0)
+
+        results: list[SearchResult] = []
+        for entry in by_medicine.values():
+            chunks = entry["chunks"]
+            top_chunk_score = chunks[0].vector_score if chunks else 0.0
+            results.append(
+                SearchResult(
+                    medicine=entry["medicine"],
+                    matched_chunks=chunks,
+                    vector_score=top_chunk_score,
+                    keyword_score=0.0,  # legacy 필드 — RRF 도입 후 의미 X
+                    final_score=entry["score_sum"],
+                )
+            )
+
+        results.sort(key=lambda r: r.final_score, reverse=True)
+        return results[:limit]

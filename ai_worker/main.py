@@ -4,7 +4,6 @@ This module contains the main entry point for the AI worker service.
 Includes Redis connection retry logic and RQ version compatibility handling.
 """
 
-import asyncio
 from pathlib import Path
 import signal
 import sys
@@ -21,26 +20,6 @@ from ai_worker.core.logger import get_logger
 from ai_worker.core.redis_client import make_sync_redis
 
 logger = get_logger(__name__)
-
-
-def warmup_embedding_model() -> None:
-    """Pre-load ko-sroberta into memory and run a dummy encode.
-
-    첫 사용자 요청이 cold-start 비용(~30초)을 뒤집어쓰지 않도록 RQ 워커
-    루프가 돌기 전에 모델을 메모리에 올리고 dummy encode 한 번을 돌린다.
-    ``_ensure_model`` 내부에서 warmup encode 까지 수행한다.
-    """
-    try:
-        from ai_worker.domains.rag.embedding_provider import _ensure_model
-
-        logger.info("Pre-warming embedding model...")
-        t0 = time.perf_counter()
-        asyncio.run(_ensure_model())
-        elapsed = time.perf_counter() - t0
-        logger.info("Embedding model warmed up in %.2fs", elapsed)
-    except Exception:
-        # 비정상이면 로그만 남기고 워커 기동은 계속한다. 첫 요청이 느려질 뿐이다.
-        logger.exception("Embedding warmup failed (non-fatal)")
 
 
 # Graceful shutdown flag
@@ -137,9 +116,6 @@ def main() -> None:
     logger.info("Timezone: %s", config.TIMEZONE)
 
     _wait_for_redis()
-
-    # 첫 사용자 요청이 ML 로딩 비용을 뒤집어쓰지 않도록 미리 모델 warm up.
-    warmup_embedding_model()
 
     # make_sync_redis 가 keepalive + retry 옵션을 일괄 적용 (BLPOP idle 후 재연결 안정화).
     redis_conn = make_sync_redis(config.REDIS_URL)

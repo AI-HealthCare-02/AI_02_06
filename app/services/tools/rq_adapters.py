@@ -1,7 +1,6 @@
 """RQ-backed adapters for the tool-calling subsystem (FastAPI side).
 
-Mirrors the ``RQEmbeddingProvider`` pattern from RAG: FastAPI never holds
-the OpenAI client nor the actual tool execution — it only enqueues an
+FastAPI never holds the actual tool execution — it only enqueues an
 AI-Worker RQ job and polls the result with ``asyncio.sleep`` so the event
 loop stays free.
 

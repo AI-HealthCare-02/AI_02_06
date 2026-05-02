@@ -34,6 +34,7 @@ from app.services.tools.recalls.checker import (
     check_manufacturer_recalls,
     check_user_medications_recall,
 )
+from app.services.tools.retry import retry_async
 
 logger = logging.getLogger(__name__)
 
@@ -123,16 +124,34 @@ async def _run_medicine_knowledge(call: dict[str, Any]) -> dict[str, Any]:
     return await retrieve_medicine_chunks(query=query)
 
 
+# Kakao API 외부 호출은 retry decorator 적용 — 일시적 ConnectionError /
+# TimeoutError 시 자동 재시도. PLAN.md (feature/RAG) §4 D1 결정.
+@retry_async()
+async def _kakao_keyword(query: str) -> list[KakaoPlace]:
+    return await search_hospitals_by_keyword(query=query)
+
+
+@retry_async()
+async def _kakao_location(
+    *,
+    lat: float,
+    lng: float,
+    radius_m: int,
+    category: HospitalCategory,
+) -> list[KakaoPlace]:
+    return await search_hospitals_by_location(lat=lat, lng=lng, radius_m=radius_m, category=category)
+
+
 async def _run_keyword(call: dict[str, Any]) -> dict[str, Any]:
-    """키워드 기반 병원/약국 검색을 실행한다."""
+    """키워드 기반 병원/약국 검색을 실행한다 (Kakao API + retry)."""
     arguments = call.get("arguments") or {}
     query = arguments.get("query", "")
-    places = await search_hospitals_by_keyword(query=query)
+    places = await _kakao_keyword(query=query)
     return {"places": _places_to_dict_list(places)}
 
 
 async def _run_location(call: dict[str, Any]) -> dict[str, Any]:
-    """위치 기반 병원/약국 검색을 실행한다 (geolocation 필수)."""
+    """위치 기반 병원/약국 검색을 실행한다 (Kakao API + retry, geolocation 필수)."""
     geolocation = call.get("geolocation")
     if not _is_valid_geolocation(geolocation):
         return {"error": "missing geolocation: location tool requires lat/lng in call payload"}
@@ -140,7 +159,7 @@ async def _run_location(call: dict[str, Any]) -> dict[str, Any]:
     arguments = call.get("arguments") or {}
     category = _CATEGORY_TO_ENUM.get(arguments.get("category", "약국"), HospitalCategory.PHARMACY)
     radius_m = int(arguments.get("radius_m", DEFAULT_RADIUS_M))
-    places = await search_hospitals_by_location(
+    places = await _kakao_location(
         lat=float(geolocation["lat"]),
         lng=float(geolocation["lng"]),
         radius_m=radius_m,
