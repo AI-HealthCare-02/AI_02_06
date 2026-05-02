@@ -343,9 +343,12 @@ class MessageService:
         # ★ user 메시지 영속화 — 실패 시 soft delete rollback
         user_msg = await self.repository.create_user_message(session_id, content)
         try:
-            # Step 1+2: medical_context + IntentClassifier (4o-mini)
+            # Step 1+2: medical_context + ingredient_mapping + IntentClassifier (4o-mini)
             classify_messages = [*history, {"role": "user", "content": content}]
-            classification = await classify_user_turn(profile_id, classify_messages)
+            medical_context, ingredient_mapping_section, classification = await classify_user_turn(
+                profile_id,
+                classify_messages,
+            )
 
             # 분기 1: direct_answer — IntentClassifier 가 즉시 답변
             if classification.direct_answer:
@@ -389,6 +392,8 @@ class MessageService:
                 tool_calls=tool_calls,
                 tool_results=tool_results,
                 classification=classification,
+                medical_context=medical_context,
+                ingredient_mapping_section=ingredient_mapping_section,
             )
         except Exception:
             await self.repository.soft_delete(user_msg)
@@ -451,6 +456,8 @@ class MessageService:
         tool_calls: list[ToolCall],
         tool_results: dict[str, Any],
         classification: Any,
+        medical_context: str = "",
+        ingredient_mapping_section: str = "",
     ) -> AskResult:
         """RAG retrieval 결과를 system prompt 에 inject 한 후 2nd LLM 호출.
 
@@ -467,6 +474,8 @@ class MessageService:
             session_summary=session_summary,
             referent_resolution=classification.referent_resolution,
             rag_section=rag_section,
+            medical_context=medical_context,
+            ingredient_mapping_section=ingredient_mapping_section,
         )
         second_messages = [
             *history,
@@ -632,16 +641,26 @@ class MessageService:
 
 
 # ── 2nd LLM system prompt 조립 ──────────────────────────────────────
-# RAG_FLOW.md §2.4 의 권장 섹션 순서:
-#   1. persona  2. output rule  3. (의학 컨텍스트는 IntentClassifier 가 흡수)
-#   4. 세션 요약  5. 명확화 (referent_resolution 있을 때)  6. RAG 검색 결과
+# PLAN.md (feat/ingredient-grounded-rag) §E - 사용자 brand <-> 검색 결과
+# 성분명 단절 방지를 위한 안전장치 4종 통합. 섹션 순서:
+#   1. persona + output rule (성분 grounded 룰 강화)
+#   2. [사용자 의학 컨텍스트] - 사용자 복용약/기저질환/알레르기 (brand 표기)
+#   3. [용어 매핑] - brand -> 활성성분 변환표 (LLM 의 단절 방지)
+#   4. [세션 요약] (옵션)
+#   5. [명확화] (referent_resolution 있을 때)
+#   6. [검색된 약품 정보] - 성분 단위 RAG 결과
 _PERSONA_AND_RULES = (
     "당신은 'Dayak' 약사 챗봇입니다. 따뜻하고 친근한 어조 (해요체) 로 응답합니다.\n"
     "출력 규칙:\n"
     "- 한국어 GFM. 코드 블록 금지.\n"
     "- 답변 안에서 [약: 약품명] [section] 형식으로 출처 인라인 명시.\n"
     "- 의학적 진단/처방 변경 제안 금지. 의사·약사 상담 권고.\n"
-    "- 약물 상호작용·부작용·금기 정보가 검색 결과에 있으면 적극 반영."
+    "- 약물 상호작용·부작용·금기 정보가 검색 결과에 있으면 적극 반영.\n"
+    "- 사용자가 사용한 약 이름은 brand 입니다. 검색 결과는 성분명 단위입니다.\n"
+    "  답변 시 사용자의 brand 이름을 그대로 쓰면서, [용어 매핑] 의 brand -> 성분\n"
+    "  변환표를 활용해 검색 결과의 성분 정보를 정확히 반영하세요. 일반론적인\n"
+    "  '의사 상담' 답변 대신, 사용자 복용약/기저질환과의 구체적 상호작용을\n"
+    "  검색 결과 기반으로 제시하세요."
 )
 
 
@@ -650,9 +669,17 @@ def _compose_system_prompt(
     session_summary: str | None,
     referent_resolution: dict[str, str] | None,
     rag_section: str,
+    medical_context: str = "",
+    ingredient_mapping_section: str = "",
 ) -> str:
-    """2nd LLM (4o) 의 system prompt 를 6 섹션 순서로 조립한다."""
+    """2nd LLM (4o) 의 system prompt 를 섹션 순서로 조립한다."""
     parts: list[str] = [_PERSONA_AND_RULES]
+
+    if medical_context:
+        parts.append(medical_context)  # 헤더 [사용자 의학 컨텍스트] 포함
+
+    if ingredient_mapping_section:
+        parts.append(ingredient_mapping_section)  # 헤더 [용어 매핑] 포함
 
     if session_summary:
         parts.append(f"[세션 요약]\n{session_summary}")

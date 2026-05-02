@@ -75,10 +75,14 @@ class TestAskWithToolsDirectAnswer:
     ) -> None:
         """'안녕' → IntentClassifier 가 greeting + direct_answer → 2nd LLM 호출 X."""
 
-        async def _fake_classify(_pid: UUID, _msgs: list[dict[str, str]]) -> IntentClassification:
-            return IntentClassification(
-                intent=IntentType.GREETING,
-                direct_answer="안녕하세요. 무엇을 도와드릴까요?",
+        async def _fake_classify(_pid: UUID, _msgs: list[dict[str, str]]) -> tuple[str, str, IntentClassification]:
+            return (
+                "",
+                "",
+                IntentClassification(
+                    intent=IntentType.GREETING,
+                    direct_answer="안녕하세요. 무엇을 도와드릴까요?",
+                ),
             )
 
         run_tool_calls_mock = AsyncMock()
@@ -112,18 +116,22 @@ class TestAskWithToolsDomainQuestion:
     ) -> None:
         """'타이레놀 먹어도 돼?' → fan-out → 5 tool_calls → RAG context inject → 2nd LLM."""
 
-        async def _fake_classify(_pid: UUID, _msgs: list[dict[str, str]]) -> IntentClassification:
-            return IntentClassification(
-                intent=IntentType.DOMAIN_QUESTION,
-                fanout_queries=[
-                    "타이레놀과 메트포민의 상호작용",
-                    "타이레놀과 와파린의 상호작용",
-                    "타이레놀과 오메가3의 상호작용",
-                    "타이레놀의 페니실린 알레르기 가능성",
-                    "타이레놀의 일반 부작용 및 주의사항",
-                ],
-                referent_resolution=None,
-                filters=SearchFilters(target_drug="타이레놀"),
+        async def _fake_classify(_pid: UUID, _msgs: list[dict[str, str]]) -> tuple[str, str, IntentClassification]:
+            return (
+                "[사용자 의학 컨텍스트]\n- 복용 중인 약: 타이레놀, 메트포민",
+                "[용어 매핑]\n- 타이레놀 → 성분: 아세트아미노펜",
+                IntentClassification(
+                    intent=IntentType.DOMAIN_QUESTION,
+                    fanout_queries=[
+                        "타이레놀과 메트포민의 상호작용",
+                        "타이레놀과 와파린의 상호작용",
+                        "타이레놀과 오메가3의 상호작용",
+                        "타이레놀의 페니실린 알레르기 가능성",
+                        "타이레놀의 일반 부작용 및 주의사항",
+                    ],
+                    referent_resolution=None,
+                    filters=SearchFilters(target_drug="타이레놀"),
+                ),
             )
 
         captured_tool_calls: dict[str, Any] = {}
@@ -194,11 +202,15 @@ class TestAskWithToolsDomainQuestion:
     ) -> None:
         """referent_resolution 가 있으면 system_prompt 의 [명확화] 섹션에 inject."""
 
-        async def _fake_classify(_pid: UUID, _msgs: list[dict[str, str]]) -> IntentClassification:
-            return IntentClassification(
-                intent=IntentType.DOMAIN_QUESTION,
-                fanout_queries=["타이레놀의 부작용"],
-                referent_resolution={"그거": "타이레놀"},
+        async def _fake_classify(_pid: UUID, _msgs: list[dict[str, str]]) -> tuple[str, str, IntentClassification]:
+            return (
+                "",
+                "",
+                IntentClassification(
+                    intent=IntentType.DOMAIN_QUESTION,
+                    fanout_queries=["타이레놀의 부작용"],
+                    referent_resolution={"그거": "타이레놀"},
+                ),
             )
 
         async def _fake_run_tool_calls(*, calls: list[dict], queue: Any) -> dict[str, Any]:
@@ -247,10 +259,14 @@ class TestAskWithToolsDomainQuestion:
     ) -> None:
         """안전망: domain_question 인데 fanout 비어있으면 fallback message."""
 
-        async def _fake_classify(_pid: UUID, _msgs: list[dict[str, str]]) -> IntentClassification:
-            return IntentClassification(
-                intent=IntentType.DOMAIN_QUESTION,
-                fanout_queries=None,  # 4o-mini 가 어긴 케이스
+        async def _fake_classify(_pid: UUID, _msgs: list[dict[str, str]]) -> tuple[str, str, IntentClassification]:
+            return (
+                "",
+                "",
+                IntentClassification(
+                    intent=IntentType.DOMAIN_QUESTION,
+                    fanout_queries=None,  # 4o-mini 가 어긴 케이스
+                ),
             )
 
         run_tool_calls_mock = AsyncMock()
@@ -283,7 +299,7 @@ class TestAskWithToolsRollback:
     ) -> None:
         """classify_user_turn 이 예외 던지면 user_msg soft_delete 호출 + 예외 propagate."""
 
-        async def _fake_classify(_pid: UUID, _msgs: list[dict[str, str]]) -> IntentClassification:
+        async def _fake_classify(_pid: UUID, _msgs: list[dict[str, str]]) -> tuple[str, str, IntentClassification]:
             raise RuntimeError("4o-mini API down")
 
         monkeypatch.setattr(ms_module, "classify_user_turn", _fake_classify)
