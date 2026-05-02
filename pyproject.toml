@@ -24,9 +24,6 @@ dependencies = [
 [dependency-groups]
 ai = [
     "scikit-learn>=1.8.0",
-    "torch",
-    "torchvision",
-    "sentence-transformers>=5.2.0",
     "numpy>=2.0.0",
     "psycopg2-binary>=2.9.0",  # pgvector support
     "tqdm>=4.67.0",            # batch seeding progress display
@@ -41,7 +38,6 @@ app = [
     "orjson>=3.11.5",
     "passlib[bcrypt]>=1.7.4",
     "pyjwt>=2.10.1",
-    "sentence-transformers>=5.2.0",
     "tortoise-orm>=0.25.3",
     "uvicorn>=0.40.0",
 ]
@@ -55,15 +51,6 @@ dev = [
     "types-passlib>=1.7.7.20250602",
     "types-python-dateutil>=2.9.0.20260124",
 ]
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[tool.uv.sources]
-torch = { index = "pytorch-cpu" }
-torchvision = { index = "pytorch-cpu" }
 
 [tool.aerich]
 tortoise_orm = "app.db.databases.TORTOISE_ORM"
