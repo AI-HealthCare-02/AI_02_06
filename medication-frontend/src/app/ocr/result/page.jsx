@@ -1,14 +1,7 @@
 'use client'
 
 // /ocr/result — OCR 결과 확인 + 수정 + 저장 (react-hook-form + zod 표준 적용).
-//
-// 흐름:
-//   1) draft_id 로 SSE 연결 → ai-worker 의 status='ready' 까지 폴링
-//   2) ready 도달 시 medicines 를 폼에 reset (useFieldArray)
-//   3) 사용자 인라인 수정 — 실시간 zod 검증 + 빨간 helper
-//   4) 저장 시 BE 의 confirm 또는 manual create 호출 (검증 통과만)
-
-import { useEffect, Suspense } from 'react'
+import { useEffect, Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Trash2 } from 'lucide-react'
 import { useFieldArray, useForm } from 'react-hook-form'
@@ -30,11 +23,11 @@ const TERMINAL_ERROR_MESSAGES = {
   failed: '처리 중 오류가 발생했어요.',
 }
 
-// 처방전 메타 + 약품 배열 통합 schema. medicationEditPatchSchema 재사용.
+// [핵심 수정 1] Zod 스키마에서 빈 문자열("")과 null을 완벽하게 허용하도록 개조
 const ocrConfirmSchema = z.object({
-  prescription_date: z.string().optional(),
-  prescription_hospital: z.string().trim().max(128, '최대 128자까지 가능해요').optional(),
-  prescription_department: z.string().trim().max(64, '최대 64자까지 가능해요').optional(),
+  prescription_date: z.string().optional().or(z.literal('')),
+  prescription_hospital: z.string().max(128, '최대 128자까지 가능해요').optional().or(z.literal('')).nullable(),
+  prescription_department: z.string().max(64, '최대 64자까지 가능해요').optional().or(z.literal('')).nullable(),
   meds: z.array(medicationEditPatchSchema).min(1, '약품을 최소 1개 입력해주세요'),
 })
 
@@ -83,7 +76,7 @@ const EMPTY_MED = {
   dose_per_intake: '',
   daily_intake_count: '',
   total_intake_days: '',
-  intake_instruction: '',
+  intake_instruction: '식후 30분',
   category: '',
 }
 
@@ -94,11 +87,15 @@ function OcrResultContent() {
   const { selectedProfileId } = useProfile()
   const { refetchMedications } = useMedication()
 
+  // 커스텀 UI 에러 관리 (Zod 덮어쓰기 방지)
+  const [customErrors, setCustomErrors] = useState({})
+
   const {
     control,
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(ocrConfirmSchema),
@@ -112,7 +109,6 @@ function OcrResultContent() {
   })
   const { fields, append, remove } = useFieldArray({ control, name: 'meds' })
 
-  // 첫 fetch 가 끝났는지 — false 일 때만 ResultSkeleton.
   const initialized = fields.length > 0 || draftId === 'manual'
 
   useEffect(() => {
@@ -147,7 +143,7 @@ function OcrResultContent() {
                 dose_per_intake: m.dose_per_intake || '',
                 daily_intake_count: m.daily_intake_count ?? '',
                 total_intake_days: m.total_intake_days ?? '',
-                intake_instruction: m.intake_instruction || '',
+                intake_instruction: m.intake_instruction || '식후 30분',
                 category: m.category || '',
               })),
             })
@@ -196,6 +192,12 @@ function OcrResultContent() {
   }
 
   const onSubmit = async (values) => {
+    // 커스텀 에러가 남아있으면 저장 차단
+    if (Object.keys(customErrors).length > 0) {
+      toast.error('입력된 값을 다시 확인해주세요.')
+      return
+    }
+
     if (draftId === 'manual' && !selectedProfileId) {
       toast.error('프로필을 선택한 후 다시 시도해주세요.')
       return
@@ -206,7 +208,14 @@ function OcrResultContent() {
       const n = parseInt(v, 10)
       return Number.isNaN(n) ? null : n
     }
-    const toStrOrNull = (v) => (v === '' || v === undefined ? null : v)
+
+    // [핵심 수정 2] 문자열이 비어있거나 공백뿐이면 무조건 null을 반환하도록 강화
+    const toStrOrNull = (v) => {
+      if (v === null || v === undefined) return null;
+      if (typeof v === 'string' && v.trim() === '') return null;
+      return typeof v === 'string' ? v.trim() : v;
+    }
+
     const confirmedMedicines = values.meds.map((med) => ({
       ...med,
       medicine_name: med.medicine_name?.trim() ?? '',
@@ -215,6 +224,7 @@ function OcrResultContent() {
       total_intake_days: toIntOrNull(med.total_intake_days),
       intake_instruction: toStrOrNull(med.intake_instruction),
       category: toStrOrNull(med.category),
+      // 상단 입력칸이 비어있으면 약품별 진료과에도 null을 주입
       department: toStrOrNull(values.prescription_department),
       dispensed_date: values.prescription_date || null,
     }))
@@ -257,13 +267,14 @@ function OcrResultContent() {
           }
         }
       } else {
+        // [핵심 수정 3] 병원/진료과 값이 빈칸일 때 명시적으로 null을 실어서 전송
         await api.post(
           '/api/v1/ocr/confirm',
           {
             draft_id: draftId,
             confirmed_medicines: confirmedMedicines,
-            hospital_name: values.prescription_hospital?.trim() || null,
-            department: values.prescription_department?.trim() || null,
+            hospital_name: toStrOrNull(values.prescription_hospital),
+            department: toStrOrNull(values.prescription_department),
           },
           {
             timeout: 60000,
@@ -279,6 +290,18 @@ function OcrResultContent() {
     } catch {
       toast.error('저장 중 오류가 발생했습니다.')
     }
+  }
+
+  // 커스텀 에러 핸들러
+  const handleCustomError = (key, message) => {
+    setCustomErrors(prev => ({ ...prev, [key]: message }))
+  }
+  const clearCustomError = (key) => {
+    setCustomErrors(prev => {
+      const newErrors = { ...prev }
+      delete newErrors[key]
+      return newErrors
+    })
   }
 
   if (!initialized) return <ResultSkeleton />
@@ -302,6 +325,7 @@ function OcrResultContent() {
         </div>
 
         <div className="max-w-3xl mx-auto px-10 py-8 space-y-4">
+          {/* 기존 상단 안내 배너 유지 */}
           <div className="bg-blue-50 rounded-2xl p-4 flex items-center gap-3">
             <span className="text-2xl">!</span>
             <div>
@@ -325,43 +349,82 @@ function OcrResultContent() {
           <div className="bg-white rounded-2xl p-5 border border-gray-200 flex items-center justify-between gap-4">
             <div>
               <p className="text-sm font-bold text-gray-900">병원</p>
-              <p className="text-xs text-gray-400 mt-0.5">비워두면 &lsquo;미상&rsquo; 으로 등록됩니다 (나중에 수정 가능)</p>
+              <p className="text-xs text-gray-400 mt-0.5">비워두면 &lsquo;미상&rsquo; 으로 등록됩니다</p>
             </div>
             <div>
               <input
                 type="text"
                 {...register('prescription_hospital')}
+                onChange={(e) => {
+                  const rawValue = e.target.value;
+                  const hasError = /[^a-zA-Z가-힣ㄱ-ㅎㅏ-ㅣ\s]/.test(rawValue);
+
+                  if (hasError) {
+                    handleCustomError('prescription_hospital', '숫자와 특수문자는 불가합니다.');
+                  } else {
+                    clearCustomError('prescription_hospital');
+                  }
+
+                  const sanitizedValue = rawValue.replace(/[^a-zA-Z가-힣ㄱ-ㅎㅏ-ㅣ\s]/g, '');
+                  e.target.value = sanitizedValue;
+                  setValue('prescription_hospital', sanitizedValue, { shouldDirty: true });
+                }}
                 placeholder="예: 서울내과의원"
                 maxLength={128}
                 className="text-base font-bold text-gray-700 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50 w-56"
               />
-              <FormError name="prescription_hospital" errors={errors} />
+              <div className="mt-1 h-4">
+                {customErrors['prescription_hospital'] ? (
+                  <p className="text-red-500 text-xs font-bold">{customErrors['prescription_hospital']}</p>
+                ) : (
+                  <FormError name="prescription_hospital" errors={errors} className="text-red-500 text-xs font-bold" />
+                )}
+              </div>
             </div>
           </div>
 
           <div className="bg-white rounded-2xl p-5 border border-gray-200 flex items-center justify-between gap-4">
             <div>
               <p className="text-sm font-bold text-gray-900">진료과</p>
-              <p className="text-xs text-gray-400 mt-0.5">비워두면 &lsquo;미상&rsquo; 으로 등록됩니다 (나중에 수정 가능)</p>
+              <p className="text-xs text-gray-400 mt-0.5">비워두면 &lsquo;미상&rsquo; 으로 등록됩니다</p>
             </div>
             <div>
               <input
                 type="text"
                 {...register('prescription_department')}
+                onChange={(e) => {
+                  const rawValue = e.target.value;
+                  const hasError = /[^a-zA-Z가-힣ㄱ-ㅎㅏ-ㅣ\s]/.test(rawValue);
+
+                  if (hasError) {
+                    handleCustomError('prescription_department', '숫자와 특수문자는 불가합니다.');
+                  } else {
+                    clearCustomError('prescription_department');
+                  }
+
+                  const sanitizedValue = rawValue.replace(/[^a-zA-Z가-힣ㄱ-ㅎㅏ-ㅣ\s]/g, '');
+                  e.target.value = sanitizedValue;
+                  setValue('prescription_department', sanitizedValue, { shouldDirty: true });
+                }}
                 placeholder="예: 내과"
                 maxLength={64}
                 className="text-base font-bold text-gray-700 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50 w-40"
               />
-              <FormError name="prescription_department" errors={errors} />
+              <div className="mt-1 h-4">
+                {customErrors['prescription_department'] ? (
+                  <p className="text-red-500 text-xs font-bold">{customErrors['prescription_department']}</p>
+                ) : (
+                  <FormError name="prescription_department" errors={errors} className="text-red-500 text-xs font-bold" />
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="space-y-4 mb-10">
+          <div className="space-y-4 mb-4">
             {fields.map((field, i) => (
               <div
                 key={field.id}
                 className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 animate-in fade-in slide-in-from-bottom-2 duration-300"
-                style={{ animationDelay: `${i * 100}ms` }}
               >
                 <div className="flex justify-between items-start mb-4 gap-4">
                   <div className="flex-1">
@@ -388,49 +451,134 @@ function OcrResultContent() {
                     <input
                       type="text"
                       {...register(`meds.${i}.dose_per_intake`)}
+                      onChange={(e) => {
+                        let val = e.target.value.replace(/[^0-9.]/g, '');
+                        const parts = val.split('.');
+                        if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
+
+                        const numVal = parseFloat(val);
+
+                        if (!isNaN(numVal) && numVal > 100) {
+                           e.target.value = '';
+                           setValue(`meds.${i}.dose_per_intake`, '', { shouldDirty: true });
+                           handleCustomError(`dose_${i}`, '최대 100까지 가능합니다.');
+                        } else {
+                           clearCustomError(`dose_${i}`);
+                           e.target.value = val;
+                           setValue(`meds.${i}.dose_per_intake`, val, { shouldDirty: true });
+                        }
+                      }}
                       className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
-                      placeholder="예: 1정"
+                      placeholder="예: 1"
                     />
+                    <div className="mt-1 px-1 h-4">
+                      {customErrors[`dose_${i}`] ? (
+                        <p className="text-red-500 text-xs font-bold">{customErrors[`dose_${i}`]}</p>
+                      ) : (
+                        <FormError name={`meds.${i}.dose_per_intake`} errors={errors} className="text-red-500 text-xs font-bold" />
+                      )}
+                    </div>
                   </div>
+
                   <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
                     <p className="text-[10px] text-gray-500 mb-1 px-1">1일 복용 횟수</p>
                     <input
-                      type="number"
+                      type="text"
                       inputMode="numeric"
                       {...register(`meds.${i}.daily_intake_count`)}
+                      onChange={(e) => {
+                        let val = e.target.value.replace(/[^0-9]/g, '');
+                        const numVal = parseInt(val, 10);
+
+                        if (!isNaN(numVal) && numVal > 24) {
+                          e.target.value = '';
+                          setValue(`meds.${i}.daily_intake_count`, '', { shouldDirty: true });
+                          handleCustomError(`freq_${i}`, '최대 24회까지 가능합니다.');
+                        } else {
+                          clearCustomError(`freq_${i}`);
+                          e.target.value = val;
+                          setValue(`meds.${i}.daily_intake_count`, val, { shouldDirty: true });
+                        }
+                      }}
                       className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
                       placeholder="예: 3"
                     />
-                    <FormError name={`meds.${i}.daily_intake_count`} errors={errors} />
+                    <div className="mt-1 px-1 h-4">
+                      {customErrors[`freq_${i}`] ? (
+                        <p className="text-red-500 text-xs font-bold">{customErrors[`freq_${i}`]}</p>
+                      ) : (
+                        <FormError name={`meds.${i}.daily_intake_count`} errors={errors} className="text-red-500 text-xs font-bold" />
+                      )}
+                    </div>
                   </div>
+
                   <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
                     <p className="text-[10px] text-gray-500 mb-1 px-1">총 복용 일수</p>
                     <input
-                      type="number"
+                      type="text"
                       inputMode="numeric"
                       {...register(`meds.${i}.total_intake_days`)}
+                      onChange={(e) => {
+                        let val = e.target.value.replace(/[^0-9]/g, '');
+                        const numVal = parseInt(val, 10);
+
+                        if (!isNaN(numVal) && numVal > 365) {
+                          e.target.value = '';
+                          setValue(`meds.${i}.total_intake_days`, '', { shouldDirty: true });
+                          handleCustomError(`days_${i}`, '최대 365일까지 가능합니다.');
+                        } else {
+                          clearCustomError(`days_${i}`);
+                          e.target.value = val;
+                          setValue(`meds.${i}.total_intake_days`, val, { shouldDirty: true });
+                        }
+                      }}
                       className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
                       placeholder="예: 5"
                     />
-                    <FormError name={`meds.${i}.total_intake_days`} errors={errors} />
+                    <div className="mt-1 px-1 h-4">
+                      {customErrors[`days_${i}`] ? (
+                        <p className="text-red-500 text-xs font-bold">{customErrors[`days_${i}`]}</p>
+                      ) : (
+                        <FormError name={`meds.${i}.total_intake_days`} errors={errors} className="text-red-500 text-xs font-bold" />
+                      )}
+                    </div>
                   </div>
+
                   <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
                     <p className="text-[10px] text-gray-500 mb-1 px-1">복용 방법</p>
-                    <input
-                      type="text"
+                    <select
                       {...register(`meds.${i}.intake_instruction`)}
-                      className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1"
-                      placeholder="예: 식후 30분"
-                    />
+                      className="text-sm font-bold text-gray-700 bg-transparent w-full focus:outline-none focus:text-blue-600 px-1 cursor-pointer"
+                    >
+                      <option value="" disabled hidden>선택해주세요</option>
+                      <option value="식후 30분">식후 30분</option>
+                      <option value="식전 30분">식전 30분</option>
+                      <option value="식사 직후">식사 직후</option>
+                      <option value="공복">공복</option>
+                      <option value="취침 전">취침 전</option>
+                      <option value="필요 시">필요 시</option>
+                      <option value="기타">기타</option>
+                    </select>
                   </div>
                 </div>
               </div>
             ))}
 
+            {/* [신규 추가] 하단 직접 입력 안내 문구 */}
+            <div className="mt-6 mb-2 bg-blue-50 rounded-2xl p-4 flex items-center gap-3 shadow-sm border border-blue-100">
+              <span className="text-2xl">💡</span>
+              <div className="flex-1">
+                <p className="font-bold text-blue-800 text-sm mb-1">인식되지 않은 약이 있나요?</p>
+                <p className="text-blue-700 text-xs">
+                  누락된 약품이 있다면 아래의 <span className="font-bold text-blue-800">+ 직접 약품 추가하기</span> 버튼을 눌러 꼭 입력해 주세요!
+                </p>
+              </div>
+            </div>
+
             <button
               type="button"
               onClick={() => append({ ...EMPTY_MED })}
-              className="w-full bg-white rounded-2xl p-4 border-2 border-dashed border-blue-300 text-blue-500 font-bold hover:bg-blue-50 hover:border-blue-400 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+              className="w-full bg-white rounded-2xl p-4 border-2 border-dashed border-blue-300 text-blue-500 font-bold hover:bg-blue-50 hover:border-blue-400 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-sm mb-10"
             >
               <span className="text-xl">+</span> 직접 약품 추가하기
             </button>

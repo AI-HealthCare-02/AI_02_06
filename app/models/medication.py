@@ -53,6 +53,23 @@ class Medication(models.Model):
     daily_intake_count = fields.IntField(null=True, description="1일 복용 횟수")
     total_intake_days = fields.IntField(null=True, description="총 복용 일수")
     intake_instruction = fields.CharField(max_length=256, null=True, description="복용 지시사항")
+    # =========================================================================
+    # [AI OCR 파이프라인 트래킹을 위한 신규 컬럼]
+    # =========================================================================
+    raw_ocr_name = fields.CharField(
+        max_length=128,
+        null=True,
+        description="OCR이 인식한 날것의 텍스트 (수동 입력 시 null)"
+    )
+    is_llm_corrected = fields.BooleanField(
+        default=False,
+        description="LLM 또는 퍼지 매칭으로 교정된 약품인지 여부"
+    )
+    match_score = fields.FloatField(
+        null=True,
+        description="퍼지 매칭 또는 LLM 유사도/신뢰도 점수 (0.0 ~ 1.0)"
+    )
+    # =========================================================================
 
     # Use PostgreSQL JSONB to store arrays like ["08:00", "13:00"]
     intake_times = fields.JSONField(description="Daily intake times list")
