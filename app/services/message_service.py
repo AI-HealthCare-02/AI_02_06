@@ -472,6 +472,19 @@ class MessageService:
             *history,
             {"role": "user", "content": content},
         ]
+        # ── 진단 로그 (diag/2nd-llm-input-output-logging) ───────────────
+        # 흐름: 2nd LLM enqueue 직전 system_prompt 전체 + messages 구조 dump
+        logger.info(
+            "[Chat-Diag] session=%s system_prompt[%dchars]=%r second_messages=%d "
+            "rag_section[%dchars]=%r referent_resolution=%s",
+            str(session_id)[:8],
+            len(system_prompt),
+            system_prompt,
+            len(second_messages),
+            len(rag_section),
+            rag_section,
+            classification.referent_resolution,
+        )
         completion = await generate_chat_response_via_rq(
             messages=second_messages,
             system_prompt=system_prompt,
