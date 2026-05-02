@@ -30,6 +30,7 @@ Cost (estimate):
 
 import argparse
 import asyncio
+import json
 import logging
 import time
 
@@ -41,6 +42,7 @@ from app.core.config import config
 from app.db.databases import TORTOISE_ORM
 from app.models.medicine_chunk import MedicineChunkSection
 from app.models.medicine_info import MedicineInfo
+from app.models.medicine_ingredient import MedicineIngredient
 from app.services.medicine_doc_parser import (
     Article,
     classify_article_section,
@@ -117,10 +119,24 @@ def _estimate_tokens(text: str) -> int:
     return int(len(text) / CHARS_PER_TOKEN) + 1
 
 
-def _format_chunk_content(medicine_name: str, section: MedicineChunkSection, article: Article) -> str:
-    """청크 임베딩 입력 텍스트 — 헤더 prefix + ARTICLE 본문."""
+def _format_chunk_content(
+    medicine_name: str,
+    section: MedicineChunkSection,
+    article: Article,
+    ingredients: list[str] | None = None,
+) -> str:
+    """청크 임베딩 입력 텍스트 - 헤더 prefix (약 + 성분 + section) + ARTICLE 본문.
+
+    PLAN.md (RAG 재설계) §A - 성분 단위 검색 정확도를 위해 brand 이름과 함께
+    [성분: ...] 헤더도 prepend. query 측 임베딩이 성분명을 포함하면 chunk
+    측과 cosine 매칭이 ↑ (메타필터로 후보 좁힌 후 ranking 정확도 ↑).
+    """
     section_kr = _SECTION_KR.get(section, section.value)
-    parts = [f"[약: {medicine_name}] [{section_kr}]"]
+    header_parts = [f"[약: {medicine_name}]"]
+    if ingredients:
+        header_parts.append(f"[성분: {', '.join(ingredients)}]")
+    header_parts.append(f"[{section_kr}]")
+    parts = [" ".join(header_parts)]
     if article.title:
         parts.append(article.title)
     if article.body:
@@ -177,7 +193,28 @@ def _split_long_content(content: str, max_tokens: int = MAX_TOKENS_PER_CHUNK) ->
     return [_truncate_to_char_limit(c, max_chars * 2) for c in chunks]
 
 
-def _build_chunks_for_medicine(med: MedicineInfo) -> list[tuple[MedicineChunkSection, int, str, int]]:
+async def _load_ingredients_for_medicine(medicine_info_id: int) -> list[str]:
+    """medicine_ingredient.mtral_name list (None 제거 + dedupe + 등록 순서)."""
+    rows = (
+        await MedicineIngredient
+        .filter(medicine_info_id=medicine_info_id)
+        .order_by("mtral_sn")
+        .values_list("mtral_name", flat=True)
+    )
+    seen: set[str] = set()
+    out: list[str] = []
+    for name in rows:
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
+
+
+def _build_chunks_for_medicine(
+    med: MedicineInfo,
+    ingredients: list[str],
+) -> list[tuple[MedicineChunkSection, int, str, int]]:
     """한 medicine 의 모든 (section, chunk_index, content, token_count) 리스트.
 
     같은 section 의 ARTICLE 이 여러 개면 chunk_index 가 0, 1, 2... 로 순차.
@@ -188,7 +225,7 @@ def _build_chunks_for_medicine(med: MedicineInfo) -> list[tuple[MedicineChunkSec
     out: list[tuple[MedicineChunkSection, int, str, int]] = []
 
     for article, section in _articles_for_medicine(med):
-        full_content = _format_chunk_content(med.medicine_name, section, article)
+        full_content = _format_chunk_content(med.medicine_name, section, article, ingredients=ingredients)
         for sub in _split_long_content(full_content):
             idx = section_counter.get(section, 0)
             section_counter[section] = idx + 1
@@ -234,35 +271,52 @@ def _vector_literal(embedding: list[float]) -> str:
 
 
 async def _insert_chunks_batch(
-    rows: list[tuple[int, MedicineChunkSection, int, str, int, list[float]]],
+    rows: list[tuple[int, MedicineChunkSection, int, str, int, list[float], list[str]]],
 ) -> int:
-    """rows: (medicine_info_id, section, chunk_index, content, token_count, embedding)
-    멱등성을 위해 ON CONFLICT DO NOTHING.
+    """rows: (medicine_info_id, section, chunk_index, content, token_count, embedding, ingredients)
+    멱등성을 위해 ON CONFLICT (medicine_info_id, section, chunk_index) DO UPDATE
+    - 본 PR-A 재임베딩에서는 기존 row 의 content/embedding/ingredients 도
+    새 형식으로 갱신해야 하므로 DO NOTHING 대신 DO UPDATE.
     """
     if not rows:
         return 0
 
     placeholders: list[str] = []
     params: list = []
-    for i, (mid, section, idx, content, tok, emb) in enumerate(rows):
-        base = i * 7
+    for i, (mid, section, idx, content, tok, emb, ingredients) in enumerate(rows):
+        base = i * 8
         placeholders.append(
-            f"(${base + 1}, ${base + 2}, ${base + 3}, ${base + 4}, ${base + 5}, ${base + 6}::vector, ${base + 7})"
+            f"(${base + 1}, ${base + 2}, ${base + 3}, ${base + 4}, ${base + 5},"
+            f" ${base + 6}::halfvec, ${base + 7}, ${base + 8}::jsonb)"
         )
-        params.extend([mid, section.value, idx, content, tok, _vector_literal(emb), EMBEDDING_MODEL])
+        params.extend([
+            mid,
+            section.value,
+            idx,
+            content,
+            tok,
+            _vector_literal(emb),
+            EMBEDDING_MODEL,
+            json.dumps(ingredients, ensure_ascii=False),
+        ])
 
     sql = f"""
         INSERT INTO medicine_chunk
-            (medicine_info_id, section, chunk_index, content, token_count, embedding, model_version)
+            (medicine_info_id, section, chunk_index, content, token_count,
+             embedding, model_version, ingredients)
         VALUES {",".join(placeholders)}
-        ON CONFLICT (medicine_info_id, section, chunk_index) DO NOTHING
+        ON CONFLICT (medicine_info_id, section, chunk_index) DO UPDATE SET
+            content = EXCLUDED.content,
+            token_count = EXCLUDED.token_count,
+            embedding = EXCLUDED.embedding,
+            model_version = EXCLUDED.model_version,
+            ingredients = EXCLUDED.ingredients,
+            updated_at = NOW()
     """  # noqa: S608
 
     from tortoise import connections
 
     await connections.get("default").execute_query(sql, params)
-    # asyncpg 의 INSERT ... ON CONFLICT 결과 파싱 일관 X.
-    # rows 길이로 카운트 (재실행 시 ON CONFLICT 가 silent skip 이라 정확).
     return len(rows)
 
 
@@ -312,7 +366,8 @@ async def process_medicines(
 
     async def _process_one(med: MedicineInfo) -> tuple[int, int]:
         async with semaphore:
-            chunks = _build_chunks_for_medicine(med)
+            ingredients = await _load_ingredients_for_medicine(med.id)
+            chunks = _build_chunks_for_medicine(med, ingredients)
             if not chunks:
                 return 0, 0
 
@@ -325,7 +380,7 @@ async def process_medicines(
                 embeddings.extend(vecs)
 
             rows = [
-                (med.id, sec, idx, content, tok, emb)
+                (med.id, sec, idx, content, tok, emb, ingredients)
                 for (sec, idx, content, tok), emb in zip(chunks, embeddings, strict=True)
             ]
             async with in_transaction("default"):
