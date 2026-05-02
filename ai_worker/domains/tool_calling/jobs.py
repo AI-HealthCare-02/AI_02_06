@@ -1,19 +1,17 @@
-"""Tool-calling RQ jobs — Phase Y / 옵션 C.
+"""Tool-calling RQ jobs — RAG 4단 파이프라인.
 
-두 가지 RQ task:
-- ``route_intent_job(messages)`` — Router LLM 호출 → assistant message dict
+진입점:
 - ``run_tool_calls_job(calls)``  — 한 턴의 모든 tool_calls 를 ``asyncio.gather``
-  로 병행 실행, ``{tool_call_id: result}`` 반환
+  로 병행 실행, ``{tool_call_id: result}`` 반환.
 
-import 는 모듈 상단에 둔다. 실제 호출은 runtime monkeypatch 가능하도록
-모듈 attribute 로 노출되므로 테스트는
-``monkeypatch.setattr(jobs, "search_hospitals_by_keyword", ...)`` 로 대체 가능.
+Router LLM (route_intent_job) 은 폐기 — IntentClassifier (4o-mini) 가
+FastAPI 측에서 직접 호출. 본 jobs 파일은 fan-out 으로 만든
+search_medicine_knowledge_base x N 호출만 담당.
 
-옵션 C 변경 (Tortoise lifecycle):
-RAG retrieval tool (``search_medicine_knowledge_base``) 은 medicine_chunk
-DB 쿼리가 필요하므로 ``run_tool_calls_job`` 이 호출 시작 시 Tortoise.init,
-종료 시 close_connections 를 한 번 묶어 처리한다. RAG 호출이 없으면 lifecycle
-스킵 — 위치 검색만 도는 turn 은 DB 연결 비용을 지지 않는다.
+Tortoise lifecycle: RAG retrieval tool (``search_medicine_knowledge_base``)
+은 medicine_chunk DB 쿼리 필요 → ``run_tool_calls_job`` 이 호출 시작 시
+Tortoise.init, 종료 시 close_connections 한 번 묶어 처리. RAG 호출 없으면
+lifecycle 스킵 (위치 검색만 도는 turn 의 DB 연결 비용 0).
 """
 
 import asyncio
@@ -24,7 +22,6 @@ from uuid import UUID
 from tortoise import Tortoise
 
 from ai_worker.domains.rag.retrieval import retrieve_medicine_chunks
-from ai_worker.domains.tool_calling import router_llm as router_provider
 from app.db.databases import TORTOISE_ORM
 from app.dtos.tools import KakaoPlace
 from app.services.tools.maps.hospital_search import (
@@ -46,30 +43,6 @@ _CATEGORY_TO_ENUM: dict[str, HospitalCategory] = {
 }
 
 _MEDICINE_KNOWLEDGE_TOOL_NAME = "search_medicine_knowledge_base"
-
-
-async def route_intent_job(messages: list[dict[str, Any]]) -> dict[str, Any]:
-    """[RQ Task] Router LLM 호출 결과를 assistant message dict 로 반환.
-
-    Args:
-        messages: 시간순 대화 이력 (마지막은 사용자 turn).
-
-    Returns:
-        ``parse_router_response`` 입력으로 바로 사용 가능한 dict.
-    """
-    logger.info("[ToolCalling] route_intent_job start messages=%d", len(messages))
-    result = await router_provider.route_with_tools(messages)
-    _log_route_summary(result)
-    return result
-
-
-def _log_route_summary(result: dict[str, Any]) -> None:
-    """Router 결과의 tool_calls 이름들을 한 줄 로그로 출력."""
-    tool_calls = result.get("tool_calls") or []
-    names_suffix = (
-        " names=" + ",".join(c.get("function", {}).get("name", "?") for c in tool_calls) if tool_calls else ""
-    )
-    logger.info("[ToolCalling] route_intent_job done tool_calls=%d%s", len(tool_calls), names_suffix)
 
 
 # ── tool_calls 병렬 dispatch (RQ Task) ──────────────────────────────
