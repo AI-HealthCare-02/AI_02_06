@@ -480,7 +480,11 @@ export default function MyPage() {
         api.get(`/api/v1/intake-logs/streak?profile_id=${profileId}`),
         api.get(`/api/v1/intake-logs?profile_id=${profileId}`),
       ])
-      setOngoingCount(challengeRes.data.filter(c => c.challenge_status === 'IN_PROGRESS').length)
+      // 진행 중인 챌린지 개수 계산 — 챌린지 리스트에서 is_active + status 필터링. BE 에서 별도 카운트 제공 안 함.
+      const ongoing = (challengeRes.data || []).filter(c => 
+        c.is_active === true && c.challenge_status === 'IN_PROGRESS').length;
+        setOngoingCount(ongoing);
+
       setStreakDays(streakRes.data.streak_days ?? 0)
       setTodayTakenCount((todayLogsRes.data || []).filter(l => l.intake_status === 'TAKEN').length)
     } catch (err) { handleApiError(err) } finally {

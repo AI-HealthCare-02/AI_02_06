@@ -1,11 +1,10 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { Sunrise, Sun, Sunset, Moon, Clock, CheckCircle2, Circle, XCircle } from 'lucide-react'
+import { Sunrise, Sun, Sunset, Moon, Clock, CheckCircle2, Circle, XCircle, Pill } from 'lucide-react'
 import api from '@/lib/api'
 
 // ── 시간대 블록 정의 ─────────────────────────────────────────────────────────
-// 흐름: intake_times 문자열 배열 → 시간 파싱 → 4개 블록 분류 → UI 렌더링
 const TIME_BLOCKS = [
   { key: 'morning',   label: '아침', Icon: Sunrise, startH: 0,  endH: 10 },
   { key: 'afternoon', label: '점심', Icon: Sun,     startH: 10, endH: 14 },
@@ -29,12 +28,10 @@ function getCurrentBlockKey() {
   return 'bedtime'
 }
 
-// intake_times가 있는 약품 → 시간대별 분류
-// intake_times가 빈 배열인 약품 → unset 목록으로 분리
 function classifyMedications(medications) {
   const blocks = { morning: [], afternoon: [], evening: [], bedtime: [] }
   const unset = []
-
+  if (!Array.isArray(medications)) return { blocks, unset };
   for (const med of medications) {
     if (!med.intake_times || med.intake_times.length === 0) {
       unset.push(med)
@@ -48,15 +45,13 @@ function classifyMedications(medications) {
   return { blocks, unset }
 }
 
-// ── 오늘의 복약 스케줄 ────────────────────────────────────────────────────────
-// 흐름: activeMedications → 시간대 분류 → 오늘 복약 기록 fetch
-//       → 블록별 체크리스트 표시 → 체크 시 POST intake-log + take
 export default function TodaySchedule({ medications, profileId }) {
   const router = useRouter()
   const [todayLogs, setTodayLogs] = useState([])
   const [takingKeys, setTakingKeys] = useState(new Set())
   const currentBlock = getCurrentBlockKey()
 
+  // 1. 모든 Hook(useCallback, useEffect)은 최상단에 위치해야 합니다.
   const fetchTodayLogs = useCallback(async () => {
     if (!profileId) return
     try {
@@ -65,14 +60,11 @@ export default function TodaySchedule({ medications, profileId }) {
         params: { profile_id: profileId, target_date: today },
       })
       setTodayLogs(res.data || [])
-    } catch {
-      // silent — 홈 화면 보조 기능이므로 에러 노출 없음
-    }
+    } catch { /* silent */ }
   }, [profileId])
 
   useEffect(() => { fetchTodayLogs() }, [fetchTodayLogs])
 
-  // medication_id + 시간 HH:MM prefix 기준으로 TAKEN 여부 확인
   const isTaken = useCallback(
     (medId, time) =>
       todayLogs.some(
@@ -84,7 +76,6 @@ export default function TodaySchedule({ medications, profileId }) {
     [todayLogs],
   )
 
-  // TAKEN 로그의 id 반환 — 취소(DELETE) 시 사용
   const getLogId = useCallback(
     (medId, time) =>
       todayLogs.find(
@@ -96,21 +87,16 @@ export default function TodaySchedule({ medications, profileId }) {
     [todayLogs],
   )
 
-  // ── 체크 취소 처리 ─────────────────────────────────────────────────────────
-  // 흐름: 로그 id 조회 → DELETE intake-log → 오늘 기록 재조회
   const handleUncheck = useCallback(
     async (med, time) => {
       const logId = getLogId(med.id, time)
       if (!logId) return
-
       const key = `${med.id}__${time}`
       setTakingKeys((prev) => new Set([...prev, key]))
       try {
         await api.delete(`/api/v1/intake-logs/${logId}`)
         await fetchTodayLogs()
-      } catch {
-        // silent
-      } finally {
+      } catch { /* silent */ } finally {
         setTakingKeys((prev) => {
           const s = new Set(prev)
           s.delete(key)
@@ -121,16 +107,39 @@ export default function TodaySchedule({ medications, profileId }) {
     [getLogId, fetchTodayLogs],
   )
 
-  // ── 시간대 전체 완료 처리 ─────────────────────────────────────────────────
-  // 흐름: 미완료 항목 필터링 → Promise.all 병렬 POST intake-log + take → 재조회
+  const handleCheck = useCallback(
+    async (med, time) => {
+      const key = `${med.id}__${time}`
+      if (takingKeys.has(key) || isTaken(med.id, time)) return
+      setTakingKeys((prev) => new Set([...prev, key]))
+      try {
+        const today = new Date().toISOString().split('T')[0]
+        const scheduledTime = time.split(':').length === 2 ? `${time}:00` : time
+        const logRes = await api.post('/api/v1/intake-logs', {
+          medication_id: med.id,
+          profile_id: profileId,
+          scheduled_date: today,
+          scheduled_time: scheduledTime,
+        })
+        await api.post(`/api/v1/intake-logs/${logRes.data.id}/take`)
+        await fetchTodayLogs()
+      } catch { /* silent */ } finally {
+        setTakingKeys((prev) => {
+          const s = new Set(prev)
+          s.delete(key)
+          return s
+        })
+      }
+    },
+    [takingKeys, isTaken, profileId, fetchTodayLogs],
+  )
+
   const handleCheckAll = useCallback(
     async (items) => {
       const pending = items.filter(({ med, time }) => !isTaken(med.id, time))
       if (pending.length === 0) return
-
       const keys = pending.map(({ med, time }) => `${med.id}__${time}`)
       setTakingKeys((prev) => new Set([...prev, ...keys]))
-
       try {
         const today = new Date().toISOString().split('T')[0]
         await Promise.all(
@@ -146,9 +155,7 @@ export default function TodaySchedule({ medications, profileId }) {
           }),
         )
         await fetchTodayLogs()
-      } catch {
-        // silent
-      } finally {
+      } catch { /* silent */ } finally {
         setTakingKeys((prev) => {
           const s = new Set(prev)
           keys.forEach((k) => s.delete(k))
@@ -159,54 +166,34 @@ export default function TodaySchedule({ medications, profileId }) {
     [isTaken, profileId, fetchTodayLogs],
   )
 
-  // ── 체크오프 처리 ─────────────────────────────────────────────────────────
-  // 흐름: POST intake-log 생성 (scheduled_time 포함) → POST take → 오늘 기록 재조회
-  const handleCheck = useCallback(
-    async (med, time) => {
-      const key = `${med.id}__${time}`
-      if (takingKeys.has(key) || isTaken(med.id, time)) return
+  // 2. 데이터 분류 (useMemo를 사용하여 안전하게 처리)
+  const { blocks, unset } = useMemo(() => classifyMedications(medications), [medications])
 
-      setTakingKeys((prev) => new Set([...prev, key]))
-      try {
-        const today = new Date().toISOString().split('T')[0]
-        // "HH:MM" → "HH:MM:SS" 변환 (서버 time 타입 호환)
-        const scheduledTime = time.split(':').length === 2 ? `${time}:00` : time
-        const logRes = await api.post('/api/v1/intake-logs', {
-          medication_id: med.id,
-          profile_id: profileId,
-          scheduled_date: today,
-          scheduled_time: scheduledTime,
-        })
-        await api.post(`/api/v1/intake-logs/${logRes.data.id}/take`)
-        await fetchTodayLogs()
-      } catch {
-        // silent
-      } finally {
-        setTakingKeys((prev) => {
-          const s = new Set(prev)
-          s.delete(key)
-          return s
-        })
-      }
-    },
-    [takingKeys, isTaken, profileId, fetchTodayLogs],
-  )
+  // 3. 로딩 및 빈 데이터 처리 (Hook 호출 이후에 위치해야 함)
+  if (!medications || !Array.isArray(medications)) {
+    return <div className="py-10 text-center text-gray-400">복약 정보를 불러오는 중...</div>;
+  }
 
-  const { blocks, unset } = classifyMedications(medications)
+  if (medications.length === 0) {
+    return (
+      <div className="py-12 text-center bg-gray-50 rounded-[32px] border border-dashed border-gray-200">
+        <Pill size={32} className="mx-auto text-gray-300 mb-3" />
+        <p className="text-gray-400 text-sm font-bold">오늘 등록된 복약 정보가 없습니다.</p>
+        <button onClick={() => router.push('/medication')} className="mt-4 text-xs font-black text-blue-600 hover:underline">
+          약 등록하러 가기 →
+        </button>
+      </div>
+    );
+  }
 
-  // 전체 진행도 (시간대 배정된 항목 기준)
   const totalItems = Object.values(blocks).reduce((acc, items) => acc + items.length, 0)
   const takenItems = Object.values(blocks).reduce(
-    (acc, items) =>
-      acc + items.filter(({ med, time }) => isTaken(med.id, time)).length,
+    (acc, items) => acc + items.filter(({ med, time }) => isTaken(med.id, time)).length,
     0,
   )
 
-  if (medications.length === 0) return null
-
   return (
     <section className="bg-white rounded-[32px] p-8 border border-gray-100 mb-6">
-      {/* 헤더 + 완료 카운터 */}
       <div className="flex justify-between items-center mb-2">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-gray-100 rounded-2xl flex items-center justify-center">
@@ -221,7 +208,6 @@ export default function TodaySchedule({ medications, profileId }) {
         )}
       </div>
 
-      {/* 진행도 바 */}
       {totalItems > 0 && (
         <div className="mt-4 mb-6">
           <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -233,52 +219,31 @@ export default function TodaySchedule({ medications, profileId }) {
         </div>
       )}
 
-      {/* 4개 시간대 블록 */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {TIME_BLOCKS.map(({ key, label, Icon }) => {
           const items = blocks[key]
           const isActive = key === currentBlock
+          const allTaken = items.length > 0 && items.every(({ med, time }) => isTaken(med.id, time))
+          const blockLoading = items.some(({ med, time }) => takingKeys.has(`${med.id}__${time}`))
 
           return (
-            <div
-              key={key}
-              className={`rounded-2xl p-4 border transition-all ${
-                isActive
-                  ? 'border-gray-900 bg-gray-50'
-                  : 'border-gray-100 bg-white'
-              }`}
-            >
-              {/* 블록 헤더 */}
-              {(() => {
-                const allTaken = items.length > 0 && items.every(({ med, time }) => isTaken(med.id, time))
-                const blockLoading = items.some(({ med, time }) => takingKeys.has(`${med.id}__${time}`))
-                return (
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <Icon size={16} className={isActive ? 'text-gray-900' : 'text-gray-400'} />
-                      <span className={`text-sm font-bold ${isActive ? 'text-gray-900' : 'text-gray-400'}`}>
-                        {label}
-                      </span>
-                    </div>
-                    {items.length > 0 && (
-                      <button
-                        onClick={() => handleCheckAll(items)}
-                        disabled={allTaken || blockLoading}
-                        aria-label={`${label} 전체 완료`}
-                        className={`text-xs font-bold transition-colors cursor-pointer disabled:cursor-default ${
-                          allTaken
-                            ? 'text-gray-300'
-                            : 'text-gray-400 hover:text-gray-700'
-                        }`}
-                      >
-                        {allTaken ? '완료' : blockLoading ? '처리중...' : '전체 완료'}
-                      </button>
-                    )}
-                  </div>
-                )
-              })()}
+            <div key={key} className={`rounded-2xl p-4 border transition-all ${isActive ? 'border-gray-900 bg-gray-50' : 'border-gray-100 bg-white'}`}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Icon size={16} className={isActive ? 'text-gray-900' : 'text-gray-400'} />
+                  <span className={`text-sm font-bold ${isActive ? 'text-gray-900' : 'text-gray-400'}`}>{label}</span>
+                </div>
+                {items.length > 0 && (
+                  <button
+                    onClick={() => handleCheckAll(items)}
+                    disabled={allTaken || blockLoading}
+                    className={`text-xs font-bold transition-colors cursor-pointer disabled:cursor-default ${allTaken ? 'text-gray-300' : 'text-gray-400 hover:text-gray-700'}`}
+                  >
+                    {allTaken ? '완료' : blockLoading ? '처리중...' : '전체 완료'}
+                  </button>
+                )}
+              </div>
 
-              {/* 약품 목록 */}
               {items.length === 0 ? (
                 <p className="text-sm text-gray-300 font-bold">-</p>
               ) : (
@@ -291,39 +256,18 @@ export default function TodaySchedule({ medications, profileId }) {
                         <button
                           onClick={() => taken ? handleUncheck(med, time) : handleCheck(med, time)}
                           disabled={loading}
-                          aria-label={taken ? '복약 취소' : '복약 확인'}
-                          className={`mt-0.5 shrink-0 transition-all cursor-pointer disabled:cursor-not-allowed group/btn ${
-                            taken
-                              ? 'text-gray-900 hover:text-red-400'
-                              : 'text-gray-300 hover:text-gray-600'
-                          }`}
+                          className={`mt-0.5 shrink-0 transition-all cursor-pointer disabled:cursor-not-allowed group/btn ${taken ? 'text-gray-900 hover:text-red-400' : 'text-gray-300 hover:text-gray-600'}`}
                         >
                           {taken ? (
-                            <>
-                              <CheckCircle2 size={16} className="group-hover/btn:hidden" />
-                              <XCircle size={16} className="hidden group-hover/btn:block" />
-                            </>
+                            <><CheckCircle2 size={16} className="group-hover/btn:hidden" /><XCircle size={16} className="hidden group-hover/btn:block" /></>
                           ) : (
                             <Circle size={16} />
                           )}
                         </button>
                         <div className="min-w-0">
-                          <p
-                            className={`text-sm font-bold leading-snug truncate transition-all ${
-                              taken
-                                ? 'text-gray-400 line-through'
-                                : 'text-gray-900'
-                            }`}
-                          >
-                            {med.medicine_name}
-                          </p>
+                          <p className={`text-sm font-bold leading-snug truncate transition-all ${taken ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{med.medicine_name}</p>
                           {(med.dose_per_intake || med.intake_instruction) && (
-                            <p className="text-xs text-gray-400 mt-0.5">
-                              {[
-                                med.dose_per_intake && `1회 ${med.dose_per_intake}`,
-                                med.intake_instruction,
-                              ].filter(Boolean).join(' · ')}
-                            </p>
+                            <p className="text-xs text-gray-400 mt-0.5">{[med.dose_per_intake && `1회 ${med.dose_per_intake}`, med.intake_instruction].filter(Boolean).join(' · ')}</p>
                           )}
                         </div>
                       </li>
@@ -336,31 +280,18 @@ export default function TodaySchedule({ medications, profileId }) {
         })}
       </div>
 
-      {/* 시간 미설정 약품 섹션 */}
       {unset.length > 0 && (
         <div className="mt-4 rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-5 py-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <Clock size={15} className="text-gray-400" />
-              <span className="text-sm font-bold text-gray-400">
-                복약 시간 미설정
-              </span>
+              <span className="text-sm font-bold text-gray-400">복약 시간 미설정</span>
             </div>
-            <button
-              onClick={() => router.push('/medication')}
-              className="text-xs font-bold text-gray-400 hover:text-gray-700 transition-colors cursor-pointer"
-            >
-              설정하기 →
-            </button>
+            <button onClick={() => router.push('/medication')} className="text-xs font-bold text-gray-400 hover:text-gray-700 transition-colors cursor-pointer">설정하기 →</button>
           </div>
           <div className="flex flex-wrap gap-2">
             {unset.map((med) => (
-              <span
-                key={med.id}
-                className="text-sm text-gray-500 bg-white border border-gray-200 px-3 py-1.5 rounded-xl font-bold"
-              >
-                {med.medicine_name}
-              </span>
+              <span key={med.id} className="text-sm text-gray-500 bg-white border border-gray-200 px-3 py-1.5 rounded-xl font-bold">{med.medicine_name}</span>
             ))}
           </div>
         </div>
