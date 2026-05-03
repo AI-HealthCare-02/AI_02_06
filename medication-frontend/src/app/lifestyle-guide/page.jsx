@@ -9,7 +9,7 @@ import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/Header'
 import BottomNav from '@/components/layout/BottomNav'
 import EmptyState from '@/components/common/EmptyState'
-import { showError } from '@/lib/api'
+import api, { showError } from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
 import { useLifestyleGuide } from '@/contexts/LifestyleGuideContext'
 import { useChallenge, useChallengeStart, useChallengeCheck } from '@/contexts/ChallengeContext'
@@ -227,14 +227,17 @@ export default function LifestyleGuidePage() {
   // GET /api/v1/daily-logs?profile_id=...&days=1
   // 응답: list[DailySymptomLogResponse]
   // 필드: { id, profile_id, log_date, symptoms: string[], note: string|null, created_at }
+  // 후속 정정: 다른 페이지/컴포넌트와 동일하게 axios 기반 `api` client 사용 (auth
+  // 헤더 자동 주입 + 일관된 에러 처리). 직접 fetch 제거.
   const fetchTodaySymptoms = async () => {
     if (!profileId) return
     const today = new Date().toISOString().split('T')[0]
     setSymptomsLoading(true)
     try {
-      const res = await fetch(`/api/v1/daily-logs?profile_id=${profileId}&days=1`)
-      if (!res.ok) return
-      const data = await res.json() // list[DailySymptomLogResponse]
+      const res = await api.get('/api/v1/daily-logs', {
+        params: { profile_id: profileId, days: 1 },
+      })
+      const data = res.data || [] // list[DailySymptomLogResponse]
       // days=1 이지만 혹시 어제 것도 포함될 수 있으니 오늘 날짜로 한 번 더 필터
       const todayLog = data.find((log) => log.log_date === today)
       setTodaySymptoms(todayLog?.symptoms ?? [])
