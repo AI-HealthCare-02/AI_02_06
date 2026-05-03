@@ -21,12 +21,14 @@ WORKDIR /app
 RUN groupadd --gid 1000 appgroup && \
     useradd --uid 1000 --gid appgroup --shell /bin/bash --create-home appuser
 
-COPY --from=builder /app/.venv /app/.venv
-COPY . .
+# venv + 소스 모두 *복사 시점* 에 권한 부여 — 별 RUN chown -R 으로 분리 시
+# OverlayFS 가 venv inode 를 통째 새 layer 로 복사하던 회귀를 차단
+# (2026-05-01 진단, ai-worker 에서 같은 패턴이 1.23GB layer 만들었음).
+COPY --from=builder --chown=appuser:appgroup /app/.venv /app/.venv
+COPY --chown=appuser:appgroup . .
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-RUN chown -R appuser:appgroup /app
 USER appuser
 
 EXPOSE 8000

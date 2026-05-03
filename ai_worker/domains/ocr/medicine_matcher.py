@@ -1,20 +1,21 @@
 """OCR 후보 토큰을 medicine_info DB 와 매칭한다. (아키텍트 패러다임 시프트 버전)"""
 
 import asyncio
-import logging
 import json
+import logging
 
 from tortoise import Tortoise
 
+from ai_worker.core.openai_client import get_openai_client
 from app.db.databases import TORTOISE_ORM
 from app.dtos.ocr import ExtractedMedicine
 from app.repositories.medicine_info_repository import MedicineInfoRepository
-from ai_worker.core.openai_client import get_openai_client
 
 logger = logging.getLogger(__name__)
 
 _FUZZY_THRESHOLD = 0.3
 _FUZZY_LIMIT = 1
+
 
 async def search_candidates_in_open_db(candidates: list[str]) -> list[ExtractedMedicine]:
     if not candidates:
@@ -66,8 +67,10 @@ async def search_candidates_in_open_db(candidates: list[str]) -> list[ExtractedM
     logger.info("Final Matching: %d LLM names -> %d matched to DB", len(extracted_items), db_match_count)
     return matched
 
+
 def match_candidates_to_medicines(candidates: list[str]) -> list[ExtractedMedicine]:
     return asyncio.run(_run_with_db_lifecycle(candidates))
+
 
 async def _run_with_db_lifecycle(candidates: list[str]) -> list[ExtractedMedicine]:
     await Tortoise.init(config=TORTOISE_ORM)
@@ -131,7 +134,7 @@ async def _extract_medicines_with_llm(raw_text: str) -> list[dict]:
     
     [OCR 전체 문맥 텍스트]
     "{raw_text}"
-    
+
     [지시사항]
     1. 환자명(홍길동 등), 병원명(SEOUL 등), 주소, 성별, 나이 등 노이즈는 완전히 무시해.
     2. 텍스트 중에서 '의약품'과 '영양제/보충제(마그네슘 등)'를 추출해.
@@ -152,8 +155,8 @@ async def _extract_medicines_with_llm(raw_text: str) -> list[dict]:
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            response_format={ "type": "json_object" },
-            temperature=0.0
+            response_format={"type": "json_object"},
+            temperature=0.0,
         )
         result = json.loads(response.choices[0].message.content)
         return result.get("items", [])

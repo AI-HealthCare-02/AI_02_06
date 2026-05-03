@@ -453,17 +453,16 @@ class LifestyleGuideService:
     ) -> list[Challenge]:
         """List challenges associated with a guide after ownership check.
 
-        가이드에 연결된 챌린지는 LLM 으로 한 번에 15개가 만들어져 있고, 사용자가
-        본 메서드로 받는 list 는 ``guide.revealed_challenge_count`` (5/10/15) 만큼.
-        "추천 챌린지 더 보기" 가 카운트를 늘리면 다음 호출에서 더 많은 챌린지가
-        반환된다.
+        가이드에 연결된 챌린지는 LLM 으로 한 번에 15개가 만들어져 있다. FE 는
+        이를 5개씩 페이지네이션 (1/3, 2/3, 3/3) 으로 노출하므로 BE 는 항상 전체
+        15개를 반환한다.
 
         Args:
             guide_id: Source guide UUID.
             account_id: Requesting account UUID.
 
         Returns:
-            Challenges linked to the guide (앞 ``revealed_challenge_count`` 개).
+            Challenges linked to the guide (전체 — 보통 15개).
 
         Raises:
             HTTPException: 404 if guide missing, 403 if owned by another account.
@@ -472,10 +471,7 @@ class LifestyleGuideService:
         if not guide:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lifestyle guide not found.")
         await self._verify_guide_ownership(guide, account_id)
-        return await self.challenge_repo.get_by_guide_id(
-            guide.id,
-            limit=guide.revealed_challenge_count,
-        )
+        return await self.challenge_repo.get_by_guide_id(guide.id)
 
 
 def _to_sse_payload(guide: LifestyleGuide) -> dict[str, Any]:

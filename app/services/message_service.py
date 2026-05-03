@@ -4,7 +4,6 @@ This module provides business logic for chat message management operations
 including creation, AI response generation, and ownership verification.
 """
 
-from datetime import UTC, datetime
 import json
 import logging
 import math
@@ -13,20 +12,26 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 
-from app.dtos.tools import AskPending, AskResult, PendingTurn, RouteResult, ToolCall
+from app.dtos.query_rewriter import IntentType
+from app.dtos.tools import AskResult, PendingTurn, ToolCall
 from app.models.messages import ChatMessage
 from app.repositories.chat_session_repository import ChatSessionRepository
 from app.repositories.message_repository import MessageRepository
-from app.services.tools.pending import DEFAULT_TTL_SEC, PendingTurnStore
+from app.services.chat.intent_orchestrator import classify_user_turn
+from app.services.chat.rag_context_assembler import assemble_rag_section
+from app.services.rag.openai_embedding import encode_query
+from app.services.rag.retrievers.hybrid_metadata import retrieve_with_metadata
+from app.services.tools.pending import PendingTurnStore
 from app.services.tools.rq_adapters import (
     generate_chat_response_via_rq,
-    route_intent_via_rq,
     run_tool_calls_via_rq,
 )
 
 logger = logging.getLogger(__name__)
 
-_HISTORY_LIMIT = 10
+# PLAN.md (feature/RAG) §0 결정 — recent history = 6 messages (3 user + 3 assistant).
+# 6 turn 마다 chat_sessions.summary 갱신 (옵션 D) 와 정확히 일치 → token 절감.
+_HISTORY_LIMIT = 6
 _STATUS_OK = "ok"
 _STATUS_DENIED = "denied"
 _GEOLOCATION_DENIED_MESSAGE = "Permission denied: user rejected geolocation"
@@ -288,9 +293,10 @@ class MessageService:
         """
         return await self.repository.create_assistant_message(session_id, content)
 
-    # ── 한 턴 라우팅 진입점 (Router LLM tool-calling) ───────────────────
-    # 흐름: ownership -> Router LLM -> kind='text' 직답 persist
-    #       또는 tool_calls 분기 (eager 즉시 실행 / geo 포함 시 PendingTurn)
+    # ── RAG 4단 파이프라인 진입점 ────────────────────────────────────────
+    # 흐름: ownership -> Step 0 (medical_context) + Step 1+2 (IntentClassifier 4o-mini)
+    #       -> direct_answer 분기 (greeting/out_of_scope/ambiguous) 즉시 응답
+    #       -> domain_question 이면 Step 3 (fanout → tool_calls 병렬) -> Step 4 (2nd LLM)
     async def ask_with_tools(
         self,
         *,
@@ -298,20 +304,15 @@ class MessageService:
         account_id: UUID,
         content: str,
     ) -> AskResult:
-        """Route one user turn through the Router LLM and fan out.
+        """Route one user turn through the RAG 4-stage pipeline.
 
-        Three branches:
-
-        - **text** — Router produced a natural-language reply without
-          invoking any tool (도메인 외 거절, 명확화 질문, 일반 인사).
-          Persist 사용자 turn + Router 의 text 를 그대로 assistant turn 으로.
-        - **tool_calls, all eager** — every tool call can run now
-          (keyword + RAG retrieval). Execute in parallel, feed results
-          back to the 2nd LLM, persist both turns.
-        - **tool_calls, any geo** — at least one call needs the user's
-          GPS. Run any eager calls immediately so they are not re-run
-          on callback, then snapshot the turn into the pending store
-          and hand the client an ``AskPending`` for the GPS round-trip.
+        분기:
+        - **direct_answer** — IntentClassifier 가 즉시 답변
+          (greeting / out_of_scope / ambiguous). Persist 후 종료.
+        - **domain_question, all eager** — fanout queries 를 RAG tool_calls
+          로 변환 + 병렬 실행 + RAG context inject 후 2nd LLM (4o) 호출.
+        - **domain_question, any geo** — (현재 RAG 4단은 GPS tool 안 씀.
+          향후 hospital_search 통합 시 PendingTurn 분기 추가 가능).
 
         Args:
             session_id: Chat session UUID.
@@ -319,85 +320,72 @@ class MessageService:
             content: User message content.
 
         Returns:
-            ``AskResult`` — shape differs per branch; see DTO docstring.
+            ``AskResult`` — direct/tool 분기에 따라 다름.
 
         Raises:
-            HTTPException: Session ownership violations bubble up.
+            HTTPException: Session ownership violations.
         """
         sid = str(session_id)[:8]
-        logger.info(
-            "[Chat] session=%s account=%s q=%r",
-            sid,
-            str(account_id)[:8],
-            _preview(content),
-        )
+        logger.info("[Chat] session=%s account=%s q=%r", sid, str(account_id)[:8], _preview(content))
 
         await self._verify_session_ownership(session_id, account_id)
 
+        # Step 0: history (6 msgs) + summary
         recent = await self.repository.get_recent_by_session(session_id, limit=_HISTORY_LIMIT)
         history = _chat_messages_to_history(recent)
-
-        # 옵션 D — 이전 세션 요약을 system role 로 prepend (있을 때만).
-        # Router LLM 의 history 첫 줄로 들어가 컨텍스트 압축 효과.
         session_summary = await self._fetch_session_summary(session_id)
-        if session_summary:
-            history = [{"role": "system", "content": f"[세션 요약]\n{session_summary}"}, *history]
-            logger.info("[Chat] session=%s summary_prepended=%dchars", sid, len(session_summary))
 
-        logger.info("[Chat] session=%s history_loaded=%dturns", sid, len(history))
-        route_messages = [*history, {"role": "user", "content": content}]
+        # session.profile_id (Step 0 의 medical_context 입력)
+        session_obj = await self.session_repository.get_by_id(session_id)
+        if session_obj is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found.")
+        profile_id = session_obj.profile_id
 
-        # ★ user 메시지를 Router 호출 전 즉시 영속화 — 응답 도착 전 모달이
-        # 닫혀도 다음 진입 시 사용자 입력이 보존된다. 단 Router/2nd LLM 호출이
-        # 실패하면 사용자가 보낸 적 없는 듯 보이도록 soft delete 로 rollback 한다
-        # (세션 소유권 위반은 위 _verify_session_ownership 에서 이미 차단).
+        # ★ user 메시지 영속화 - 실패 시 soft delete rollback
         user_msg = await self.repository.create_user_message(session_id, content)
-
         try:
-            queue = self._get_queue()
-
-            route = await route_intent_via_rq(messages=route_messages, queue=queue)
-            tool_names = ",".join(tc.name for tc in route.tool_calls) if route.tool_calls else "-"
-            logger.info(
-                "[Chat] session=%s route kind=%s calls=%d tools=%s",
-                sid,
-                route.kind,
-                len(route.tool_calls),
-                tool_names,
+            # Step 1: medical_context + ingredient_mapping + Query Rewriter (4o-mini)
+            classify_messages = [*history, {"role": "user", "content": content}]
+            medical_context, ingredient_mapping_section, rewriter_output = await classify_user_turn(
+                profile_id,
+                classify_messages,
             )
 
-            if route.kind == "text":
-                return await self._persist_router_text_turn(session_id, user_msg, route.text)
-
-            eager_calls = [tc for tc in route.tool_calls if not tc.needs_geolocation]
-            geo_calls = [tc for tc in route.tool_calls if tc.needs_geolocation]
-
-            eager_results: dict[str, Any] = {}
-            if eager_calls:
-                eager_payload = [_tool_call_to_worker_dict(tc) for tc in eager_calls]
-                eager_results = await run_tool_calls_via_rq(calls=eager_payload, queue=queue)
-
-            if geo_calls:
-                return await self._park_pending_turn(
-                    session_id=session_id,
-                    account_id=account_id,
-                    user_msg=user_msg,
-                    route=route,
-                    eager_results=eager_results,
+            # 분기 1: direct_answer (greeting/out_of_scope/ambiguous)
+            if rewriter_output.direct_answer:
+                logger.info(
+                    "[Chat] session=%s intent=%s direct_answer (no RAG)",
+                    sid,
+                    rewriter_output.intent.value,
                 )
+                return await self._persist_direct_answer_turn(session_id, user_msg, rewriter_output.direct_answer)
 
-            return await self._finalize_tool_turn(
+            # 분기 2: domain_question - rewritten_query + metadata 로 retrieval
+            if (
+                rewriter_output.intent != IntentType.DOMAIN_QUESTION
+                or not rewriter_output.rewritten_query
+                or rewriter_output.metadata is None
+            ):
+                logger.warning(
+                    "[Chat] session=%s domain_question but rewritten_query/metadata 누락 - fallback",
+                    sid,
+                )
+                fallback = "어떤 약이나 증상에 대해 알려드릴까요? 좀 더 구체적으로 말씀해주세요."
+                return await self._persist_direct_answer_turn(session_id, user_msg, fallback)
+
+            return await self._finalize_rag_turn(
                 session_id=session_id,
                 user_msg=user_msg,
                 history=history,
-                route=route,
-                tool_results=eager_results,
+                session_summary=session_summary,
+                content=content,
+                rewriter_output=rewriter_output,
+                medical_context=medical_context,
+                ingredient_mapping_section=ingredient_mapping_section,
             )
         except Exception:
-            # Router/2nd LLM/RQ 등 서버 처리 실패 → user 메시지 rollback (soft delete).
-            # 다음 진입 시 사용자 입력이 보이지 않아 다시 시도 가능.
             await self.repository.soft_delete(user_msg)
-            logger.exception("[Chat] session=%s server error — rolled back user msg", sid)
+            logger.exception("[Chat] session=%s server error - rolled back user msg", sid)
             raise
 
     async def _fetch_session_summary(self, session_id: UUID) -> str | None:
@@ -427,15 +415,15 @@ class MessageService:
             # fire-and-forget — enqueue 실패는 사용자 응답을 막지 않는다.
             logger.exception("[Chat] session=%s compact enqueue failed", str(session_id)[:8])
 
-    async def _persist_router_text_turn(
+    async def _persist_direct_answer_turn(
         self,
         session_id: UUID,
         user_msg: ChatMessage,
         text: str,
     ) -> AskResult:
-        """Router LLM 이 직접 답변한 (text) 턴 — assistant 만 persist (user 는 ask_with_tools 가 이미 저장)."""
+        """IntentClassifier 가 직접 답변한 turn — assistant 만 persist."""
         logger.info(
-            "[Chat] session=%s route=text reply=%r len=%d",
+            "[Chat] session=%s direct_answer reply=%r len=%d",
             str(session_id)[:8],
             _preview(text),
             len(text),
@@ -445,69 +433,70 @@ class MessageService:
         self._maybe_enqueue_compact(session_id, total)
         return AskResult(user_message=user_msg, assistant_message=assistant_msg, pending=None)
 
-    async def _park_pending_turn(
-        self,
-        *,
-        session_id: UUID,
-        account_id: UUID,
-        user_msg: ChatMessage,
-        route: RouteResult,
-        eager_results: dict[str, Any],
-    ) -> AskResult:
-        """User 는 이미 저장됨 — PendingTurn 만 발급."""
-        messages_snapshot = [
-            {"role": "user", "content": user_msg.content},
-            route.assistant_message or {"role": "assistant", "content": None, "tool_calls": []},
-        ]
-        pending = PendingTurn(
-            turn_id="",
-            session_id=str(session_id),
-            account_id=str(account_id),
-            messages_snapshot=messages_snapshot,
-            tool_calls=route.tool_calls,
-            eager_results=eager_results,
-            created_at=datetime.now(UTC),
-        )
-        store = self._get_pending_store()
-        turn_id = await store.create(pending)
-        geo_count = len(route.tool_calls) - len(eager_results)
-        logger.info("[ToolCalling] pending turn=%s eager=%d geo=%d", turn_id, len(eager_results), geo_count)
-
-        return AskResult(
-            user_message=user_msg,
-            assistant_message=None,
-            pending=AskPending(turn_id=turn_id, ttl_sec=DEFAULT_TTL_SEC),
-        )
-
-    async def _finalize_tool_turn(
+    async def _finalize_rag_turn(
         self,
         *,
         session_id: UUID,
         user_msg: ChatMessage,
         history: list[dict[str, str]],
-        route: RouteResult,
-        tool_results: dict[str, Any],
+        session_summary: str | None,
+        content: str,
+        rewriter_output: Any,
+        medical_context: str = "",
+        ingredient_mapping_section: str = "",
     ) -> AskResult:
-        """2nd LLM 호출 후 assistant 만 persist (user 는 ask_with_tools 가 이미 저장)."""
-        assistant_with_calls = route.assistant_message or {"role": "assistant", "content": None, "tool_calls": []}
-        tool_messages = [_tool_result_message(call_id, result) for call_id, result in tool_results.items()]
+        """rewritten_query + metadata 로 retrieval -> 2nd LLM 호출.
 
+        흐름:
+          1. metadata.target_ingredients + interaction_concerns 산출 (ingredient 필터)
+          2. encode_query(rewritten_query) - 1회 임베딩
+          3. retrieve_with_metadata - hybrid SQL (메타필터 + cosine top-K)
+          4. assemble_rag_section - chunk dict list 평탄화/dedup
+          5. _compose_system_prompt - persona + medical_context + 용어 매핑 +
+             세션요약 + 명확화 + RAG 검색 결과
+          6. generate_chat_response_via_rq - 2nd LLM (4o)
+        """
+        meta = rewriter_output.metadata
+        ingredient_filter = list({*meta.target_ingredients, *meta.interaction_concerns})
+
+        embedding = await encode_query(rewriter_output.rewritten_query)
+        chunks = await retrieve_with_metadata(
+            query_embedding=embedding,
+            target_ingredients=ingredient_filter,
+            target_sections=meta.target_sections or None,
+            target_conditions=meta.target_conditions or None,
+            limit=15,
+        )
+        chunk_dicts = [c.to_dict() for c in chunks]
+        rag_section = assemble_rag_section({"_": {"chunks": chunk_dicts}})
+
+        system_prompt = _compose_system_prompt(
+            session_summary=session_summary,
+            referent_resolution=rewriter_output.referent_resolution,
+            rag_section=rag_section,
+            medical_context=medical_context,
+            ingredient_mapping_section=ingredient_mapping_section,
+        )
         second_messages = [
             *history,
-            {"role": "user", "content": user_msg.content},
-            assistant_with_calls,
-            *tool_messages,
+            {"role": "user", "content": content},
         ]
+        logger.info(
+            "[Chat] session=%s rewritten=%r chunks=%d rag_section=%dchars",
+            str(session_id)[:8],
+            rewriter_output.rewritten_query,
+            len(chunks),
+            len(rag_section),
+        )
         completion = await generate_chat_response_via_rq(
             messages=second_messages,
-            system_prompt=None,
+            system_prompt=system_prompt,
             queue=self._get_queue(),
         )
         answer = completion.get("answer", "")
         logger.info(
-            "[Chat] session=%s finalize tools=%d reply=%r len=%d",
+            "[Chat] session=%s reply=%r len=%d",
             str(session_id)[:8],
-            len(tool_results),
             _preview(answer),
             len(answer),
         )
@@ -641,3 +630,98 @@ class MessageService:
         """
         message = await self.get_message_with_owner_check(message_id, account_id)
         await self.repository.soft_delete(message)
+
+
+# ── 2nd LLM system prompt 조립 ──────────────────────────────────────
+# PLAN.md (RAG 재설계 PR-D) - 사용자 brand <-> 검색결과 성분명 단절 방지를
+# 위한 안전장치 섹션 순서:
+#   1. persona + output rule (성분 grounded 강화)
+#   2. [사용자 의학 컨텍스트] (사용자 복용약/기저질환/알레르기 brand 표기)
+#   3. [용어 매핑] (brand -> 활성성분 변환표)
+#   4. [세션 요약] (옵션)
+#   5. [명확화] (referent_resolution 있을 때)
+#   6. [검색된 약품 정보] (성분 단위 RAG 결과)
+_PERSONA_AND_RULES = (
+    "당신은 'Dayak' 약사 챗봇입니다. 약 복용에 대해 걱정 많은 사용자에게\n"
+    "동네 단골 약사처럼 따뜻하고 안심되는 어조 (해요체) 로 응답합니다.\n"
+    "\n"
+    "## 말투와 톤 (사용자 친화 + 전문 용어 병기)\n"
+    "- 첫 문장은 **사용자의 걱정에 공감하거나 안심시키는 한마디** 로 시작.\n"
+    "  예) '걱정되시는 마음 충분히 이해돼요.', '같이 한 번 살펴볼게요.',\n"
+    "      '결론부터 말씀드리면 …'.\n"
+    "- 의학 전문 용어는 **쉬운 일상 비유로 먼저 풀어 쓰고, 괄호 () 안에\n"
+    "  실제 전문 용어를 같이 적습니다.** — 사용자가 그 키워드로 추가 검색\n"
+    "  하거나 약사·의사에게 다시 물어볼 수 있도록 돕는 목적.\n"
+    "  예) '몸에서 약을 분해하는 효소의 일을 늦춰요 (**CYP3A4 효소 억제**)',\n"
+    "      '간에 부담이 갈 수 있어요 (**간독성, hepatotoxicity**)',\n"
+    "      '피가 더 묽어질 수 있어요 (**INR 상승**)',\n"
+    "      '약효가 너무 강해질 수 있어요 (**혈중 농도 상승**)'.\n"
+    "  -> 비유 → 괄호 (전문 용어) 순서, 전문 용어는 굵게 강조.\n"
+    "  -> 사용자가 직접 입력한 약 이름·증상 같은 일상어에는 괄호 병기 불필요.\n"
+    "- 단정적 명령 ('하세요', '금지') 보다 **부드러운 권유** 사용.\n"
+    "  예) '~ 하시는 게 좋아요', '가능하면 ~ 권해드려요', '~ 은 피하시면 좋아요'.\n"
+    "- 답변 끝은 사용자가 다음에 할 행동을 가볍게 안내.\n"
+    "  예) '추가로 궁금한 점 있으시면 언제든 물어보세요', '복약 중 불편하면\n"
+    "      바로 약사·의사에게 말씀해주세요'.\n"
+    "- 차갑거나 사무적인 표현 회피 — '본 답변은 …', '귀하의 ~' 같은 딱딱한\n"
+    "  공문체는 쓰지 않습니다.\n"
+    "\n"
+    "## 출력 형식 (한국어 GFM Markdown 적극 활용)\n"
+    "- 답변 길이: 평균 400~800자 권장. 검색 결과의 핵심 정보를 충분히 활용.\n"
+    "  너무 짧은 답변 (200자 미만) 회피 — 사용자가 구체적 정보 받도록.\n"
+    "- 답변에 적합한 곳에 다음 Markdown 적극 사용:\n"
+    "  * `## 소제목` — 답변에 2개 이상의 토픽 (예: 상호작용 / 주의사항) 이\n"
+    "    있을 때 섹션 구분.\n"
+    "  * `**굵게**` — 약품명, 위험 키워드 (출혈 위험, 간 손상 등), 핵심 수치 (1일 4g).\n"
+    "  * `- 글머리 기호 리스트` — 항목이 2개 이상일 때 (주의사항, 부작용 list).\n"
+    "  * `1. 번호 리스트` — 단계/순서가 있을 때 (복용 순서 등).\n"
+    "  * `> 인용` — 결론/요약 강조.\n"
+    "- 코드 블록 (```) 만 금지. 인라인 `code` 도 사용 자제.\n"
+    "\n"
+    "## 출처 인라인 명시\n"
+    "- 답변에서 검색 결과를 인용한 부분 끝에 `[약: 약품명] [section]` 형식.\n"
+    "- 두 약 이상의 chunk 를 활용했다면 각각 인용 (예: `[약: 타이레놀] [drug_interaction]`,\n"
+    "  `[약: 쿠파린정] [drug_interaction]`).\n"
+    "\n"
+    "## 의료 안전 룰\n"
+    "- 의학적 진단/처방 변경 제안 금지. 의사·약사 상담 권고는 부드럽게.\n"
+    "- 약물 상호작용·부작용·금기 정보가 검색 결과에 있으면 **적극 반영**.\n"
+    "- 위험 정보는 **분명하게** 알리되, 과도한 공포감을 주지 않게 균형 유지.\n"
+    "\n"
+    "## brand <-> 성분 매핑 (단절 방지)\n"
+    "- 사용자가 사용한 약 이름은 brand, 검색 결과는 성분명 단위입니다.\n"
+    "- 답변 시 사용자의 brand 이름을 그대로 쓰면서, [용어 매핑] 의 brand -> 성분\n"
+    "  변환표를 활용해 검색 결과의 성분 정보를 정확히 반영하세요.\n"
+    "- 일반론적인 '의사 상담' 답변 대신, 사용자 복용약/기저질환과의 구체적\n"
+    "  상호작용을 검색 결과 기반으로 제시하세요."
+)
+
+
+def _compose_system_prompt(
+    *,
+    session_summary: str | None,
+    referent_resolution: dict[str, str] | None,
+    rag_section: str,
+    medical_context: str = "",
+    ingredient_mapping_section: str = "",
+) -> str:
+    """2nd LLM (4o) 의 system prompt 를 안전장치 포함 섹션 순서로 조립."""
+    parts: list[str] = [_PERSONA_AND_RULES]
+
+    if medical_context:
+        parts.append(medical_context)  # [사용자 의학 컨텍스트] 헤더 포함
+
+    if ingredient_mapping_section:
+        parts.append(ingredient_mapping_section)  # [용어 매핑] 헤더 포함
+
+    if session_summary:
+        parts.append(f"[세션 요약]\n{session_summary}")
+
+    if referent_resolution:
+        clarif_lines = "\n".join(f"- '{k}' → '{v}'" for k, v in referent_resolution.items())
+        parts.append(f"[명확화]\n{clarif_lines}")
+
+    if rag_section:
+        parts.append(rag_section)  # [검색된 약품 정보] 헤더 포함
+
+    return "\n\n".join(parts)

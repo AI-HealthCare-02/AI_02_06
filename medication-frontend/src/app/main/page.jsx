@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, Suspense, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
-import { Pill, Flame, Plus, MessageCircle, FileText, Loader2, X, Trash2 } from 'lucide-react'
+import { Pill, Flame, Plus, MessageCircle, FileText, Loader2, X, Trash2, Activity } from 'lucide-react'
 import ChatModal from '@/components/chat/ChatModal'
 import SurveyModal from '@/components/common/SurveyModal'
 import { useProfile } from '@/contexts/ProfileContext'
@@ -133,6 +133,15 @@ function getRemainingDays(med) {
   return null
 }
 
+// ── 메인 페이지 컴포넌트 (Suspense 적용) ──────────────────────────────────────────
+export default function MainPage() {
+  return (
+    <Suspense fallback={<MainSkeleton />}>
+      <MainPageContent />
+    </Suspense>
+  )
+}
+
 function MainPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -141,6 +150,10 @@ function MainPageContent() {
   const [showChat, setShowChat] = useState(false)
   const [activeChallenge, setActiveChallenge] = useState(null)
   const [greeting, setGreeting] = useState({ msg: '반가워요', sub: '오늘 하루도 건강하게 시작해봐요' })
+
+  // [추가] 오늘의 증상 관련 상태 관리
+  const [todaySymptoms, setTodaySymptoms] = useState([])
+  const [todayNote, setTodayNote] = useState('')
 
   const { selectedProfileId, selectedProfile } = useProfile()
   // 4 Context 가 모든 server state 를 단일 진실로 관리 — 자체 fetch 0
@@ -164,25 +177,53 @@ function MainPageContent() {
   }, [currentBgIndex])
 
   // 설문 팝업 쿼리 파라미터 감지
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (searchParams.get('showSurvey') === 'true') {
       setShowSurvey(true)
       router.replace('/main', { scroll: false })
     }
   }, [searchParams, router])
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Context 들이 자동으로 server state 를 관리 — 페이지는 derived state 만 갱신.
-  /* eslint-disable react-hooks/set-state-in-effect */
+  // [수정] 증상 데이터 fetch 로직 통합
   useEffect(() => {
     if (!selectedProfileId) return
-    isInitialLoad.current = false
-    setIsLoading(false)
-    const hour = new Date().getHours()
-    if (hour < 12) setGreeting({ msg: '좋은 아침이에요', sub: '오늘 하루도 건강하게 시작해봐요' })
-    else if (hour < 17) setGreeting({ msg: '좋은 오후예요', sub: '점심 식사 후 약 챙기셨나요?' })
-    else setGreeting({ msg: '좋은 저녁이에요', sub: '저녁 복약 시간을 확인해보세요' })
+
+    const fetchData = async () => {
+      isInitialLoad.current = false
+      setIsLoading(false)
+
+      // 인사말 설정 로직
+      const hour = new Date().getHours()
+      if (hour < 12) setGreeting({ msg: '좋은 아침이에요', sub: '오늘 하루도 건강하게 시작해봐요' })
+      else if (hour < 17) setGreeting({ msg: '좋은 오후예요', sub: '점심 식사 후 약 챙기셨나요?' })
+      else setGreeting({ msg: '좋은 저녁이에요', sub: '저녁 복약 시간을 확인해보세요' })
+
+      // [추가] 오늘 증상 데이터 가져오기 (API 호출)
+      try {
+        const today = new Date().toISOString().split('T')[0]
+        const response = await api.get(`/api/v1/daily-logs`, {
+          params: {
+            profile_id: selectedProfileId,
+            data: today
+          }
+        })
+        if (response.data && response.data.length > 0) {
+          const latestLog = response.data[0]
+          setTodaySymptoms(latestLog.symptoms || [])
+          setTodayNote(latestLog.note || '')
+        } else {
+          setTodaySymptoms([])
+          setTodayNote('')
+        }
+      } catch (error) {
+        console.warn('Failed to fetch symptoms:', error)
+        setTodaySymptoms([])
+        setTodayNote('')
+      }
+    }
+
+    fetchData()
   }, [selectedProfileId])
 
   // 진행 중 챌린지에서 랜덤 1개 — activeChallenges 갱신 시 자동 반영
@@ -194,14 +235,8 @@ function MainPageContent() {
     const random = activeChallenges[Math.floor(Math.random() * activeChallenges.length)]
     setActiveChallenge(random)
   }, [activeChallenges])
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // main 페이지 진입 시 / 프로필 전환 시 OCR drafts 동기화.
-  // - result 페이지에서 SSE 로 ready 도달한 draft 가 Context activeDrafts 에는
-  //   반영되지 않은 상태로 main 으로 돌아오면, refetch 가 없으면 새로고침해야
-  //   카드가 보였다 → mount/프로필 전환 시 명시적 refetch 로 해결.
-  // - refetchDrafts 자체가 selectedProfileId 의존이라 변경 시 의존성 재생성되어
-  //   effect 가 재호출됨 (안전망: Context effect 가 missed 한 경우도 cover).
   useEffect(() => {
     if (selectedProfileId) refetchDrafts()
   }, [selectedProfileId, refetchDrafts])
@@ -214,7 +249,6 @@ function MainPageContent() {
   }, [selectedProfileId, refetchDrafts])
 
   // 카드에서 개별 draft 폐기 — 백엔드 DELETE 후 즉시 목록에서 제외.
-  // 실패 시에도 사용자 흐름을 차단하지 않고 silently skip (24h 후 자동 정리됨).
   const handleDeleteDraft = useCallback(async (draftId) => {
     try {
       await api.delete(`/api/v1/ocr/draft/${draftId}`, {
@@ -260,7 +294,7 @@ function MainPageContent() {
             </button>
           </div>
 
-          {/* 이미지 인디케이터 — 클릭으로 수동 전환 가능 (hit area 충분히 확보) */}
+          {/* 이미지 인디케이터 — 클릭으로 수동 전환 가능 */}
           <div className="flex gap-2 justify-center mt-10">
             {HERO_BG_IMAGES.map((_, i) => (
               <button
@@ -270,118 +304,131 @@ function MainPageContent() {
                 aria-label={`배경 이미지 ${i + 1}`}
                 className="py-3 px-1 cursor-pointer flex items-center justify-center"
               >
-                <span
-                  className={`block h-2 rounded-full transition-all ${
-                    i === currentBgIndex ? 'bg-white w-8' : 'bg-white/40 w-2'
-                  }`}
-                />
+                <span className={`block h-2 rounded-full transition-all ${currentBgIndex === i ? 'w-8 bg-white' : 'w-2 bg-white/30'}`} />
               </button>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── 대시보드 ── */}
       <main className="max-w-7xl mx-auto w-full px-6 py-14">
-        {/* 오늘의 복약 스케줄 — 약품 그리드 상단 전체 너비 */}
-        <TodaySchedule medications={medications} profileId={selectedProfileId} />
+        <div className="grid md:grid-cols-12 gap-8">
+          <div className="md:col-span-8 space-y-8">
 
-        <div className="grid md:grid-cols-12 gap-6 items-start">
-          {/* 복약 현황 */}
-          <section className="md:col-span-8 bg-white rounded-[32px] p-8 border border-gray-100">
-            <div className="flex justify-between items-center mb-8">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-gray-100 rounded-2xl flex items-center justify-center"><Pill size={20} className="text-gray-900" /></div>
-                <h2 className="text-2xl font-bold text-gray-900">복용 중인 약</h2>
-              </div>
-              <button onClick={() => router.push('/medication')} className="text-base font-bold text-gray-400 hover:text-gray-900 transition-colors cursor-pointer">
-                전체보기 →
-              </button>
-            </div>
-            {medications.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
-                  <Pill size={28} className="text-gray-300" />
+            {/* [추가] 오늘의 증상 요약 카드 섹션 */}
+            <section className="bg-white rounded-[32px] p-8 shadow-sm border border-gray-100">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-red-500">
+                    <Activity size={20} />
+                  </div>
+                  <h2 className="text-xl font-black text-gray-900">오늘의 증상</h2>
                 </div>
-                <p className="text-gray-400 font-bold text-base mb-1">등록된 약이 없어요</p>
-                <p className="text-gray-300 text-base mb-6">처방전을 촬영해서 약을 등록해보세요</p>
-                <button onClick={goToOcrFlow} className="px-6 py-3 bg-gray-900 text-white text-base font-bold rounded-full cursor-pointer hover:bg-gray-800 transition-colors">
-                  처방전 등록하기
+                <button
+                  onClick={() => router.push('/lifestyle-guide?tab=symptom')}
+                  className="text-sm font-bold text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  기록하기
                 </button>
               </div>
-            ) : (
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {medications.slice(0, 6).map((med) => (
-                  <div
-                    key={med.id}
-                    onClick={() => router.push(`/medication/${med.id}`)}
-                    className="p-5 rounded-2xl border border-gray-100 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-all cursor-pointer"
-                  >
-                    <div className="flex justify-between items-start mb-3">
-                      {med.category && (
-                        <span className="text-xs font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded-full">{med.category}</span>
-                      )}
-                      <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center ml-auto">
-                        <Plus size={12} className="text-gray-400" />
-                      </div>
-                    </div>
-                    <h3 className="font-bold text-gray-900 text-base mb-1 leading-snug">{med.medicine_name}</h3>
-                    <p className="text-sm text-gray-500 mb-0.5">
-                      {[
-                        med.daily_intake_count && `1일 ${med.daily_intake_count}회`,
-                        med.intake_instruction,
-                      ].filter(Boolean).join(' · ') || med.dose_per_intake || '복용 정보 없음'}
+
+              {todaySymptoms.length > 0 ? (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap gap-2">
+                    {todaySymptoms.map((s, idx) => (
+                      <span key={idx} className="px-4 py-2 bg-gray-50 text-gray-700 rounded-full text-sm font-bold border border-gray-100">
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                  {todayNote && (
+                    <p className="text-gray-500 text-sm leading-relaxed bg-gray-50/50 p-4 rounded-2xl border border-dashed border-gray-200">
+                      "{todayNote}"
                     </p>
-                    {getRemainingDays(med) && (
-                      <p className="text-sm text-blue-500 font-semibold">{getRemainingDays(med)}</p>
-                    )}
+                  )}
+                </div>
+              ) : (
+                <div className="py-4 text-center">
+                  <p className="text-gray-400 text-sm mb-4">오늘 기록된 증상이 없습니다.</p>
+                  <button
+                    onClick={() => router.push('/lifestyle-guide?tab=symptom')}
+                    className="px-6 py-2 bg-gray-900 text-white text-xs font-bold rounded-full hover:bg-black transition-all"
+                  >
+                    지금 기록하기
+                  </button>
+                </div>
+              )}
+            </section>
+
+            {/* ── 복약 스케줄 ── */}
+            <section className="bg-white rounded-[32px] p-8 shadow-sm border border-gray-100">
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-500">
+                    <Pill size={20} />
+                  </div>
+                  <h2 className="text-xl font-black text-gray-900">오늘의 복약 스케줄</h2>
+                </div>
+              </div>
+              <TodaySchedule medications={medications} profileId={selectedProfileId} />
+            </section>
+          </div>
+
+          <div className="md:col-span-4 space-y-8">
+            {/* ── 챌린지 카드 ── */}
+            <section className="bg-gray-900 rounded-[32px] p-8 text-white relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform duration-500">
+                <Flame size={80} />
+              </div>
+              <div className="relative z-10">
+                <div className="flex items-center gap-2 mb-6">
+                  <span className="px-3 py-1 bg-white/10 rounded-full text-[10px] font-bold tracking-wider uppercase">Active Challenge</span>
+                </div>
+                {activeChallenge ? (
+                  <>
+                    <h3 className="text-2xl font-black mb-2">{activeChallenge.title}</h3>
+                    <p className="text-gray-400 text-sm mb-8 leading-relaxed">{activeChallenge.description}</p>
+                    <button onClick={() => router.push('/challenge')} className="w-full py-4 bg-white text-black font-bold rounded-2xl hover:bg-gray-100 transition-all">진행 상황 보기</button>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="text-2xl font-black mb-2">새로운 도전을<br />시작해보세요</h3>
+                    <p className="text-gray-400 text-sm mb-8">건강한 습관을 만드는 가장 쉬운 방법</p>
+                    <button onClick={() => router.push('/challenge')} className="w-full py-4 bg-white text-black font-bold rounded-2xl hover:bg-gray-100 transition-all">챌린지 둘러보기</button>
+                  </>
+                )}
+              </div>
+            </section>
+
+            {/* ── 복약 관리 카드 ── */}
+            <section className="bg-white rounded-[32px] p-8 shadow-sm border border-gray-100">
+              <h3 className="text-lg font-black text-gray-900 mb-6">복약 관리</h3>
+              <div className="space-y-4">
+                {medications.slice(0, 2).map((med) => (
+                  <div key={med.medication_id} className="p-4 rounded-2xl bg-gray-50 border border-gray-100">
+                    <div className="flex justify-between items-start mb-1">
+                      <p className="font-bold text-gray-900 truncate flex-1">{med.medicine_name}</p>
+                      <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full ml-2 flex-shrink-0">
+                        {getRemainingDays(med)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400">{med.dosage}</p>
                   </div>
                 ))}
+                <button onClick={() => router.push('/medication')} className="w-full py-4 bg-gray-50 text-gray-900 font-bold rounded-2xl hover:bg-gray-100 transition-all flex items-center justify-center gap-2">
+                  <Plus size={18} /> 전체 보기
+                </button>
               </div>
-            )}
-          </section>
-
-          {/* 사이드바 */}
-          <div className="md:col-span-4 space-y-6">
-            <div onClick={() => router.push('/challenge')} className="bg-gray-900 rounded-[32px] p-8 text-white cursor-pointer hover:-translate-y-1 transition-all min-h-[220px] flex flex-col justify-end relative overflow-hidden group">
-              <Flame size={120} className="absolute -right-4 -top-4 opacity-[0.05] group-hover:scale-110 transition-transform" />
-              <p className="text-gray-500 font-bold text-sm mb-2 tracking-widest">CHALLENGE</p>
-              {activeChallenge ? (
-                <>
-                  <h2 className="text-3xl font-black mb-3">{activeChallenge.title}</h2>
-                  <p className="text-orange-500 text-base font-bold">
-                    {activeChallenge.completed_dates?.length || 0}일째 성공 중! →
-                  </p>
-                </>
-              ) : (
-                <>
-                  <h2 className="text-3xl font-black mb-3">챌린지 시작하기</h2>
-                  <p className="text-gray-400 text-base font-bold">건강한 습관을 만들어보세요 →</p>
-                </>
-              )}
-            </div>
+            </section>
           </div>
         </div>
       </main>
 
-      {/* 처리 중·확인 대기 OCR draft 카드 (우측하단 floating).
-          key={selectedProfileId} 로 프로필 전환 시 unmount/remount → 내부 dismissed
-          state 가 자동 reset 되어 새 프로필에서 카드를 다시 볼 수 있다. */}
       <ActiveDraftsCard
-        key={selectedProfileId}
         drafts={activeDrafts}
-        onSelect={(draftId) => router.push(`/ocr/result?draft_id=${draftId}`)}
+        onSelect={(id) => router.push(`/ocr/result?draft_id=${id}`)}
         onDelete={handleDeleteDraft}
       />
     </div>
-  )
-}
-
-// Suspense로 감싸서 export (useSearchParams 필수)
-export default function MainPage() {
-  return (
-    <Suspense fallback={<MainSkeleton />}>
-      <MainPageContent />
-    </Suspense>
   )
 }

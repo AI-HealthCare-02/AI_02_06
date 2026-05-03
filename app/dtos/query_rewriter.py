@@ -1,0 +1,130 @@
+"""Query Rewriter (1st LLM) Pydantic schema — Structured Output.
+
+PLAN.md (RAG 재설계 PR-B) — 사용자 raw 질의 + medical_context (DB 자동 prepend)
+를 입력받아 단일 호출로 다음을 모두 산출:
+
+1. intent 분류 (greeting / out_of_scope / domain_question / ambiguous)
+2. greeting/out_of_scope/ambiguous → direct_answer 텍스트
+3. domain_question → rewritten_query + metadata (ingredients/conditions/
+   sections/drugs/interactions)
+4. 대명사 풀이 referent_resolution
+
+이전 IntentClassifier 의 책임을 흡수하면서, fanout_queries (cap=10) 분산
+대신 *재작성된 단일 질의 + 메타데이터* 로 hybrid retrieval 입력 단순화.
+의약품 도메인 본질 (병용금기/부작용/주의사항이 활성성분 단위로 정의됨) 에
+부합 — 메타데이터 필터 + 임베딩 cosine 의 hybrid 전략 가능.
+"""
+
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class IntentType(StrEnum):
+    """4가지 의도 카테고리 (이전 IntentClassifier 와 동일)."""
+
+    GREETING = "greeting"
+    """단순 인사 — direct_answer 즉시 응답."""
+
+    OUT_OF_SCOPE = "out_of_scope"
+    """도메인 외 (정치/시사/잡담/욕설/날씨 등) — direct_answer 가이드 메시지."""
+
+    DOMAIN_QUESTION = "domain_question"
+    """의학/약학 도메인 질문 — rewritten_query + metadata 로 RAG 검색 진입."""
+
+    AMBIGUOUS = "ambiguous"
+    """대명사가 있는데 history 에서 referent 를 못 찾음 — direct_answer 명확화."""
+
+
+class QueryMetadata(BaseModel):
+    """RAG hybrid retrieval 의 메타필터 입력 (intent=domain_question 일 때만)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_drugs: list[str] = Field(
+        default_factory=list,
+        description=(
+            "사용자 질의에 등장한 brand 이름 (raw query 또는 referent_resolution 결과). "
+            "예: ['타이레놀']. 답변 시 brand 그대로 표기에 사용."
+        ),
+    )
+    target_ingredients: list[str] = Field(
+        default_factory=list,
+        description=(
+            "검색 대상 활성성분명 (medicine_ingredient.mtral_name 와 매칭). "
+            "target_drugs 의 활성성분 + medical_context 활성성분 중 검색 의도 약. "
+            "예: ['아세트아미노펜']."
+        ),
+    )
+    target_conditions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "환자상태 controlled vocab. medical_context 의 conditions + raw query 의 "
+            "환자상태 표현을 controlled term 으로 변환. "
+            "예: 'liver_disease', 'kidney_disease', 'diabetes', 'hypertension', "
+            "'pregnancy', 'breastfeeding', 'allergy_penicillin' 등. 빈 list 가능."
+        ),
+    )
+    target_sections: list[str] = Field(
+        default_factory=list,
+        description=(
+            "검색할 chunk section list (MedicineChunkSection enum value). "
+            "값: 'overview', 'intake_guide', 'drug_interaction', "
+            "'lifestyle_interaction', 'adverse_reaction', 'special_event'. "
+            "질문 의도에 맞는 섹션만 (예: 부작용 질문 → ['adverse_reaction', "
+            "'drug_interaction']). 빈 list 면 모든 섹션 검색."
+        ),
+    )
+    interaction_concerns: list[str] = Field(
+        default_factory=list,
+        description=(
+            "사용자 복용약의 활성성분 list — 상호작용 검사 대상. "
+            "medical_context 의 [용어 매핑] 의 brand → 성분 변환 결과를 활용. "
+            "검색 시 target_ingredients 와 함께 ingredient 메타필터의 union. "
+            "예: ['와파린나트륨', '메트포르민염산염']."
+        ),
+    )
+
+
+class QueryRewriterOutput(BaseModel):
+    """1st LLM (gpt-4o-mini Structured Output) 의 통합 결과 schema.
+
+    Structured Outputs 강제 — schema 위반 자체 차단. fanout_queries (cap=10)
+    대신 단일 rewritten_query + metadata 로 hybrid retrieval 입력 단순화.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    intent: IntentType = Field(..., description="질의 의도 카테고리")
+    direct_answer: str | None = Field(
+        None,
+        description=(
+            "intent 가 greeting/out_of_scope/ambiguous 일 때 즉시 응답할 텍스트. "
+            "domain_question 일 때는 None (rewritten_query + metadata 로 RAG 진입)."
+        ),
+    )
+    rewritten_query: str | None = Field(
+        None,
+        description=(
+            "intent 가 domain_question 일 때 medical_context 를 prepend 한 self-"
+            "contained 검색 질의. 약 이름 옆에 (성분) 함께 표기 권장. "
+            "예: '간 질환 환자가 와파린(쿠마딘정) 복용 중 아세트아미노펜(타이레놀) "
+            "병용 시 출혈 위험과 간 손상 주의사항'. 다른 intent 일 때 None."
+        ),
+    )
+    metadata: QueryMetadata | None = Field(
+        None,
+        description=(
+            "intent 가 domain_question 일 때 retrieval 메타필터 입력. "
+            "target_ingredients + interaction_concerns 가 ingredient 필터 source, "
+            "target_conditions 가 환자상태 필터, target_sections 가 섹션 필터. "
+            "다른 intent 일 때 None."
+        ),
+    )
+    referent_resolution: dict[str, str] | None = Field(
+        None,
+        description=(
+            "대명사 → 명사 매핑. 예: {'그거': '타이레놀'}. "
+            "history 에 명시된 referent 만 인정 (hallucination 방지). 없으면 None."
+        ),
+    )

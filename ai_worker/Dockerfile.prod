@@ -22,22 +22,15 @@ WORKDIR /app
 RUN groupadd --gid 1000 appgroup && \
     useradd --uid 1000 --gid appgroup --shell /bin/bash --create-home appuser
 
-COPY --from=builder /app/.venv /app/.venv
-COPY . .
+# venv + 소스 모두 *복사 시점*에 권한 부여 — 별 RUN chown -R 으로 layer 분리
+# 시 OverlayFS 가 venv 안의 수만 개 파일 inode 를 통째 새 layer 로 복사해
+# 1.23GB 의 chown layer 가 생기던 회귀 (2026-05-01 진단). COPY --chown 은
+# 빌드 시점에 inline 으로 metadata 만 set 하므로 별 layer 없이 0B.
+COPY --from=builder --chown=appuser:appgroup /app/.venv /app/.venv
+COPY --chown=appuser:appgroup . .
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-# ko-sroberta 모델은 image layer 가 아니라 host volume 으로 분리.
-# - HF_HOME 은 docker-compose 의 hf_cache named volume 마운트 지점.
-# - 첫 컨테이너 start 시 sentence-transformers 가 알아서 다운로드 → 영속 저장.
-# - 두 번째 컨테이너 부터는 cache hit (다운로드 0회).
-# - 이미지 layer 에서 모델이 빠져 ai-worker 이미지 ~3GB → ~600MB (5분의 1).
-ENV HF_HOME=/data/hf-cache
-ENV TRANSFORMERS_CACHE=/data/hf-cache
-ENV SENTENCE_TRANSFORMERS_HOME=/data/hf-cache
-
-# 마운트 지점 미리 생성 + 권한 부여 (named volume 이 비어있을 때 권한 보장)
-RUN mkdir -p /data/hf-cache && chown -R appuser:appgroup /app /data
 USER appuser
 
 # compose.prod.yml 이 Redis 기반 healthcheck 로 override. 여기선 기본만 정의.
