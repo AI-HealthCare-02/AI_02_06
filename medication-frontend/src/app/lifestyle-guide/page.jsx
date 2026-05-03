@@ -5,7 +5,7 @@
 // - 각 탭에 연결된 챌린지를 하단 배너로 표시 (3-상태: 시작 전/진행중/완료)
 // - 증상 탭에는 오늘의 일일 증상 로그 입력 폼 포함
 import { useState, useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/Header'
 import BottomNav from '@/components/layout/BottomNav'
 import EmptyState from '@/components/common/EmptyState'
@@ -191,8 +191,12 @@ function ChallengeBanner({ challenge, isViewingHistory }) {
 }
 
 // ── 메인 페이지 ────────────────────────────────────────────────────────────────
+// 유효한 탭 키 (TABS 의 key 와 일치). 메인 → ?tab=symptom 진입 시 활용.
+const VALID_TAB_KEYS = ['interaction', 'sleep', 'diet', 'exercise', 'symptom']
+
 export default function LifestyleGuidePage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const confirm = useConfirm()
   const { selectedProfileId: profileId } = useProfile()
   const {
@@ -213,7 +217,12 @@ export default function LifestyleGuidePage() {
   const [isRevealing, setIsRevealing] = useState(false)
   const [selectedGuide, setSelectedGuide] = useState(null)
   const [userPickedGuideId, setUserPickedGuideId] = useState(null)
-  const [activeTab, setActiveTab] = useState('interaction')
+  // 메인 페이지의 '오늘의 증상 → 기록하기' 같은 deep link 가 ?tab=<key> 로
+  // 진입 탭을 지정할 수 있게 한다 (예: /lifestyle-guide?tab=symptom).
+  const initialTabFromQuery = searchParams.get('tab')
+  const [activeTab, setActiveTab] = useState(
+    VALID_TAB_KEYS.includes(initialTabFromQuery) ? initialTabFromQuery : 'interaction'
+  )
 
   // ── 오늘의 증상 상태 ──
   const [todaySymptoms, setTodaySymptoms] = useState([])
