@@ -476,12 +476,16 @@ async def main_async(args: argparse.Namespace) -> None:
             ids = [int(x.strip()) for x in args.medicine_ids.split(",") if x.strip()]
             logger.info("ID 목록 모드 — %d medicines", len(ids))
         elif args.name_like:
-            patterns = [p.strip() for p in args.name_like.split(",") if p.strip()]
+            # ── 부분 일치 패턴 검색 (`%token%` 자동 wrap) ──
+            # Tortoise ORM 의 ILIKE 룩업은 ``__ilike`` 가 아닌 ``__icontains``.
+            # ``__ilike`` 는 FieldError: Unknown filter param 발생.
+            # ``__icontains`` 는 자동으로 % wrap → 사용자 입력의 % 는 strip 필요 없음.
+            patterns = [p.strip().strip("%") for p in args.name_like.split(",") if p.strip()]
             from tortoise.expressions import Q
 
             cond = Q()
             for p in patterns:
-                cond |= Q(medicine_name__ilike=p) | Q(item_eng_name__ilike=p)
+                cond |= Q(medicine_name__icontains=p) | Q(item_eng_name__icontains=p)
             matched = await MedicineInfo.filter(cond).values_list("id", flat=True)
             ids = list(matched)
             logger.info("name-like 매칭 — %d medicines (patterns=%s)", len(ids), patterns)
