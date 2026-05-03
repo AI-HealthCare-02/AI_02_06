@@ -481,13 +481,32 @@ class MessageService:
             *history,
             {"role": "user", "content": content},
         ]
+        sid = str(session_id)[:8]
         logger.info(
             "[Chat] session=%s rewritten=%r chunks=%d rag_section=%dchars",
-            str(session_id)[:8],
+            sid,
             rewriter_output.rewritten_query,
             len(chunks),
             len(rag_section),
         )
+        # ── retrieval 품질 디버깅용 chunk 상세 로깅 ───────────────────
+        # 흐름: top-N 한 줄 summary (medicine#section@distance) -> 각 chunk content preview
+        # INFO 레벨 — 운영에서 retrieval 회귀 / 0건 / 무관한 약 잡힘 등 즉시 확인.
+        if chunks:
+            summary = " | ".join(
+                f"[{i:02d}] {c.medicine_name}#{c.section}@{c.distance:.3f}" for i, c in enumerate(chunks)
+            )
+            logger.info("[Chat] session=%s chunks_detail=%s", sid, summary)
+            for i, c in enumerate(chunks):
+                logger.info(
+                    "[Chat] session=%s chunk[%02d] med=%r section=%s distance=%.4f preview=%r",
+                    sid,
+                    i,
+                    c.medicine_name,
+                    c.section,
+                    c.distance,
+                    c.content[:120].replace("\n", " "),
+                )
         completion = await generate_chat_response_via_rq(
             messages=second_messages,
             system_prompt=system_prompt,
