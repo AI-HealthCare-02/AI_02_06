@@ -5,12 +5,24 @@ RUN_IN_TRANSACTION = True
 
 async def upgrade(db: BaseDBAsyncClient) -> str:
     # ── pg_trgm + medicine_info 이름 GIN 인덱스 ────────────────────────────
-    # 흐름: extension 등록 -> medicine_name + medicine_name_eng 두 컬럼에 trgm GIN
-    #       인덱스 -> 약품명 fuzzy 자동완성 (similarity / ILIKE / `%` 연산자) 가속.
-    # similarity() / `%` 연산자 (default threshold 0.3) 가 인덱스를 탑니다.
-    # 운영 트래픽 영향 최소화를 위해 CREATE INDEX 는 IF NOT EXISTS — 재실행 안전.
+    # 흐름: extension 등록 -> lock_timeout 안전 장치
+    #       -> medicine_name + item_eng_name 두 컬럼에 trgm GIN 인덱스
+    #       -> 약품명 fuzzy 자동완성 가속.
+    #
+    # 락 영향 분석 (운영 308K rows + 컨테이너 512MB):
+    #   - GIN 인덱스 빌드 자체는 ~5-10초 (trigram entries 가벼운 편).
+    #   - medicine_info 테이블이 read-mostly (RAG 검색 + drug_recall sync 만 write).
+    #   - CREATE INDEX 는 ACCESS EXCLUSIVE LOCK 을 잡지만 짧은 시간이라 자동배포
+    #     중 다른 쿼리에 미치는 영향은 미미.
+    #
+    # CONCURRENTLY 미사용 이유:
+    #   - aerich 가 multi-statement 마이그레이션을 트랜잭션으로 감싸서 실행하므로
+    #     CREATE INDEX CONCURRENTLY (트랜잭션 안에서 실행 불가) 가 거부됨.
+    #   - 대신 ``lock_timeout = 5s`` 로 안전 장치 — 다른 트랜잭션이 medicine_info
+    #     에 락을 들고 있으면 5초 후 마이그레이션 자체가 실패 (safe rollback).
     return """
         CREATE EXTENSION IF NOT EXISTS pg_trgm;
+        SET LOCAL lock_timeout = '5s';
         CREATE INDEX IF NOT EXISTS idx_medicine_info_name_trgm
             ON medicine_info USING gin (medicine_name gin_trgm_ops);
         CREATE INDEX IF NOT EXISTS idx_medicine_info_item_eng_name_trgm
@@ -19,8 +31,8 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
 
 
 async def downgrade(db: BaseDBAsyncClient) -> str:
-    # extension DROP 은 다른 인덱스에 영향 우려가 있어 인덱스만 제거. 필요 시
-    # 운영자가 별도로 `DROP EXTENSION pg_trgm`.
+    # 인덱스만 제거. extension DROP 은 다른 인덱스에 영향 우려가 있어 운영자가
+    # 별도로 `DROP EXTENSION pg_trgm` 수동 실행.
     return """
         DROP INDEX IF EXISTS idx_medicine_info_item_eng_name_trgm;
         DROP INDEX IF EXISTS idx_medicine_info_name_trgm;
