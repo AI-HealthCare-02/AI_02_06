@@ -122,6 +122,52 @@ class MedicineInfoRepository:
             for row in rows
         ]
 
+    # ── 자동완성용 검색 (prefix 우선 + trgm 백업) ────────────────────
+    async def autocomplete_by_name(
+        self,
+        query: str,
+        limit: int = 8,
+        threshold: float = 0.2,
+    ) -> list[dict]:
+        """약품명 자동완성 — prefix 매칭이 1순위, trigram similarity 가 2순위.
+
+        OCR 결과 인라인 편집 / "+ 약 추가" 모달의 실시간 자동완성에 사용. 사용자가
+        "타이"만 쳐도 "타이레놀정 500mg" 가 1순위로 노출되도록 prefix 일치를
+        먼저 잡고, 오타 (예: "다이레놀") 는 trigram similarity 로 보완.
+
+        ILIKE 와 `%` 연산자 모두 ``idx_medicine_info_name_trgm`` GIN 인덱스를 탄다.
+
+        Args:
+            query: 사용자 입력 (보통 1~10자, 공백 trim 됨).
+            limit: 최대 결과 수 (default 8 — dropdown 1 화면 수용).
+            threshold: trigram similarity 최소값 (default 0.2 — 자동완성용 완화).
+
+        Returns:
+            list[dict]: ``[{id, medicine_name, score}, ...]`` — score desc + name asc.
+        """
+        conn = Tortoise.get_connection("default")
+        # prefix 우선 정렬을 위해 CASE 식으로 1차 정렬, 같은 그룹 내에서는
+        # trigram score desc, 동점 시 name asc.
+        _, rows = await conn.execute_query(
+            "SELECT id, medicine_name, "
+            "similarity(medicine_name, $1) AS score, "
+            "(medicine_name ILIKE $1 || '%') AS is_prefix "
+            "FROM medicine_info "
+            "WHERE medicine_name ILIKE $1 || '%' "
+            "   OR similarity(medicine_name, $1) > $2 "
+            "ORDER BY is_prefix DESC, score DESC, medicine_name ASC "
+            "LIMIT $3",
+            [query, threshold, limit],
+        )
+        return [
+            {
+                "id": row["id"],
+                "medicine_name": row["medicine_name"],
+                "score": float(row["score"]),
+            }
+            for row in rows
+        ]
+
     async def ensure_pg_trgm(self) -> None:
         """Ensure pg_trgm extension is available in the database.
 
