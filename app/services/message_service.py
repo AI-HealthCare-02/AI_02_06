@@ -12,14 +12,15 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 
-from app.dtos.intent import IntentType
+from app.dtos.query_rewriter import IntentType
 from app.dtos.tools import AskResult, PendingTurn, ToolCall
 from app.models.messages import ChatMessage
 from app.repositories.chat_session_repository import ChatSessionRepository
 from app.repositories.message_repository import MessageRepository
-from app.services.chat.fanout_tool_calls import fanout_to_tool_calls
 from app.services.chat.intent_orchestrator import classify_user_turn
 from app.services.chat.rag_context_assembler import assemble_rag_section
+from app.services.rag.openai_embedding import encode_query
+from app.services.rag.retrievers.hybrid_metadata import retrieve_with_metadata
 from app.services.tools.pending import PendingTurnStore
 from app.services.tools.rq_adapters import (
     generate_chat_response_via_rq,
@@ -340,59 +341,51 @@ class MessageService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found.")
         profile_id = session_obj.profile_id
 
-        # ★ user 메시지 영속화 — 실패 시 soft delete rollback
+        # ★ user 메시지 영속화 - 실패 시 soft delete rollback
         user_msg = await self.repository.create_user_message(session_id, content)
         try:
-            # Step 1+2: medical_context + IntentClassifier (4o-mini)
+            # Step 1: medical_context + ingredient_mapping + Query Rewriter (4o-mini)
             classify_messages = [*history, {"role": "user", "content": content}]
-            classification = await classify_user_turn(profile_id, classify_messages)
+            medical_context, ingredient_mapping_section, rewriter_output = await classify_user_turn(
+                profile_id,
+                classify_messages,
+            )
 
-            # 분기 1: direct_answer — IntentClassifier 가 즉시 답변
-            if classification.direct_answer:
+            # 분기 1: direct_answer (greeting/out_of_scope/ambiguous)
+            if rewriter_output.direct_answer:
                 logger.info(
                     "[Chat] session=%s intent=%s direct_answer (no RAG)",
                     sid,
-                    classification.intent.value,
+                    rewriter_output.intent.value,
                 )
-                return await self._persist_direct_answer_turn(session_id, user_msg, classification.direct_answer)
+                return await self._persist_direct_answer_turn(session_id, user_msg, rewriter_output.direct_answer)
 
-            # 분기 2: domain_question — fan-out → RAG tool_calls 병렬
-            if classification.intent != IntentType.DOMAIN_QUESTION or not classification.fanout_queries:
-                # 안전망: domain_question 인데 fanout 비어있는 케이스 (4o-mini 가 어김)
+            # 분기 2: domain_question - rewritten_query + metadata 로 retrieval
+            if (
+                rewriter_output.intent != IntentType.DOMAIN_QUESTION
+                or not rewriter_output.rewritten_query
+                or rewriter_output.metadata is None
+            ):
                 logger.warning(
-                    "[Chat] session=%s domain_question but no fanout_queries — fallback message",
+                    "[Chat] session=%s domain_question but rewritten_query/metadata 누락 - fallback",
                     sid,
                 )
                 fallback = "어떤 약이나 증상에 대해 알려드릴까요? 좀 더 구체적으로 말씀해주세요."
                 return await self._persist_direct_answer_turn(session_id, user_msg, fallback)
 
-            tool_calls = fanout_to_tool_calls(classification)
-            logger.info(
-                "[Chat] session=%s fanout=%d queries → %d tool_calls",
-                sid,
-                len(classification.fanout_queries),
-                len(tool_calls),
-            )
-
-            # Step 3: tool_calls 병렬 실행 (ai_worker.run_tool_calls_job)
-            queue = self._get_queue()
-            payload = [_tool_call_to_worker_dict(tc) for tc in tool_calls]
-            tool_results = await run_tool_calls_via_rq(calls=payload, queue=queue)
-
-            # Step 4: RAG context inject + 2nd LLM
             return await self._finalize_rag_turn(
                 session_id=session_id,
                 user_msg=user_msg,
                 history=history,
                 session_summary=session_summary,
                 content=content,
-                tool_calls=tool_calls,
-                tool_results=tool_results,
-                classification=classification,
+                rewriter_output=rewriter_output,
+                medical_context=medical_context,
+                ingredient_mapping_section=ingredient_mapping_section,
             )
         except Exception:
             await self.repository.soft_delete(user_msg)
-            logger.exception("[Chat] session=%s server error — rolled back user msg", sid)
+            logger.exception("[Chat] session=%s server error - rolled back user msg", sid)
             raise
 
     async def _fetch_session_summary(self, session_id: UUID) -> str | None:
@@ -448,42 +441,52 @@ class MessageService:
         history: list[dict[str, str]],
         session_summary: str | None,
         content: str,
-        tool_calls: list[ToolCall],
-        tool_results: dict[str, Any],
-        classification: Any,
+        rewriter_output: Any,
+        medical_context: str = "",
+        ingredient_mapping_section: str = "",
     ) -> AskResult:
-        """RAG retrieval 결과를 system prompt 에 inject 한 후 2nd LLM 호출.
+        """rewritten_query + metadata 로 retrieval -> 2nd LLM 호출.
 
-        2nd LLM 의 messages 구조 (PLAN.md §2.3 / RAG_FLOW.md §2.4):
-          - system: persona + output rule + [세션 요약] + [명확화] + [검색된 약품 정보]
-          - history (3 user + 3 assistant)
-          - user (현재 turn raw query)
-          - assistant tool_calls + tool results (OpenAI 표준 페어링)
+        흐름:
+          1. metadata.target_ingredients + interaction_concerns 산출 (ingredient 필터)
+          2. encode_query(rewritten_query) - 1회 임베딩
+          3. retrieve_with_metadata - hybrid SQL (메타필터 + cosine top-K)
+          4. assemble_rag_section - chunk dict list 평탄화/dedup
+          5. _compose_system_prompt - persona + medical_context + 용어 매핑 +
+             세션요약 + 명확화 + RAG 검색 결과
+          6. generate_chat_response_via_rq - 2nd LLM (4o)
         """
-        del tool_calls  # 현재는 OpenAI tool_call 페어링 불필요 (RAG 결과는 system 에 inject)
+        meta = rewriter_output.metadata
+        ingredient_filter = list({*meta.target_ingredients, *meta.interaction_concerns})
 
-        rag_section = assemble_rag_section(tool_results)
+        embedding = await encode_query(rewriter_output.rewritten_query)
+        chunks = await retrieve_with_metadata(
+            query_embedding=embedding,
+            target_ingredients=ingredient_filter,
+            target_sections=meta.target_sections or None,
+            target_conditions=meta.target_conditions or None,
+            limit=15,
+        )
+        chunk_dicts = [c.to_dict() for c in chunks]
+        rag_section = assemble_rag_section({"_": {"chunks": chunk_dicts}})
+
         system_prompt = _compose_system_prompt(
             session_summary=session_summary,
-            referent_resolution=classification.referent_resolution,
+            referent_resolution=rewriter_output.referent_resolution,
             rag_section=rag_section,
+            medical_context=medical_context,
+            ingredient_mapping_section=ingredient_mapping_section,
         )
         second_messages = [
             *history,
             {"role": "user", "content": content},
         ]
-        # ── 진단 로그 (diag/2nd-llm-input-output-logging) ───────────────
-        # 흐름: 2nd LLM enqueue 직전 system_prompt 전체 + messages 구조 dump
         logger.info(
-            "[Chat-Diag] session=%s system_prompt[%dchars]=%r second_messages=%d "
-            "rag_section[%dchars]=%r referent_resolution=%s",
+            "[Chat] session=%s rewritten=%r chunks=%d rag_section=%dchars",
             str(session_id)[:8],
-            len(system_prompt),
-            system_prompt,
-            len(second_messages),
+            rewriter_output.rewritten_query,
+            len(chunks),
             len(rag_section),
-            rag_section,
-            classification.referent_resolution,
         )
         completion = await generate_chat_response_via_rq(
             messages=second_messages,
@@ -492,10 +495,8 @@ class MessageService:
         )
         answer = completion.get("answer", "")
         logger.info(
-            "[Chat] session=%s rag_finalize tools=%d chunks_inject=%dchars reply=%r len=%d",
+            "[Chat] session=%s reply=%r len=%d",
             str(session_id)[:8],
-            len(tool_results),
-            len(rag_section),
             _preview(answer),
             len(answer),
         )
@@ -632,16 +633,26 @@ class MessageService:
 
 
 # ── 2nd LLM system prompt 조립 ──────────────────────────────────────
-# RAG_FLOW.md §2.4 의 권장 섹션 순서:
-#   1. persona  2. output rule  3. (의학 컨텍스트는 IntentClassifier 가 흡수)
-#   4. 세션 요약  5. 명확화 (referent_resolution 있을 때)  6. RAG 검색 결과
+# PLAN.md (RAG 재설계 PR-D) - 사용자 brand <-> 검색결과 성분명 단절 방지를
+# 위한 안전장치 섹션 순서:
+#   1. persona + output rule (성분 grounded 강화)
+#   2. [사용자 의학 컨텍스트] (사용자 복용약/기저질환/알레르기 brand 표기)
+#   3. [용어 매핑] (brand -> 활성성분 변환표)
+#   4. [세션 요약] (옵션)
+#   5. [명확화] (referent_resolution 있을 때)
+#   6. [검색된 약품 정보] (성분 단위 RAG 결과)
 _PERSONA_AND_RULES = (
     "당신은 'Dayak' 약사 챗봇입니다. 따뜻하고 친근한 어조 (해요체) 로 응답합니다.\n"
     "출력 규칙:\n"
     "- 한국어 GFM. 코드 블록 금지.\n"
     "- 답변 안에서 [약: 약품명] [section] 형식으로 출처 인라인 명시.\n"
     "- 의학적 진단/처방 변경 제안 금지. 의사·약사 상담 권고.\n"
-    "- 약물 상호작용·부작용·금기 정보가 검색 결과에 있으면 적극 반영."
+    "- 약물 상호작용·부작용·금기 정보가 검색 결과에 있으면 적극 반영.\n"
+    "- 사용자가 사용한 약 이름은 brand 입니다. 검색 결과는 성분명 단위입니다.\n"
+    "  답변 시 사용자의 brand 이름을 그대로 쓰면서, [용어 매핑] 의 brand -> 성분\n"
+    "  변환표를 활용해 검색 결과의 성분 정보를 정확히 반영하세요. 일반론적인\n"
+    "  '의사 상담' 답변 대신, 사용자 복용약/기저질환과의 구체적 상호작용을\n"
+    "  검색 결과 기반으로 제시하세요."
 )
 
 
@@ -650,9 +661,17 @@ def _compose_system_prompt(
     session_summary: str | None,
     referent_resolution: dict[str, str] | None,
     rag_section: str,
+    medical_context: str = "",
+    ingredient_mapping_section: str = "",
 ) -> str:
-    """2nd LLM (4o) 의 system prompt 를 6 섹션 순서로 조립한다."""
+    """2nd LLM (4o) 의 system prompt 를 안전장치 포함 섹션 순서로 조립."""
     parts: list[str] = [_PERSONA_AND_RULES]
+
+    if medical_context:
+        parts.append(medical_context)  # [사용자 의학 컨텍스트] 헤더 포함
+
+    if ingredient_mapping_section:
+        parts.append(ingredient_mapping_section)  # [용어 매핑] 헤더 포함
 
     if session_summary:
         parts.append(f"[세션 요약]\n{session_summary}")
@@ -662,7 +681,6 @@ def _compose_system_prompt(
         parts.append(f"[명확화]\n{clarif_lines}")
 
     if rag_section:
-        # rag_section 에 이미 [검색된 약품 정보] 헤더 포함
-        parts.append(rag_section)
+        parts.append(rag_section)  # [검색된 약품 정보] 헤더 포함
 
     return "\n\n".join(parts)
