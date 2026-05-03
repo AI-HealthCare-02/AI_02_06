@@ -91,7 +91,7 @@ def _build_hybrid_sql(
         WHERE {where_clause}
         ORDER BY distance ASC
         LIMIT ${3 + int(has_section_filter) + int(has_condition_filter)}
-    """  # noqa: S608 — where_clause 는 코드 내부 상수 + 값은 $N 바인딩 → SQL injection 안전
+    """  # noqa: S608  # nosec B608 — where_clause 는 코드 내부 상수 + 값은 $N 바인딩 → SQL injection 안전
 
 
 async def retrieve_with_metadata(
