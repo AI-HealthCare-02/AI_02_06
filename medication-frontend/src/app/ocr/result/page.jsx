@@ -1,10 +1,10 @@
 'use client'
 
 // /ocr/result — OCR 결과 확인 + 수정 + 저장 (react-hook-form + zod 표준 적용).
-import { useEffect, Suspense, useState } from 'react'
+import { useEffect, Suspense, useState, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Trash2 } from 'lucide-react'
-import { useFieldArray, useForm } from 'react-hook-form'
+import { Controller, useFieldArray, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import toast from 'react-hot-toast'
@@ -16,6 +16,7 @@ import { useProfile } from '@/contexts/ProfileContext'
 import { useMedication } from '@/contexts/MedicationContext'
 import { medicationEditPatchSchema } from '@/schemas'
 import FormError from '@/components/form/FormError'
+import MedicineNameAutocomplete from '@/components/medication/MedicineNameAutocomplete'
 
 const TERMINAL_ERROR_MESSAGES = {
   no_text: '이미지에서 텍스트를 찾지 못했어요.',
@@ -23,7 +24,6 @@ const TERMINAL_ERROR_MESSAGES = {
   failed: '처리 중 오류가 발생했어요.',
 }
 
-// [핵심 수정 1] Zod 스키마에서 빈 문자열("")과 null을 완벽하게 허용하도록 개조
 const ocrConfirmSchema = z.object({
   prescription_date: z.string().optional().or(z.literal('')),
   prescription_hospital: z.string().max(128, '최대 128자까지 가능해요').optional().or(z.literal('')).nullable(),
@@ -87,7 +87,11 @@ function OcrResultContent() {
   const { selectedProfileId } = useProfile()
   const { refetchMedications } = useMedication()
 
-  // 커스텀 UI 에러 관리 (Zod 덮어쓰기 방지)
+  // 💡 스트림 제어와 재시도 쿨다운을 위한 상태 추가
+  const streamControllerRef = useRef(null)
+  const [isRetaking, setIsRetaking] = useState(false)
+
+  // 커스텀 UI 에러 관리
   const [customErrors, setCustomErrors] = useState({})
 
   const {
@@ -127,6 +131,8 @@ function OcrResultContent() {
     }
 
     const abortController = new AbortController()
+    streamControllerRef.current = abortController // 💡 외부 차단용 Ref 연결
+
     const consumeStream = async () => {
       try {
         for await (const payload of watchDraftStatus(draftId, selectedProfileId, abortController.signal)) {
@@ -156,26 +162,49 @@ function OcrResultContent() {
           }
         }
       } catch (err) {
-        if (abortController.signal.aborted) return
+        if (abortController.signal.aborted) return // 💡 강제 차단 시 에러 무시
         toast.error('데이터가 만료되었거나 불러올 수 없습니다. 다시 촬영해주세요.')
         router.push('/ocr')
       }
     }
     consumeStream()
-    return () => abortController.abort()
+
+    return () => {
+      abortController.abort()
+      streamControllerRef.current = null
+    }
   }, [draftId, router, selectedProfileId, reset])
 
+  // 💡 악의적 연타 및 좀비 스트림 차단 로직 적용
   const handleRetake = async () => {
+    const now = Date.now()
+    const lastRetakeTime = sessionStorage.getItem('last_retake_time')
+    const COOLDOWN_MS = 5000 // 5초 쿨다운
+
+    if (lastRetakeTime && now - parseInt(lastRetakeTime, 10) < COOLDOWN_MS) {
+      const remainSec = Math.ceil((COOLDOWN_MS - (now - parseInt(lastRetakeTime, 10))) / 1000)
+      toast.error(`너무 잦은 재시도입니다. ${remainSec}초 후 다시 시도해주세요.`)
+      return
+    }
+
+    // 화면에 옛날 데이터가 덮어씌워지지 않도록 스트림의 숨통을 즉시 끊음
+    if (streamControllerRef.current) {
+      streamControllerRef.current.abort()
+    }
+
+    setIsRetaking(true)
+    sessionStorage.setItem('last_retake_time', now.toString())
+
     if (draftId && draftId !== 'manual') {
       try {
         await api.delete(`/api/v1/ocr/draft/${draftId}`, {
           params: selectedProfileId ? { profile_id: selectedProfileId } : undefined,
         })
       } catch {
-        // ignore
+        // 무시
       }
     }
-    router.push('/ocr')
+    window.location.href = '/ocr'
   }
 
   const onInvalid = (formErrors) => {
@@ -192,7 +221,6 @@ function OcrResultContent() {
   }
 
   const onSubmit = async (values) => {
-    // 커스텀 에러가 남아있으면 저장 차단
     if (Object.keys(customErrors).length > 0) {
       toast.error('입력된 값을 다시 확인해주세요.')
       return
@@ -209,7 +237,6 @@ function OcrResultContent() {
       return Number.isNaN(n) ? null : n
     }
 
-    // [핵심 수정 2] 문자열이 비어있거나 공백뿐이면 무조건 null을 반환하도록 강화
     const toStrOrNull = (v) => {
       if (v === null || v === undefined) return null;
       if (typeof v === 'string' && v.trim() === '') return null;
@@ -224,7 +251,6 @@ function OcrResultContent() {
       total_intake_days: toIntOrNull(med.total_intake_days),
       intake_instruction: toStrOrNull(med.intake_instruction),
       category: toStrOrNull(med.category),
-      // 상단 입력칸이 비어있으면 약품별 진료과에도 null을 주입
       department: toStrOrNull(values.prescription_department),
       dispensed_date: values.prescription_date || null,
     }))
@@ -267,7 +293,6 @@ function OcrResultContent() {
           }
         }
       } else {
-        // [핵심 수정 3] 병원/진료과 값이 빈칸일 때 명시적으로 null을 실어서 전송
         await api.post(
           '/api/v1/ocr/confirm',
           {
@@ -292,7 +317,6 @@ function OcrResultContent() {
     }
   }
 
-  // 커스텀 에러 핸들러
   const handleCustomError = (key, message) => {
     setCustomErrors(prev => ({ ...prev, [key]: message }))
   }
@@ -325,7 +349,6 @@ function OcrResultContent() {
         </div>
 
         <div className="max-w-3xl mx-auto px-10 py-8 space-y-4">
-          {/* 기존 상단 안내 배너 유지 */}
           <div className="bg-blue-50 rounded-2xl p-4 flex items-center gap-3">
             <span className="text-2xl">!</span>
             <div>
@@ -428,11 +451,17 @@ function OcrResultContent() {
               >
                 <div className="flex justify-between items-start mb-4 gap-4">
                   <div className="flex-1">
-                    <input
-                      type="text"
-                      {...register(`meds.${i}.medicine_name`)}
-                      className="font-bold text-lg text-gray-900 border-b-2 border-transparent hover:border-blue-200 focus:border-blue-500 focus:outline-none bg-transparent w-full transition-colors"
-                      placeholder="약품명 입력"
+                    <Controller
+                      control={control}
+                      name={`meds.${i}.medicine_name`}
+                      render={({ field }) => (
+                        <MedicineNameAutocomplete
+                          value={field.value}
+                          onChange={field.onChange}
+                          placeholder="약품명 입력"
+                          inputClassName="font-bold text-lg text-gray-900 border-b-2 border-transparent hover:border-blue-200 focus:border-blue-500 focus:outline-none bg-transparent w-full transition-colors"
+                        />
+                      )}
                     />
                     <FormError name={`meds.${i}.medicine_name`} errors={errors} />
                   </div>
@@ -564,7 +593,6 @@ function OcrResultContent() {
               </div>
             ))}
 
-            {/* [신규 추가] 하단 직접 입력 안내 문구 */}
             <div className="mt-6 mb-2 bg-blue-50 rounded-2xl p-4 flex items-center gap-3 shadow-sm border border-blue-100">
               <span className="text-2xl">💡</span>
               <div className="flex-1">
@@ -585,12 +613,14 @@ function OcrResultContent() {
           </div>
 
           <div className="flex gap-3 pb-10">
+            {/* 💡 버튼 상태 연결 및 로딩 문구 처리 */}
             <button
               type="button"
               onClick={handleRetake}
-              className="flex-1 bg-white border border-gray-200 py-4 rounded-xl text-gray-500 text-sm font-bold cursor-pointer hover:bg-gray-50 transition-colors"
+              disabled={isRetaking}
+              className="flex-1 bg-white border border-gray-200 py-4 rounded-xl text-gray-500 text-sm font-bold cursor-pointer hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              다시 촬영
+              {isRetaking ? '정리 중...' : '다시 촬영'}
             </button>
             <button
               type="submit"

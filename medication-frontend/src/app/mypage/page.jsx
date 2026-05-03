@@ -12,10 +12,10 @@ import api, { handleApiError } from '@/lib/api'
 import toast from 'react-hot-toast'
 import { useConfirm } from '@/components/common/ConfirmDialog'
 import FormError from '@/components/form/FormError'
+import HealthSurveyModal from '@/components/common/HealthSurveyModal'
 import { useProfile } from '@/contexts/ProfileContext'
 import {
   familyProfileSchema,
-  healthSurveySchema,
   nicknameUpdateSchema,
 } from '@/schemas'
 
@@ -74,215 +74,9 @@ function BasicInfoModal({ info, onClose, onSave }) {
   )
 }
 
-function HealthInfoModal({ info, onClose, onSave }) {
-  const {
-    register,
-    control,
-    handleSubmit,
-    formState: { errors, isValid },
-  } = useForm({
-    resolver: zodResolver(healthSurveySchema),
-    mode: 'onChange',
-    defaultValues: {
-      age: info?.age?.toString() || '',
-      gender: info?.gender || 'MALE',
-      height: info?.height?.toString() || '',
-      weight: info?.weight?.toString() || '',
-      is_smoking: info?.is_smoking ?? null,
-      is_drinking: info?.is_drinking ?? null,
-      conditions: info?.conditions || [],
-      allergies: info?.allergies || [],
-    },
-  })
-
-  const btnSelected = 'bg-gray-900 text-white border-gray-900'
-  const btnUnselected = 'bg-white text-gray-400 border-gray-100 hover:border-gray-300'
-  const chipSelected = 'bg-gray-900 text-white border-gray-900'
-  const chipUnselected = 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
-
-  // "없음" 토글 처리 — 다른 항목과 mutual exclusion.
-  const toggleChip = (list, item) => {
-    if (item === '없음') return list.includes('없음') ? [] : ['없음']
-    const without = list.filter((v) => v !== '없음')
-    return without.includes(item) ? without.filter((v) => v !== item) : [...without, item]
-  }
-
-  const onSubmit = (values) => onSave(values)
-
-  return (
-    <Modal title="건강 프로필 수정" onClose={onClose} onSave={handleSubmit(onSubmit)} saveDisabled={!isValid}>
-      <div className="space-y-6">
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="text-xs font-black text-gray-400 mb-2 block ml-1">나이</label>
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="예: 30"
-              {...register('age')}
-              className={`w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 border transition-colors ${
-                errors.age ? 'border-red-500' : 'border-transparent focus:border-gray-200'
-              }`}
-            />
-            <FormError name="age" errors={errors} />
-          </div>
-          <div>
-            <label className="text-xs font-black text-gray-400 mb-2 block ml-1">성별</label>
-            <Controller
-              control={control}
-              name="gender"
-              render={({ field }) => (
-                <div className="flex gap-2">
-                  {['MALE', 'FEMALE'].map((g) => (
-                    <button
-                      key={g}
-                      type="button"
-                      onClick={() => field.onChange(g)}
-                      className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${
-                        field.value === g ? btnSelected : btnUnselected
-                      }`}
-                    >
-                      {g === 'MALE' ? '남성' : '여성'}
-                    </button>
-                  ))}
-                </div>
-              )}
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="text-xs font-black text-gray-400 mb-2 block ml-1">키 (cm)</label>
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="예: 170"
-              {...register('height')}
-              className={`w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 border transition-colors ${
-                errors.height ? 'border-red-500' : 'border-transparent focus:border-gray-200'
-              }`}
-            />
-            <FormError name="height" errors={errors} />
-          </div>
-          <div>
-            <label className="text-xs font-black text-gray-400 mb-2 block ml-1">몸무게 (kg)</label>
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="예: 65.5"
-              {...register('weight')}
-              className={`w-full px-6 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-800 border transition-colors ${
-                errors.weight ? 'border-red-500' : 'border-transparent focus:border-gray-200'
-              }`}
-            />
-            <FormError name="weight" errors={errors} />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="text-xs font-black text-gray-400 mb-2 block ml-1">흡연 여부</label>
-            <Controller
-              control={control}
-              name="is_smoking"
-              render={({ field }) => (
-                <div className="flex gap-2">
-                  {[true, false].map((v) => (
-                    <button
-                      key={String(v)}
-                      type="button"
-                      onClick={() => field.onChange(v)}
-                      className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${
-                        field.value === v ? btnSelected : btnUnselected
-                      }`}
-                    >
-                      {v ? '예' : '아니오'}
-                    </button>
-                  ))}
-                </div>
-              )}
-            />
-          </div>
-          <div>
-            <label className="text-xs font-black text-gray-400 mb-2 block ml-1">음주 여부</label>
-            <Controller
-              control={control}
-              name="is_drinking"
-              render={({ field }) => (
-                <div className="flex gap-2">
-                  {[true, false].map((v) => (
-                    <button
-                      key={String(v)}
-                      type="button"
-                      onClick={() => field.onChange(v)}
-                      className={`flex-1 py-4 rounded-2xl text-sm font-bold border transition-all cursor-pointer ${
-                        field.value === v ? btnSelected : btnUnselected
-                      }`}
-                    >
-                      {v ? '예' : '아니오'}
-                    </button>
-                  ))}
-                </div>
-              )}
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="text-xs font-black text-gray-400 mb-3 block ml-1">기저질환</label>
-          <Controller
-            control={control}
-            name="conditions"
-            render={({ field }) => (
-              <div className="flex flex-wrap gap-2">
-                {['고혈압', '당뇨', '고지혈증', '심장질환', '뇌졸중', '천식', '신장질환', '갑상선질환', '없음'].map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => field.onChange(toggleChip(field.value || [], item))}
-                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all border cursor-pointer ${
-                      (field.value || []).includes(item) ? chipSelected : chipUnselected
-                    }`}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
-            )}
-          />
-        </div>
-
-        <div>
-          <label className="text-xs font-black text-gray-400 mb-3 block ml-1">알레르기</label>
-          <Controller
-            control={control}
-            name="allergies"
-            render={({ field }) => (
-              <div className="flex flex-wrap gap-2">
-                {['페니실린', '아스피린', '항생제', '소염제', '없음'].map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => field.onChange(toggleChip(field.value || [], item))}
-                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all border cursor-pointer ${
-                      (field.value || []).includes(item) ? chipSelected : chipUnselected
-                    }`}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
-            )}
-          />
-        </div>
-      </div>
-    </Modal>
-  )
-}
-
 // 가족 관계 선택지 — 7종 (SELF 제외, OTHER 포함). 라벨 = ProfileContext 의 RELATION_LABELS 와 일치.
 const FAMILY_RELATION_OPTIONS = [
+  { value: 'SELF', label: '본인' },
   { value: 'FATHER', label: '아버지' },
   { value: 'MOTHER', label: '어머니' },
   { value: 'SON', label: '아들' },
@@ -481,7 +275,7 @@ export default function MyPage() {
         api.get(`/api/v1/intake-logs?profile_id=${profileId}`),
       ])
       // 진행 중인 챌린지 개수 계산 — 챌린지 리스트에서 is_active + status 필터링. BE 에서 별도 카운트 제공 안 함.
-      const ongoing = (challengeRes.data || []).filter(c => 
+      const ongoing = (challengeRes.data || []).filter(c =>
         c.is_active === true && c.challenge_status === 'IN_PROGRESS').length;
         setOngoingCount(ongoing);
 
@@ -761,7 +555,14 @@ export default function MyPage() {
       </div>
 
       {modalType === 'basic' && <BasicInfoModal info={userProfile} onClose={() => setModalType(null)} onSave={handleSaveBasic} />}
-      {modalType === 'health' && <HealthInfoModal info={userProfile?.health_survey} onClose={() => setModalType(null)} onSave={handleSaveHealth} />}
+      {modalType === 'health' && (
+        <HealthSurveyModal
+          info={userProfile?.health_survey}
+          onClose={() => setModalType(null)}
+          onSave={handleSaveHealth}
+          title="건강 프로필 수정"
+        />
+      )}
       {modalType === 'family' && <FamilyModal member={selectedFamilyMember} onClose={() => { setModalType(null); setSelectedFamilyMember(null); }} onSave={handleSaveFamily} />}
       {showLogoutModal && <LogoutModal onClose={() => setShowLogoutModal(false)} onConfirm={handleLogout} />}
       {showDeleteModal && <DeleteAccountModal onClose={() => setShowDeleteModal(false)} onConfirm={handleDeleteAccount} />}
