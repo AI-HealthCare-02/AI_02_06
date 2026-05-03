@@ -19,10 +19,10 @@ import { useConfirm } from '@/components/common/ConfirmDialog'
 import PrescriptionPickerModal from '@/components/lifestyle/PrescriptionPickerModal'
 import SymptomLogForm from '@/components/lifestyle/SymptomLogForm'
 import toast from 'react-hot-toast'
-import { AlertTriangle, Moon, Utensils, Dumbbell, Stethoscope } from 'lucide-react'
+import { AlertTriangle, Moon, Utensils, Dumbbell, Stethoscope, ChevronLeft, ChevronRight } from 'lucide-react'
 
 
-const MAX_REVEALED_CHALLENGES = 15
+const CHALLENGES_PER_PAGE = 5
 
 const TABS = [
   {
@@ -205,7 +205,6 @@ export default function LifestyleGuidePage() {
     isLoading: guidesLoading,
     generateGuide,
     deleteGuide,
-    revealMoreChallenges,
   } = useLifestyleGuide()
   const { challengesByGuide } = useChallenge()
   const { groups: prescriptionGroups, isLoading: groupsLoading } = usePrescriptionGroup()
@@ -214,9 +213,10 @@ export default function LifestyleGuidePage() {
 
   const [isGenerating, setIsGenerating] = useState(false)
   const [isPickerOpen, setIsPickerOpen] = useState(false)
-  const [isRevealing, setIsRevealing] = useState(false)
   const [selectedGuide, setSelectedGuide] = useState(null)
   const [userPickedGuideId, setUserPickedGuideId] = useState(null)
+  // 챌린지 페이지네이션 (5개씩 1/3, 2/3, 3/3). 가이드 변경 시 첫 페이지로 reset.
+  const [challengePage, setChallengePage] = useState(0)
   // 메인 페이지의 '오늘의 증상 → 기록하기' 같은 deep link 가 ?tab=<key> 로
   // 진입 탭을 지정할 수 있게 한다 (예: /lifestyle-guide?tab=symptom).
   const initialTabFromQuery = searchParams.get('tab')
@@ -269,6 +269,11 @@ export default function LifestyleGuidePage() {
       fetchTodaySymptoms()
     }
   }, [activeTab])
+
+  // 가이드가 바뀌면 챌린지 페이지를 1쪽으로 리셋 (사용자가 칩으로 다른 가이드 선택 등)
+  useEffect(() => {
+    setChallengePage(0)
+  }, [selectedGuide?.id])
 
   // ── guideChallenges ──
   const guideChallenges = (selectedGuide ? challengesByGuide(selectedGuide.id) : [])
@@ -695,56 +700,23 @@ export default function LifestyleGuidePage() {
               )}
             </div>
 
-            {/* ── 챌린지 목록 ── */}
+            {/* ── 챌린지 목록 (5개씩 페이지네이션) ── */}
             {guideChallenges.length > 0 && (() => {
-              const revealed = selectedGuide.revealed_challenge_count ?? 5
-              const reachedLimit = revealed >= MAX_REVEALED_CHALLENGES
+              const totalPages = Math.max(1, Math.ceil(guideChallenges.length / CHALLENGES_PER_PAGE))
+              const safePage = Math.min(challengePage, totalPages - 1)
+              const pageStart = safePage * CHALLENGES_PER_PAGE
+              const pageItems = guideChallenges.slice(pageStart, pageStart + CHALLENGES_PER_PAGE)
+              const isFirstPage = safePage === 0
+              const isLastPage = safePage >= totalPages - 1
               return (
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-50 p-4">
                   <div className="flex items-center justify-between mb-3 gap-2">
                     <div className="min-w-0">
                       <p className="text-xs font-bold text-gray-400">🎯 이 가이드에서 생성된 챌린지</p>
                       <p className="text-[11px] text-gray-400 mt-0.5 break-keep">
-                        한 가이드에서 최대 {MAX_REVEALED_CHALLENGES}개까지 추천받을 수 있어요 ({revealed}/{MAX_REVEALED_CHALLENGES})
+                        총 {guideChallenges.length}개의 추천 챌린지를 페이지로 넘겨가며 둘러볼 수 있어요.
                       </p>
                     </div>
-                    {!isViewingHistory && (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          if (isRevealing) return
-                          if (reachedLimit) {
-                            showError(`더 이상 추천받을 수 없어요. 최대 ${MAX_REVEALED_CHALLENGES}개까지 추천받을 수 있어요.`)
-                            return
-                          }
-                          setIsRevealing(true)
-                          try {
-                            await revealMoreChallenges(selectedGuide.id)
-                            toast.success('추천 챌린지 5개를 추가로 보여드려요!')
-                          } catch (err) {
-                            const detail = err.response?.data?.detail
-                            if (err.response?.status === 409 && detail?.code === 'REVEAL_LIMIT_REACHED') {
-                              showError(detail.message || `최대 ${MAX_REVEALED_CHALLENGES}개까지 추천받을 수 있어요.`)
-                            } else {
-                              showError('챌린지 더 보기를 처리하지 못했어요. 잠시 후 다시 시도해주세요.')
-                            }
-                          } finally {
-                            setIsRevealing(false)
-                          }
-                        }}
-                        disabled={reachedLimit || isRevealing}
-                        title={reachedLimit ? `최대 ${MAX_REVEALED_CHALLENGES}개까지 추천받을 수 있어요.` : undefined}
-                        className={`shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border transition-colors ${
-                          reachedLimit
-                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-                            : isRevealing
-                              ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-wait'
-                              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 cursor-pointer'
-                        }`}
-                      >
-                        {isRevealing ? '...' : '추천 챌린지 더 보기'}
-                      </button>
-                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -753,7 +725,7 @@ export default function LifestyleGuidePage() {
                         {[1, 2].map((i) => <div key={i} className="h-10 bg-gray-100 rounded-xl" />)}
                       </div>
                     ) : (
-                      guideChallenges.map((c) => {
+                      pageItems.map((c) => {
                         const tabMeta = TABS.find((t) => t.key === c.category)
                         const diffStyle = c.difficulty ? (DIFFICULTY_STYLE[c.difficulty] || DIFFICULTY_STYLE['보통']) : null
                         const today = new Date().toISOString().split('T')[0]
@@ -822,6 +794,41 @@ export default function LifestyleGuidePage() {
                       })
                     )}
                   </div>
+
+                  {/* ── 페이지네이션 컨트롤 ── */}
+                  {totalPages > 1 && (
+                    <div className="mt-4 flex items-center justify-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setChallengePage((p) => Math.max(0, p - 1))}
+                        disabled={isFirstPage}
+                        aria-label="이전 페이지"
+                        className={`w-8 h-8 flex items-center justify-center rounded-full border transition-colors ${
+                          isFirstPage
+                            ? 'bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 cursor-pointer'
+                        }`}
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                      <span className="text-xs font-bold text-gray-500 tabular-nums">
+                        {safePage + 1} / {totalPages}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setChallengePage((p) => Math.min(totalPages - 1, p + 1))}
+                        disabled={isLastPage}
+                        aria-label="다음 페이지"
+                        className={`w-8 h-8 flex items-center justify-center rounded-full border transition-colors ${
+                          isLastPage
+                            ? 'bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 cursor-pointer'
+                        }`}
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
+                  )}
                 </div>
               )
             })()}
