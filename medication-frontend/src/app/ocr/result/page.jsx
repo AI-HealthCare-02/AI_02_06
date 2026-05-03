@@ -4,7 +4,7 @@
 import { useEffect, Suspense, useState, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Trash2 } from 'lucide-react'
-import { useFieldArray, useForm } from 'react-hook-form'
+import { Controller, useFieldArray, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import toast from 'react-hot-toast'
@@ -16,6 +16,7 @@ import { useProfile } from '@/contexts/ProfileContext'
 import { useMedication } from '@/contexts/MedicationContext'
 import { medicationEditPatchSchema } from '@/schemas'
 import FormError from '@/components/form/FormError'
+import MedicineNameAutocomplete from '@/components/medication/MedicineNameAutocomplete'
 
 const TERMINAL_ERROR_MESSAGES = {
   no_text: '이미지에서 텍스트를 찾지 못했어요.',
@@ -450,11 +451,17 @@ function OcrResultContent() {
               >
                 <div className="flex justify-between items-start mb-4 gap-4">
                   <div className="flex-1">
-                    <input
-                      type="text"
-                      {...register(`meds.${i}.medicine_name`)}
-                      className="font-bold text-lg text-gray-900 border-b-2 border-transparent hover:border-blue-200 focus:border-blue-500 focus:outline-none bg-transparent w-full transition-colors"
-                      placeholder="약품명 입력"
+                    <Controller
+                      control={control}
+                      name={`meds.${i}.medicine_name`}
+                      render={({ field }) => (
+                        <MedicineNameAutocomplete
+                          value={field.value}
+                          onChange={field.onChange}
+                          placeholder="약품명 입력"
+                          inputClassName="font-bold text-lg text-gray-900 border-b-2 border-transparent hover:border-blue-200 focus:border-blue-500 focus:outline-none bg-transparent w-full transition-colors"
+                        />
+                      )}
                     />
                     <FormError name={`meds.${i}.medicine_name`} errors={errors} />
                   </div>

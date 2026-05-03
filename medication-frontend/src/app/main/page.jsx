@@ -4,8 +4,10 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import { Pill, Flame, Plus, MessageCircle, FileText, Loader2, X, Trash2, Activity } from 'lucide-react'
 import ChatModal from '@/components/chat/ChatModal'
-import SurveyModal from '@/components/common/SurveyModal'
+import HealthSurveyModal from '@/components/common/HealthSurveyModal'
 import { useProfile } from '@/contexts/ProfileContext'
+import toast from 'react-hot-toast'
+import { showError } from '@/lib/api'
 import { useMedication } from '@/contexts/MedicationContext'
 import { useChallenge } from '@/contexts/ChallengeContext'
 import { useOcrDraft, useOcrEntryNavigator } from '@/contexts/OcrDraftContext'
@@ -155,7 +157,8 @@ function MainPageContent() {
   const [todaySymptoms, setTodaySymptoms] = useState([])
   const [todayNote, setTodayNote] = useState('')
 
-  const { selectedProfileId, selectedProfile } = useProfile()
+  const { profiles, selectedProfileId, selectedProfile, createProfile, updateProfile } = useProfile()
+  const [isSurveySubmitting, setIsSurveySubmitting] = useState(false)
   // 4 Context 가 모든 server state 를 단일 진실로 관리 — 자체 fetch 0
   const { activeMedications: medications } = useMedication()
   const { activeChallenges } = useChallenge()
@@ -260,11 +263,74 @@ function MainPageContent() {
     removeDraftLocally(draftId)
   }, [removeDraftLocally, selectedProfileId])
 
+  // ── 첫 로그인 설문 모달 핸들러 (createProfile / updateProfile 분기) ────────
+  // 흐름: 사용자가 본인 프로필 (relation_type='SELF') 미등록이면 createProfile,
+  //       이미 있으면 updateProfile. mypage 의 건강 정보 수정도 같은 모달을 쓰며,
+  //       호출 측이 다른 분기를 갖는다 (mypage 는 항상 update).
+  const existingSelfProfile = profiles?.find((p) => p.id === selectedProfileId) || null
+  const handleSurveySave = async (values) => {
+    setIsSurveySubmitting(true)
+    try {
+      const healthSurvey = {
+        age: parseInt(values.age) || null,
+        gender: values.gender || null,
+        height: parseInt(values.height) || null,
+        weight: parseFloat(values.weight) || null,
+        is_smoking: values.is_smoking,
+        is_drinking: values.is_drinking,
+        conditions: values.conditions?.length ? values.conditions : null,
+        allergies: values.allergies?.length ? values.allergies : null,
+      }
+      if (existingSelfProfile) {
+        await updateProfile(existingSelfProfile.id, {
+          health_survey: healthSurvey,
+          gender: values.gender || null,
+        })
+      } else {
+        await createProfile({
+          relation_type: 'SELF',
+          name: userName || '나',
+          health_survey: healthSurvey,
+        })
+      }
+      toast.success('건강 정보가 저장되었습니다.')
+      setShowSurvey(false)
+    } catch (err) {
+      console.error(err)
+      showError(err.parsed?.message || '설문 저장에 실패했습니다.')
+    } finally {
+      setIsSurveySubmitting(false)
+    }
+  }
+  const handleSurveySkip = async () => {
+    if (!existingSelfProfile) {
+      setIsSurveySubmitting(true)
+      try {
+        await createProfile({ relation_type: 'SELF', name: userName || '나', health_survey: null })
+      } catch (err) {
+        console.error(err)
+      }
+      setIsSurveySubmitting(false)
+    }
+    setShowSurvey(false)
+  }
+
   if (isLoading) return <MainSkeleton />
 
   return (
     <div className={`transition-opacity duration-200 ${isRefreshing ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
-      {showSurvey && <SurveyModal onClose={() => setShowSurvey(false)} userName={userName} profileId={selectedProfileId} />}
+      {showSurvey && (
+        <HealthSurveyModal
+          info={existingSelfProfile?.health_survey}
+          onClose={() => setShowSurvey(false)}
+          onSave={handleSurveySave}
+          onSkip={handleSurveySkip}
+          title="건강 정보 입력"
+          subtitle={`${userName} 님에게 딱 맞는 복약 가이드를 준비할게요`}
+          showSkip
+          isSubmitting={isSurveySubmitting}
+        />
+      )}
       {showChat && <ChatModal onClose={() => setShowChat(false)} profileId={selectedProfileId} />}
 
       {/* ── 히어로 섹션 (배경 이미지 슬라이드쇼 + 다크 오버레이) ── */}
