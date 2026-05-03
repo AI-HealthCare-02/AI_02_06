@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import api from '@/lib/api'
 import { useMedication } from '@/contexts/MedicationContext'
 
@@ -26,6 +26,11 @@ export default function TimeSlotPicker({ medication }) {
     (medication.intake_times || []).map(normalizeTime),
   )
   const [saving, setSaving] = useState(false)
+
+  // ── [추가] 다른 약 선택 시 시간대 초기화 ──
+useEffect(() => {
+  setCurrentTimes((medication.intake_times || []).map(normalizeTime))
+}, [medication.id])
 
   const isActive = (slotTime) => currentTimes.includes(slotTime)
 

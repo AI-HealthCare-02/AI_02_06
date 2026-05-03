@@ -76,6 +76,7 @@ function BasicInfoModal({ info, onClose, onSave }) {
 
 // 가족 관계 선택지 — 7종 (SELF 제외, OTHER 포함). 라벨 = ProfileContext 의 RELATION_LABELS 와 일치.
 const FAMILY_RELATION_OPTIONS = [
+  { value: 'SELF', label: '본인' },
   { value: 'FATHER', label: '아버지' },
   { value: 'MOTHER', label: '어머니' },
   { value: 'SON', label: '아들' },

@@ -208,13 +208,13 @@ function MainPageContent() {
         const response = await api.get(`/api/v1/daily-logs`, {
           params: {
             profile_id: selectedProfileId,
-            data: today
+            days: 1
           }
         })
         if (response.data && response.data.length > 0) {
-          const latestLog = response.data[0]
-          setTodaySymptoms(latestLog.symptoms || [])
-          setTodayNote(latestLog.note || '')
+          const todayLogs = response.data.find(log => log.log_date === today)
+          setTodaySymptoms(todayLogs?.symptoms || [])
+          setTodayNote(todayLogs?.note || '')
         } else {
           setTodaySymptoms([])
           setTodayNote('')
@@ -470,17 +470,20 @@ function MainPageContent() {
             <section className="bg-white rounded-[32px] p-8 shadow-sm border border-gray-100">
               <h3 className="text-lg font-black text-gray-900 mb-6">복약 관리</h3>
               <div className="space-y-4">
-                {medications.slice(0, 2).map((med) => (
-                  <div key={med.medication_id} className="p-4 rounded-2xl bg-gray-50 border border-gray-100">
-                    <div className="flex justify-between items-start mb-1">
-                      <p className="font-bold text-gray-900 truncate flex-1">{med.medicine_name}</p>
+                {medications.slice(0, 2).map((med, index) => {
+                  console.log(med)   // ← 이 줄 추가
+                  return (
+                    <div key={`${med.id}-${index}`} className="p-4 rounded-2xl bg-gray-50 border border-gray-100">
+                      <div className="flex justify-between items-start mb-1">
+                        <p className="font-bold text-gray-900 truncate flex-1">{med.medicine_name}</p>
                       <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full ml-2 flex-shrink-0">
                         {getRemainingDays(med)}
                       </span>
                     </div>
                     <p className="text-xs text-gray-400">{med.dosage}</p>
                   </div>
-                ))}
+                  )
+                })}
                 <button onClick={() => router.push('/medication')} className="w-full py-4 bg-gray-50 text-gray-900 font-bold rounded-2xl hover:bg-gray-100 transition-all flex items-center justify-center gap-2">
                   <Plus size={18} /> 전체 보기
                 </button>
