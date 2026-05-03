@@ -173,6 +173,7 @@ export function PrescriptionGroupProvider({ children }) {
       qc.invalidateQueries({ queryKey: qk.prescriptionGroups.all() })
       qc.invalidateQueries({ queryKey: qk.lifestyleGuides.all() })
       qc.invalidateQueries({ queryKey: qk.challenges.all() })
+      qc.invalidateQueries({ queryKey: qk.medications.all() }) // ← [추가] 처방전 삭제 시 약 목록도 즉시 갱신
     },
   })
 

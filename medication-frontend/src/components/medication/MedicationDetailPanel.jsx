@@ -64,7 +64,7 @@ function DeleteConfirmModal({ medicineName, onConfirm, onCancel, isDeleting }) {
  */
 export default function MedicationDetailPanel({ medicationId, onDeleted }) {
   const id = medicationId
-  const { medications, deleteMedication, deactivateMedication, getDrugInfo } = useMedication()
+  const { medications, deleteMedication, deactivateMedication, getDrugInfo, refetchMedications } = useMedication()
   const [isLoading, setIsLoading] = useState(true)
   const [isDrugInfoLoading, setIsDrugInfoLoading] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -121,6 +121,7 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
     setIsDeleting(true)
     try {
       await deleteMedication(id)
+      await refetchMedications() // 홈 화면 등에서 즉시 반영 위해 Context 재조회
       onDeleted?.()
     } catch (err) {
       console.error(err)

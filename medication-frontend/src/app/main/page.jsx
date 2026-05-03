@@ -205,13 +205,13 @@ function MainPageContent() {
         const response = await api.get(`/api/v1/daily-logs`, {
           params: { 
             profile_id: selectedProfileId,
-            data: today
+            days: 1
           }
         })
         if (response.data && response.data.length > 0) {
-          const latestLog = response.data[0]
-          setTodaySymptoms(latestLog.symptoms || [])
-          setTodayNote(latestLog.note || '')
+          const todayLogs = response.data.find(log => log.log_date === today)
+          setTodaySymptoms(todayLogs?.symptoms || [])
+          setTodayNote(todayLogs?.note || '')
         } else {
           setTodaySymptoms([])
           setTodayNote('')
