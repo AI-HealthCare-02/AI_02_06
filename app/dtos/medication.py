@@ -101,13 +101,16 @@ class MedicationResponse(BaseMedication):
     # 회수·판매중지 알림 페이로드 (Phase 7 §A.2.1·§A.2.2)
     # POST 응답: 등록 시점 모달 페이로드. GET 응답: 마이페이지 라벨 페이로드.
     # medication 객체에 attach 된 속성을 from_attributes 로 자동 매핑한다.
+    # TODO(FE 후속 PR, yeoul98): mypage 행 옆 회수 칩 + OCR 등록 직후 회수 모달
+    # 표시. 본 BE PR (#126) 머지 후 별도 FE PR 으로 추가 — 통합 머지 시점에는
+    # FE 미활용 (데드 필드) 로 두되, 응답 형식은 확정.
     recall_alert: RecallAlertDTO | None = Field(
         None,
-        description="등록 직후 1회 발화할 회수 모달 페이로드 (POST 응답 전용)",
+        description="등록 직후 1회 발화할 회수 모달 페이로드 (POST 응답 전용, FE 후속 PR 활용)",
     )
     recall_status: RecallStatusDTO | None = Field(
         None,
-        description="마이페이지 medication 행 옆 라벨 페이로드 (GET 응답 전용)",
+        description="마이페이지 medication 행 옆 라벨 페이로드 (GET 응답 전용, FE 후속 PR 활용)",
     )
 
 
