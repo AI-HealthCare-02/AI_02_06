@@ -150,7 +150,7 @@ function MainPageContent() {
   const [showChat, setShowChat] = useState(false)
   const [activeChallenge, setActiveChallenge] = useState(null)
   const [greeting, setGreeting] = useState({ msg: '반가워요', sub: '오늘 하루도 건강하게 시작해봐요' })
-  
+
   // [추가] 오늘의 증상 관련 상태 관리
   const [todaySymptoms, setTodaySymptoms] = useState([])
   const [todayNote, setTodayNote] = useState('')
@@ -188,11 +188,11 @@ function MainPageContent() {
   // [수정] 증상 데이터 fetch 로직 통합
   useEffect(() => {
     if (!selectedProfileId) return
-    
+
     const fetchData = async () => {
       isInitialLoad.current = false
       setIsLoading(false)
-      
+
       // 인사말 설정 로직
       const hour = new Date().getHours()
       if (hour < 12) setGreeting({ msg: '좋은 아침이에요', sub: '오늘 하루도 건강하게 시작해봐요' })
@@ -203,7 +203,7 @@ function MainPageContent() {
       try {
         const today = new Date().toISOString().split('T')[0]
         const response = await api.get(`/api/v1/daily-logs`, {
-          params: { 
+          params: {
             profile_id: selectedProfileId,
             data: today
           }
@@ -314,7 +314,7 @@ function MainPageContent() {
       <main className="max-w-7xl mx-auto w-full px-6 py-14">
         <div className="grid md:grid-cols-12 gap-8">
           <div className="md:col-span-8 space-y-8">
-            
+
             {/* [추가] 오늘의 증상 요약 카드 섹션 */}
             <section className="bg-white rounded-[32px] p-8 shadow-sm border border-gray-100">
               <div className="flex items-center justify-between mb-6">
@@ -324,8 +324,8 @@ function MainPageContent() {
                   </div>
                   <h2 className="text-xl font-black text-gray-900">오늘의 증상</h2>
                 </div>
-                <button 
-                  onClick={() => router.push('/lifestyle-guide')}
+                <button
+                  onClick={() => router.push('/lifestyle-guide?tab=symptom')}
                   className="text-sm font-bold text-gray-400 hover:text-gray-600 transition-colors"
                 >
                   기록하기
@@ -350,8 +350,8 @@ function MainPageContent() {
               ) : (
                 <div className="py-4 text-center">
                   <p className="text-gray-400 text-sm mb-4">오늘 기록된 증상이 없습니다.</p>
-                  <button 
-                    onClick={() => router.push('/lifestyle-guide')}
+                  <button
+                    onClick={() => router.push('/lifestyle-guide?tab=symptom')}
                     className="px-6 py-2 bg-gray-900 text-white text-xs font-bold rounded-full hover:bg-black transition-all"
                   >
                     지금 기록하기
@@ -424,8 +424,8 @@ function MainPageContent() {
         </div>
       </main>
 
-      <ActiveDraftsCard 
-        drafts={activeDrafts} 
+      <ActiveDraftsCard
+        drafts={activeDrafts}
         onSelect={(id) => router.push(`/ocr/result?draft_id=${id}`)}
         onDelete={handleDeleteDraft}
       />

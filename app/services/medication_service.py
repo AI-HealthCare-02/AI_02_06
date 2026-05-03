@@ -11,7 +11,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from tortoise.transactions import in_transaction
 
-from app.dtos.drug_info import DrugInfoResponse, PrecautionSection
+from app.dtos.drug_info import DrugInfoResponse, DrugInteraction, PrecautionSection
 from app.dtos.medication import MedicationBulkDeleteResponse, MedicationCreate, MedicationUpdate, PrescriptionDateItem
 from app.dtos.recall import RecallAlertDTO, RecallStatusDTO
 from app.models.medication import Medication
@@ -525,10 +525,13 @@ class MedicationService:
         return await self._get_drug_info(medication.medicine_name)
 
     async def _get_drug_info(self, medicine_name: str) -> DrugInfoResponse:
-        """MedicineInfo 테이블에서 약품 정보 조회 — LLM 호출 없음.
+        """MedicineInfo + medicine_chunk 에서 약품 정보 조회 — LLM 호출 없음.
 
-        흐름: 정확 일치 (``get_by_name``) → 미일치 시 ILIKE fallback (``search_by_name``)
-              → 둘 다 miss 면 빈 응답. NULL 컬럼도 빈 list 반환.
+        흐름:
+          1) 정확 일치 (``get_by_name``) → 미일치 시 ILIKE fallback
+          2) MedicineInfo 의 precautions/side_effects/dosage 추출
+          3) medicine_chunk 의 ``section='drug_interaction'`` chunks 를
+             DrugInteraction list 로 변환 (각 chunk = 1 DrugInteraction)
 
         Args:
             medicine_name: 매칭할 약품명.
@@ -545,12 +548,14 @@ class MedicationService:
         if info is None:
             return DrugInfoResponse(medicine_name=medicine_name)
 
+        interactions = await _load_drug_interactions(info.id)
+
         return DrugInfoResponse(
             medicine_name=info.medicine_name,
             warnings=_to_precaution_sections(info.precautions),
             side_effects=info.side_effects or [],
             dosage=info.dosage or "",
-            interactions=[],
+            interactions=interactions,
         )
 
 
@@ -562,3 +567,51 @@ def _to_precaution_sections(precautions: dict | None) -> list[PrecautionSection]
     if not precautions or not isinstance(precautions, dict):
         return []
     return [PrecautionSection(category=cat, items=list(items or [])) for cat, items in precautions.items() if items]
+
+
+# ── medicine_chunk drug_interaction → DrugInteraction list ─────────
+# 흐름: medicine_info_id 매칭 + section='drug_interaction' chunks 조회 (chunk_index 순)
+#       -> 각 chunk 의 content 헤더 ([약: ...] [성분: ...] [약물 상호작용]) 제거
+#       -> 첫 줄 (또는 첫 번호 list) 을 drug 라벨, 나머지를 description 으로
+async def _load_drug_interactions(medicine_info_id: int) -> list[DrugInteraction]:
+    """medicine_chunk 의 drug_interaction section chunks 를 DrugInteraction list 로.
+
+    Args:
+        medicine_info_id: 부모 medicine_info.id.
+
+    Returns:
+        list[DrugInteraction] - chunk_index 오름차순. chunk 0건이면 빈 list.
+    """
+    from app.models.medicine_chunk import MedicineChunk, MedicineChunkSection
+
+    chunks = (
+        await MedicineChunk
+        .filter(
+            medicine_info_id=medicine_info_id,
+            section=MedicineChunkSection.DRUG_INTERACTION.value,
+        )
+        .order_by("chunk_index")
+        .all()
+    )
+    return [DrugInteraction(**_chunk_to_interaction(c.content, c.chunk_index)) for c in chunks if c.content]
+
+
+def _chunk_to_interaction(content: str, chunk_index: int) -> dict[str, str]:
+    r"""Chunk content 헤더 제거 + drug/description 분리.
+
+    헤더 패턴: ``[약: name] [성분: ...] [약물 상호작용]\n<제목>\n<본문>``
+    헤더가 있는 첫 줄 ``[`` 시작은 모두 제거, 그 다음 첫 비공백 줄을 drug 라벨,
+    나머지를 description 으로. 헤더가 없으면 chunk_index 기반 라벨.
+    """
+    raw_lines = [line for line in (content or "").split("\n") if line.strip()]
+    body_lines = [
+        line for line in raw_lines if not line.lstrip().startswith("[약:") and not line.lstrip().startswith("[성분:")
+    ]
+    if not body_lines:
+        return {"drug": f"상호작용 #{chunk_index + 1}", "description": content.strip()[:500]}
+    drug_label = body_lines[0].strip()
+    description = "\n".join(body_lines[1:]).strip() or drug_label
+    if len(drug_label) > 60:
+        # 첫 줄이 너무 길면 chunk_index 라벨로 fallback (가독성)
+        return {"drug": f"상호작용 #{chunk_index + 1}", "description": "\n".join(body_lines).strip()}
+    return {"drug": drug_label, "description": description}
