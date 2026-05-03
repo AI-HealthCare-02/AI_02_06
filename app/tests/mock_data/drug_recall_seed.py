@@ -389,3 +389,188 @@ SEED_MEDICINE_INFO_NORMAL_30: list[dict[str, Any]] = [
         "CANCEL_NAME": "정상",
     },
 ]
+
+# 5월2일 최종적으로 추가한 실전활용 용도의 recall drug 데이터 20개
+# - 활성성분명(라니티딘/발사르탄/메틸프레드니솔론 등)은 실제 명칭.
+# - 회사명·제품 브랜드명은 모두 합성. 실재 제약사 명예훼손 회피 + 매칭
+#   알고리즘(item_seq / entrps_name_normalized / 복합 UNIQUE) 검증 전용.
+# - 분포: NDMA 2 / GMP 동일 제조사 3 / 자율회수 2 / 의약외품 4 /
+#         병원전용 2 / 한약재 2 / 포장오류 2 / 동일 ITEM_SEQ x 2 사유 2 /
+#         의약품 동등성 재평가 1 = 20건
+# - ITEM_SEQ 는 `2025040XX` 대역으로 신규 발급 (기존 SEED_RECALL_30 과 충돌 없음).
+SEED_RECALL_PRODUCTION_20: list[dict[str, Any]] = [
+    # ── §1 NDMA/NDEA 발암성 불순물 (sale_stop=Y, ⚠️ 강한 알림 분기) ──
+    {
+        "ITEM_SEQ": "202504001",
+        "PRDUCT": "데모라니티딘정150밀리그램",
+        "ENTRPS": "(주)데모제약",
+        "RTRVL_RESN": (
+            "N-니트로소디메틸아민(NDMA) 잠정관리기준(0.32ppm) 초과 검출 — "
+            "IARC 2A군 발암 가능성으로 전량 회수 및 판매중지"
+        ),
+        "RECALL_COMMAND_DATE": "20260428",
+        "STDR_CODE": "8800001501010",
+        "SALE_STOP_YN": "Y",
+    },
+    {
+        "ITEM_SEQ": "202504002",
+        "PRDUCT": "샘플발사르탄정80밀리그램",
+        "ENTRPS": "(주)샘플바이오",
+        "RTRVL_RESN": ("N-니트로소디에틸아민(NDEA) 검출 — IARC 2A군 발암 가능성. 전량 회수 및 판매중지"),
+        "RECALL_COMMAND_DATE": "20260427",
+        "STDR_CODE": "8800002080020",
+        "SALE_STOP_YN": "Y",
+    },
+    # ── §2 GMP 위반 동일 제조사 일괄 회수 3품목 (sale_stop=Y, cross-product 매칭) ──
+    {
+        "ITEM_SEQ": "202504003",
+        "PRDUCT": "테스트솔정4밀리그램(메틸프레드니솔론)",
+        "ENTRPS": "(주)테스트팜",
+        "RTRVL_RESN": ("제조소 GMP 위반 — 무균공정 자료 위·변조 적발. 동일 제조라인 12개 품목 일괄 회수"),
+        "RECALL_COMMAND_DATE": "20260425",
+        "SALE_STOP_YN": "Y",
+    },
+    {
+        "ITEM_SEQ": "202504004",
+        "PRDUCT": "테스트프레드정5밀리그램(프레드니솔론)",
+        "ENTRPS": "(주)테스트팜",
+        "RTRVL_RESN": "제조소 GMP 위반 — 무균공정 자료 위·변조 적발. 일괄 회수",
+        "RECALL_COMMAND_DATE": "20260425",
+        "SALE_STOP_YN": "Y",
+    },
+    {
+        "ITEM_SEQ": "202504005",
+        "PRDUCT": "테스트덱정0.5밀리그램(덱사메타손)",
+        "ENTRPS": "(주)테스트팜",
+        "RTRVL_RESN": "제조소 GMP 위반 — 무균공정 자료 위·변조 적발. 일괄 회수",
+        "RECALL_COMMAND_DATE": "20260425",
+        "SALE_STOP_YN": "Y",
+    },
+    # ── §3 표시사항 자율회수 (sale_stop=N, 부드러운 안내 분기) ──
+    {
+        "ITEM_SEQ": "202504006",
+        "PRDUCT": "데이오웬크림0.05%(데소나이드)",
+        "ENTRPS": "데이약사주식회사",
+        "RTRVL_RESN": ("1차 포장(튜브) 표시사항 오기 — 유효성분 함량 표기 오류(0.05% → 0.5%). 자율 회수 권고"),
+        "RECALL_COMMAND_DATE": "20260420",
+        "SALE_STOP_YN": "N",
+    },
+    {
+        "ITEM_SEQ": "202504007",
+        "PRDUCT": "알파아세트아미노펜정500밀리그램",
+        "ENTRPS": "(주)알파제약",
+        "RTRVL_RESN": "임부 사용 주의 표시 누락 — 자율 회수 권고",
+        "RECALL_COMMAND_DATE": "20260418",
+        "SALE_STOP_YN": "N",
+    },
+    # ── §4 의약외품 4건 (is_non_drug=True 분기 — 사용자 알림 노이즈 차단 검증) ──
+    {
+        "ITEM_SEQ": "202504008",
+        "PRDUCT": "베타프레쉬치약",
+        "ENTRPS": "베타제약(주)",
+        "RTRVL_RESN": "품질부적합 우려 — 자율 회수",
+        "RECALL_COMMAND_DATE": "20260415",
+        "SALE_STOP_YN": "N",
+    },
+    {
+        "ITEM_SEQ": "202504009",
+        "PRDUCT": "감마손소독제500밀리리터",
+        "ENTRPS": "(주)감마약품",
+        "RTRVL_RESN": "메탄올 함유 — 사용금지 및 회수",
+        "RECALL_COMMAND_DATE": "20260414",
+        "SALE_STOP_YN": "Y",
+    },
+    {
+        "ITEM_SEQ": "202504010",
+        "PRDUCT": "델타민트구강세정액",
+        "ENTRPS": "(주)델타바이오",
+        "RTRVL_RESN": "표시기재사항 오기 — 자율 회수",
+        "RECALL_COMMAND_DATE": "20260412",
+        "SALE_STOP_YN": "N",
+    },
+    {
+        "ITEM_SEQ": "202504011",
+        "PRDUCT": "엡실론기능성치약",
+        "ENTRPS": "(주)엡실론케어",
+        "RTRVL_RESN": "품질부적합 우려 — 자율 회수",
+        "RECALL_COMMAND_DATE": "20260410",
+        "SALE_STOP_YN": "N",
+    },
+    # ── §5 병원전용 2건 (is_hospital_only=True 분기 — 일반 사용자 매칭 안 됨 검증) ──
+    {
+        "ITEM_SEQ": "202504012",
+        "PRDUCT": "제타미다졸람주사5밀리그램(미다졸람염산염)",
+        "ENTRPS": "(주)제타파마",
+        "RTRVL_RESN": "2차 포장 표시 오기",
+        "RECALL_COMMAND_DATE": "20260408",
+        "SALE_STOP_YN": "Y",
+    },
+    {
+        "ITEM_SEQ": "202504013",
+        "PRDUCT": "에타세파졸린나트륨주사1그램",
+        "ENTRPS": "에타제약(주)",
+        "RTRVL_RESN": "엔도톡신 시험 부적합 — 전량 회수",
+        "RECALL_COMMAND_DATE": "20260407",
+        "SALE_STOP_YN": "Y",
+    },
+    # ── §6 한약재 2건 (사용자 매칭 안 되는 정상 케이스 — false positive 검증) ──
+    {
+        "ITEM_SEQ": "202504014",
+        "PRDUCT": "이오타황기",
+        "ENTRPS": "(주)이오타생약",
+        "RTRVL_RESN": "성상 부적합",
+        "RECALL_COMMAND_DATE": "20260405",
+        "SALE_STOP_YN": "N",
+    },
+    {
+        "ITEM_SEQ": "202504015",
+        "PRDUCT": "카파당귀",
+        "ENTRPS": "(주)카파한약",
+        "RTRVL_RESN": "순도시험 1) 이물 가) 줄기",
+        "RECALL_COMMAND_DATE": "20260403",
+        "SALE_STOP_YN": "N",
+    },
+    # ── §7 일반 회수 2건 (낮은 위험, 사용자 약과 무관한 행) ──
+    {
+        "ITEM_SEQ": "202504016",
+        "PRDUCT": "람다스타틴정20밀리그램(아토르바스타틴)",
+        "ENTRPS": "(주)람다파마",
+        "RTRVL_RESN": "바코드 오류 — 자율 회수",
+        "RECALL_COMMAND_DATE": "20260331",
+        "SALE_STOP_YN": "N",
+    },
+    {
+        "ITEM_SEQ": "202504017",
+        "PRDUCT": "뮤플러스액100밀리리터",
+        "ENTRPS": "뮤제약(주)",
+        "RTRVL_RESN": "카톤 포장 오류",
+        "RECALL_COMMAND_DATE": "20260328",
+        "SALE_STOP_YN": "N",
+    },
+    # ── §8 동일 ITEM_SEQ x 2 사유 (복합 UNIQUE (item_seq, date, reason) 검증) ──
+    {
+        "ITEM_SEQ": "202504018",
+        "PRDUCT": "오미크론케어연고",
+        "ENTRPS": "(주)오미크론바이오",
+        "RTRVL_RESN": "포장재 불량(코팅 벗겨짐)",
+        "RECALL_COMMAND_DATE": "20260326",
+        "SALE_STOP_YN": "N",
+    },
+    {
+        "ITEM_SEQ": "202504018",  # 동일 ITEM_SEQ (복합 UNIQUE 두 번째 행)
+        "PRDUCT": "오미크론케어연고",
+        "ENTRPS": "(주)오미크론바이오",
+        "RTRVL_RESN": "안정성시험 일부항목(성상)",
+        "RECALL_COMMAND_DATE": "20260326",
+        "SALE_STOP_YN": "N",
+    },
+    # ── §9 의약품 동등성 재평가 1건 (낮은 위험, 안내성 알림) ──
+    {
+        "ITEM_SEQ": "202504019",
+        "PRDUCT": "파이메트포르민정500밀리그램",
+        "ENTRPS": "(주)파이팜",
+        "RTRVL_RESN": "의약품 동등성 재평가 — 자료 보완 필요로 자율 회수",
+        "RECALL_COMMAND_DATE": "20260322",
+        "SALE_STOP_YN": "N",
+    },
+]

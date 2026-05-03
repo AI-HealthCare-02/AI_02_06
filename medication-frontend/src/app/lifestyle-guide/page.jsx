@@ -9,7 +9,7 @@ import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/Header'
 import BottomNav from '@/components/layout/BottomNav'
 import EmptyState from '@/components/common/EmptyState'
-import { showError } from '@/lib/api'
+import api, { showError } from '@/lib/api'
 import { useProfile } from '@/contexts/ProfileContext'
 import { useLifestyleGuide } from '@/contexts/LifestyleGuideContext'
 import { useChallenge, useChallengeStart, useChallengeCheck } from '@/contexts/ChallengeContext'
@@ -19,20 +19,16 @@ import { useConfirm } from '@/components/common/ConfirmDialog'
 import PrescriptionPickerModal from '@/components/lifestyle/PrescriptionPickerModal'
 import SymptomLogForm from '@/components/lifestyle/SymptomLogForm'
 import toast from 'react-hot-toast'
+import { AlertTriangle, Moon, Utensils, Dumbbell, Stethoscope } from 'lucide-react'
 
-// "추천 챌린지 더 보기" 한도 — BE 와 동일 (LifestyleGuide.revealed_challenge_count
-// 의 최대값). 사용자에게는 "최대 15개" 카피로 노출.
+
 const MAX_REVEALED_CHALLENGES = 15
 
-// 가이드 생성 SSE / terminal error mapping 은 LifestyleGuideContext 로 이동 완료.
-
-// ── 탭 메타데이터 ──────────────────────────────────────────────────────────────
-// key: API 응답 content 객체의 키값 및 challenge.category 매핑 값과 일치해야 함
 const TABS = [
   {
     key: 'interaction',
     label: '약물 상호작용',
-    icon: '⚠️',
+    icon: <AlertTriangle size={16} />,
     color: 'text-red-500',
     bg: 'bg-red-50',
     border: 'border-red-200',
@@ -41,7 +37,7 @@ const TABS = [
   {
     key: 'sleep',
     label: '수면·생체리듬',
-    icon: '🌙',
+    icon: <Moon size={16} />,
     color: 'text-indigo-500',
     bg: 'bg-indigo-50',
     border: 'border-indigo-200',
@@ -50,7 +46,7 @@ const TABS = [
   {
     key: 'diet',
     label: '식단·수분',
-    icon: '🥗',
+    icon: <Utensils size={16} />,
     color: 'text-green-500',
     bg: 'bg-green-50',
     border: 'border-green-200',
@@ -59,7 +55,7 @@ const TABS = [
   {
     key: 'exercise',
     label: '운동',
-    icon: '💪',
+    icon: <Dumbbell size={16} />,
     color: 'text-blue-500',
     bg: 'bg-blue-50',
     border: 'border-blue-200',
@@ -68,7 +64,7 @@ const TABS = [
   {
     key: 'symptom',
     label: '증상 트래킹',
-    icon: '🩺',
+    icon: <Stethoscope size={16} />,
     color: 'text-orange-500',
     bg: 'bg-orange-50',
     border: 'border-orange-200',
@@ -76,27 +72,17 @@ const TABS = [
   },
 ]
 
-// 챌린지 난이도 뱃지 스타일 매핑
 const DIFFICULTY_STYLE = {
   '쉬움': { bg: 'bg-blue-50', text: 'text-blue-500' },
   '보통': { bg: 'bg-green-50', text: 'text-green-500' },
   '어려움': { bg: 'bg-red-50', text: 'text-red-500' },
 }
 
-// ── 날짜 포맷 유틸 ─────────────────────────────────────────────────────────────
-// formatDate: 이력 날짜 칩에 표시 (예: "4/24")
 function formatDate(isoStr) {
   const d = new Date(isoStr)
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
-// formatFullDate: 과거 가이드 열람 안내 배너에 표시 (예: "2026.04.24")
-function formatFullDate(isoStr) {
-  const d = new Date(isoStr)
-  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`
-}
-
-// formatFullDateTime: 과거 가이드 안내/삭제 confirm 등에 표시 — 시간까지 (예: "2026.04.30 18:23")
 function formatFullDateTime(isoStr) {
   const d = new Date(isoStr)
   const yyyy = d.getFullYear()
@@ -107,8 +93,6 @@ function formatFullDateTime(isoStr) {
   return `${yyyy}.${mm}.${dd} ${HH}:${MM}`
 }
 
-// medication_snapshot 안의 처방일(dispensed_date) 분포에서 사용자에게 보여줄
-// 대표 처방일 라벨을 만든다. 처방일이 모두 같으면 단일 날짜, 다르면 범위로.
 function summarizePrescribedRange(snapshot) {
   if (!Array.isArray(snapshot) || snapshot.length === 0) return null
   const dates = snapshot
@@ -121,17 +105,9 @@ function summarizePrescribedRange(snapshot) {
   return first === last ? first : `${first} ~ ${last}`
 }
 
-// ── 증상 로그 폼은 components/lifestyle/SymptomLogForm.jsx 로 추출됨 (PR-B 표준 폼) ──
-
 // ── 챌린지 배너 컴포넌트 ────────────────────────────────────────────────────────
-// 화면 하단에 고정되는 배너로, 현재 선택된 탭 카테고리에 해당하는 챌린지 1개를 표시
-// 챌린지 3-상태 패턴:
-//   1) COMPLETED → 초록 "완료" 뱃지 (버튼 없음)
-//   2) is_active=false → "시작하기" 버튼 (과거 가이드 열람 시 비활성화)
-//   3) is_active=true → 오늘 체크 여부에 따라 "오늘 완료 체크" 버튼 or "오늘 완료!" 텍스트
 function ChallengeBanner({ challenge, isViewingHistory }) {
   const router = useRouter()
-  // 시작/체크 정책은 hook 으로 ─ 어디서 호출하든 동일 동작.
   const { isStarting, startTarget, requestStart } = useChallengeStart()
   const { checkingId, checkToday } = useChallengeCheck()
 
@@ -142,12 +118,10 @@ function ChallengeBanner({ challenge, isViewingHistory }) {
   const isProcessing = isStartingThis || isChecking
 
   const today = new Date().toISOString().split('T')[0]
-  // completed_dates 배열에 오늘 날짜가 있는지 확인 (string/Date 양쪽 타입 대응)
   const checkedToday = challenge.completed_dates?.some(
     (d) => (typeof d === 'string' ? d : d.toISOString?.().split('T')[0]) === today
   )
 
-  // 상태 1: COMPLETED - 완료 뱃지 표시
   if (challenge.challenge_status === 'COMPLETED') {
     return (
       <div className="fixed bottom-20 left-0 w-full px-4 z-40 pointer-events-none">
@@ -175,22 +149,19 @@ function ChallengeBanner({ challenge, isViewingHistory }) {
           )}
         </div>
 
-        {/* 과거 가이드 열람 중이면 모든 챌린지 액션 비활성화 */}
         {isViewingHistory ? (
           <span className="text-xs text-gray-400 shrink-0 ml-3">과거 가이드</span>
         ) : !challenge.is_active ? (
-          // 상태 2: 미시작 → 시작하기 버튼 (PATCH {is_active: true})
           <button
             onClick={() => requestStart(challenge)}
             disabled={isProcessing}
             className={`ml-3 px-4 py-2 rounded-xl text-xs font-bold shrink-0 transition-colors cursor-pointer ${
-              isProcessing ? 'bg-gray-100 text-gray-400 cursor-wait' : 'bg-gray-900 text-white hover:bg-gray-700'
+              isProcessing ? 'bg-gray-100 text-gray-400 cursor-wait' : 'bg-gray-900 text-white hover:bg-gray-800 active:scale-95'
             }`}
           >
-            {isProcessing ? '처리중...' : '시작하기'}
+            {isProcessing && startTarget?.id === challenge.id ? '처리중...' : '시작하기'}
           </button>
         ) : checkedToday ? (
-          // 상태 3-b: 오늘 이미 체크함 → 완료 텍스트 + 챌린지 페이지 이동 버튼
           <div className="flex items-center gap-2 ml-3 shrink-0">
             <span className="bg-green-50 text-green-500 text-xs font-bold px-3 py-2 rounded-xl">
               오늘 완료!
@@ -204,7 +175,6 @@ function ChallengeBanner({ challenge, isViewingHistory }) {
             </button>
           </div>
         ) : (
-          // 상태 3-a: 진행중, 오늘 미체크 → 완료 체크 버튼 (PATCH {completed_dates, challenge_status})
           <button
             onClick={() => checkToday(challenge)}
             disabled={isProcessing}
@@ -234,31 +204,64 @@ export default function LifestyleGuidePage() {
     revealMoreChallenges,
   } = useLifestyleGuide()
   const { challengesByGuide } = useChallenge()
-  // 처방전 그룹 list — "+ 새 가이드" 차단 / 모달 후보 list 의 SSOT.
   const { groups: prescriptionGroups, isLoading: groupsLoading } = usePrescriptionGroup()
-  // 챌린지 시작/체크 모두 hook 으로 단일 정책. 페이지는 derived 만 책임.
   const { startTarget, isStarting, requestStart, cancelStart, confirmStart } = useChallengeStart()
   const { checkingId, checkToday } = useChallengeCheck()
 
   const [isGenerating, setIsGenerating] = useState(false)
-  // "+ 새 가이드" 클릭 시 처방전 선택 모달 노출 여부.
   const [isPickerOpen, setIsPickerOpen] = useState(false)
-  // 챌린지 더 보기 처리 중 중복 클릭 방지.
   const [isRevealing, setIsRevealing] = useState(false)
-  const [selectedGuide, setSelectedGuide] = useState(null)   // 현재 본문에 표시되는 가이드
-  // 사용자가 칩으로 명시 선택한 가이드 id — set 되어 있으면 sticky.
-  // null 일 때만 자동으로 latestGuide 를 따라간다 (auto-follow).
-  // 새 가이드 생성 또는 picked 가이드 삭제 시 null 로 리셋.
+  const [selectedGuide, setSelectedGuide] = useState(null)
   const [userPickedGuideId, setUserPickedGuideId] = useState(null)
-  const [activeTab, setActiveTab] = useState('interaction')  // 현재 선택된 탭 키
+  const [activeTab, setActiveTab] = useState('interaction')
 
+  // ── 오늘의 증상 상태 ──
+  const [todaySymptoms, setTodaySymptoms] = useState([])
+  const [todayNote, setTodayNote] = useState('')
+  const [symptomsLoading, setSymptomsLoading] = useState(false)
 
   const chipScrollRef = useRef(null)
   const isLoading = guidesLoading
 
-  // selectedGuide 의 챌린지는 ChallengeContext store 에서 derived.
-  // 정렬 기준 (사용자 합의): 기간 짧은 순 → 제목 가나다 → id tiebreak.
-  // store 의 union 순서나 GET 응답 순서와 무관하게 항상 같은 흐름으로 노출.
+  // ── 오늘의 증상 fetch ──
+  // GET /api/v1/daily-logs?profile_id=...&days=1
+  // 응답: list[DailySymptomLogResponse]
+  // 필드: { id, profile_id, log_date, symptoms: string[], note: string|null, created_at }
+  // 후속 정정: 다른 페이지/컴포넌트와 동일하게 axios 기반 `api` client 사용 (auth
+  // 헤더 자동 주입 + 일관된 에러 처리). 직접 fetch 제거.
+  const fetchTodaySymptoms = async () => {
+    if (!profileId) return
+    const today = new Date().toISOString().split('T')[0]
+    setSymptomsLoading(true)
+    try {
+      const res = await api.get('/api/v1/daily-logs', {
+        params: { profile_id: profileId, days: 1 },
+      })
+      const data = res.data || [] // list[DailySymptomLogResponse]
+      // days=1 이지만 혹시 어제 것도 포함될 수 있으니 오늘 날짜로 한 번 더 필터
+      const todayLog = data.find((log) => log.log_date === today)
+      setTodaySymptoms(todayLog?.symptoms ?? [])
+      setTodayNote(todayLog?.note ?? '')
+    } catch {
+      // 조용히 실패 — 카드 빈 상태로 표시
+    } finally {
+      setSymptomsLoading(false)
+    }
+  }
+
+  // 페이지 마운트 시 조회
+  useEffect(() => {
+    fetchTodaySymptoms()
+  }, [profileId])
+
+  // 증상 탭 진입 시 재조회
+  useEffect(() => {
+    if (activeTab === 'symptom') {
+      fetchTodaySymptoms()
+    }
+  }, [activeTab])
+
+  // ── guideChallenges ──
   const guideChallenges = (selectedGuide ? challengesByGuide(selectedGuide.id) : [])
     .slice()
     .sort((a, b) => {
@@ -271,24 +274,13 @@ export default function LifestyleGuidePage() {
       if (cmp !== 0) return cmp
       return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
     })
-  const isLoadingChallenges = false  // store 에서 derived 라 별도 로딩 없음
+  const isLoadingChallenges = false
 
-  // 과거 열람 = ready 가이드 중 가장 최신과 selectedGuide 가 다를 때.
-  // placeholder (status='pending') 는 비교에 끼지 않는다 — 그래야 "+ 새 가이드"
-  // 직후 placeholder 가 guides[0] 로 prepend 되어도 isViewingHistory 가
-  // 갑자기 true 로 바뀌지 않는다 (사용자 우려).
   const firstReadyGuide = guides.find(g => g.status === 'ready') || null
   const isViewingHistory =
     !!selectedGuide && !!firstReadyGuide && selectedGuide.id !== firstReadyGuide.id
 
-  // 가이드 store 변동 시 selectedGuide 자동 보정.
-  //
-  // 정책:
-  //  1) userPickedGuideId 가 set 되어 있으면 그 가이드를 sticky 로 유지
-  //     (단, 그 가이드가 사라졌으면 auto-follow 로 회귀)
-  //  2) auto-follow: 항상 latestGuide (= 가장 최근 ready) 를 selectedGuide 로
-  //     → "+ 새 가이드" → ready 도달 시 자동으로 새 가이드로 본문 전환
-  //  3) latestGuide 가 없으면 guides 안의 ready 가이드 중 첫 번째
+  // ── selectedGuide 자동 보정 ──
   useEffect(() => {
     if (userPickedGuideId) {
       const picked = guides.find(g => g.id === userPickedGuideId && g.status === 'ready')
@@ -296,7 +288,6 @@ export default function LifestyleGuidePage() {
         if (picked !== selectedGuide) setSelectedGuide(picked)
         return
       }
-      // picked 가이드가 사라짐 (삭제됨) → auto-follow 로 회귀
       setUserPickedGuideId(null)
       return
     }
@@ -316,18 +307,10 @@ export default function LifestyleGuidePage() {
     }
   }, [latestGuide, guides, selectedGuide, userPickedGuideId])
 
-  // ── 현재 탭에 해당하는 챌린지 1개 ──
-  // 하단 배너에 표시할 챌린지: 현재 탭의 category와 일치하는 것 중 DELETED 제외
-  const activeBannerChallenge = guideChallenges.find(
-    (c) => c.category === activeTab && c.challenge_status !== 'DELETED'
-  ) || null
-
-  // 처방전 그룹 list 중 *복용 중 약 1건 이상* 인 그룹만 가이드 생성 후보.
-  // 빈 list 면 "+ 새 가이드" 클릭 시 toast + /ocr 이동.
   const eligibleGroups = (prescriptionGroups || []).filter((g) => g.has_active_medication)
   const hasEligibleGroup = eligibleGroups.length > 0
 
-  // "+ 새 가이드" 버튼 클릭 — 처방전 0개면 toast + /ocr, 아니면 모달 오픈.
+  // ── 새 가이드 버튼 클릭 ──
   const handleClickNewGuide = () => {
     if (!profileId) {
       showError('프로필을 먼저 선택해주세요.')
@@ -343,10 +326,7 @@ export default function LifestyleGuidePage() {
     setIsPickerOpen(true)
   }
 
-  // ── 가이드 생성 (처방전 단위 RQ + SSE) ──
-  // 흐름: 모달에서 group 선택 -> POST /lifestyle-guides/generate?group_id=...
-  //       -> 즉시 202 + pending guide_id (또는 dedupe hit 시 ready)
-  //       -> Context 가 placeholder 삽입 + SSE update + ready 시 챌린지 sync
+  // ── 가이드 생성 ──
   const handleConfirmPickGroup = async (prescriptionGroupId) => {
     setIsPickerOpen(false)
     if (isGenerating) return
@@ -363,7 +343,6 @@ export default function LifestyleGuidePage() {
       }
     } catch (err) {
       const detail = err.response?.data?.detail
-      // BE 409: 그룹 active 약 0건 → 처방전 페이지 이동 안내
       if (err.response?.status === 409 && detail?.code === 'NO_ACTIVE_MEDICATIONS') {
         showError(detail.message || '이 처방전엔 복용 중인 약이 없어 가이드를 만들 수 없어요.')
         router.push(detail.redirect_to || '/medication')
@@ -380,6 +359,7 @@ export default function LifestyleGuidePage() {
     }
   }
 
+  // ── 가이드 삭제 ──
   const handleDeleteGuide = async (guide) => {
     const ok = await confirm({
       title: '가이드 삭제',
@@ -389,7 +369,6 @@ export default function LifestyleGuidePage() {
     })
     if (!ok) return
     try {
-      // sticky picked 가 삭제 대상이면 auto-follow 로 회귀
       if (userPickedGuideId === guide.id) setUserPickedGuideId(null)
       await deleteGuide(guide.id)
       toast.success('가이드가 삭제되었습니다.')
@@ -398,9 +377,7 @@ export default function LifestyleGuidePage() {
     }
   }
 
-  // ── 챌린지 시작 (모달 onConfirm) ──
-  // useChallengeStart 의 confirmStart 가 PATCH /api/v1/challenges/{id}/start 호출.
-  // ChallengeContext 가 응답으로 store in-place 갱신 → guideChallenges derived 자동 반영.
+  // ── 챌린지 시작 ──
   const handleConfirmStart = async (difficulty, targetDays) => {
     try {
       const updated = await confirmStart(difficulty, targetDays)
@@ -423,8 +400,6 @@ export default function LifestyleGuidePage() {
       showError('챌린지 시작에 실패했습니다.')
     }
   }
-
-  // 체크 정책은 useChallengeCheck hook 으로 이전 — handleChallengeCheck 제거됨.
 
   // ── 로딩 스켈레톤 ──
   if (isLoading) {
@@ -451,7 +426,7 @@ export default function LifestyleGuidePage() {
 
       <div className="max-w-3xl mx-auto px-4 py-4 space-y-4">
 
-        {/* ── 생성 버튼 — 타이틀 우측 작은 버튼으로 변경 ── */}
+        {/* ── 새 가이드 버튼 ── */}
         <div className="flex items-center justify-between">
           <p className="text-xs text-gray-400">
             {isGenerating ? '🤖 AI가 분석 중입니다...' : ''}
@@ -469,7 +444,7 @@ export default function LifestyleGuidePage() {
           </button>
         </div>
 
-        {/* ── 가이드 없음: EmptyState + 처방전 선행 안내 ── */}
+        {/* ── 가이드 없음 ── */}
         {guides.length === 0 && !isGenerating && (
           <>
             <EmptyState
@@ -491,7 +466,7 @@ export default function LifestyleGuidePage() {
           </>
         )}
 
-        {/* ── 첫 가이드 생성 중 (이력 없음) — 큰 스켈레톤 ── */}
+        {/* ── 첫 가이드 생성 중 스켈레톤 ── */}
         {isGenerating && guides.filter(g => g.status === 'ready').length === 0 && (
           <div className="animate-pulse space-y-4">
             <div className="flex gap-2">
@@ -512,20 +487,15 @@ export default function LifestyleGuidePage() {
                 <div className="h-5 bg-gray-200 rounded w-28" />
               </div>
               <div className="space-y-2.5">
-                <div className="h-4 bg-gray-200 rounded w-full" />
-                <div className="h-4 bg-gray-200 rounded w-11/12" />
-                <div className="h-4 bg-gray-200 rounded w-4/5" />
-                <div className="h-4 bg-gray-200 rounded w-full" />
-                <div className="h-4 bg-gray-200 rounded w-3/4" />
-                <div className="h-4 bg-gray-200 rounded w-5/6" />
+                {['w-full', 'w-11/12', 'w-4/5', 'w-full', 'w-3/4', 'w-5/6'].map((w, i) => (
+                  <div key={i} className={`h-4 bg-gray-200 rounded ${w}`} />
+                ))}
               </div>
             </div>
           </div>
         )}
 
-        {/* ── 기존 가이드 보유 + 생성 중 — 작은 inline placeholder ── */}
-        {/*    기존 selectedGuide 본문은 그대로 유지하고, 새 가이드는            */}
-        {/*    이력 칩에서 "생성중" 표시 + 상단 알림 카드로만 안내한다.            */}
+        {/* ── 기존 가이드 있고 신규 생성 중 — inline 알림 ── */}
         {isGenerating && guides.filter(g => g.status === 'ready').length > 0 && (
           <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center gap-3">
             <div className="h-4 w-4 rounded-full border-2 border-blue-300 border-t-blue-600 animate-spin shrink-0" />
@@ -538,10 +508,10 @@ export default function LifestyleGuidePage() {
           </div>
         )}
 
-        {/* ── 이력 날짜 칩 (가이드 있을 때만) ── */}
+        {/* ── 이력 날짜 칩 ── */}
         {guides.length > 0 && (
           <div ref={chipScrollRef} className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-            {guides.map((guide, idx) => {
+            {guides.map((guide) => {
               const isSelected = selectedGuide?.id === guide.id
               return (
                 <div
@@ -578,9 +548,7 @@ export default function LifestyleGuidePage() {
           </div>
         )}
 
-        {/* ── 과거 가이드 열람 배너 ──
-            처방일이 아니라 "가이드 생성 시점" 기준임을 명확히 함.
-            이후 처방 / 설문 변경이 있을 수 있어 새 가이드 생성을 권장.   */}
+        {/* ── 과거 가이드 열람 배너 ── */}
         {isViewingHistory && (() => {
           const prescribed = summarizePrescribedRange(selectedGuide.medication_snapshot)
           return (
@@ -599,10 +567,10 @@ export default function LifestyleGuidePage() {
           )
         })()}
 
-        {/* ── 가이드 내용 (가이드 선택된 경우) — 생성 중에도 기존 ready 가이드는 그대로 보인다 ── */}
+        {/* ── 가이드 내용 ── */}
         {selectedGuide && (
           <>
-            {/* 복용 약 스냅샷 — 처방일이 있으면 chip 옆에 작은 라벨로 표기 */}
+            {/* 복용 약 스냅샷 */}
             {selectedGuide.medication_snapshot?.length > 0 && (
               <div className="bg-white rounded-2xl px-4 py-3 shadow-sm border border-gray-50">
                 <p className="text-xs font-bold text-gray-400 mb-2">💊 가이드 생성 시 복용 약</p>
@@ -666,154 +634,195 @@ export default function LifestyleGuidePage() {
                 <p className="text-sm text-gray-400">이 카테고리의 가이드 내용이 없습니다.</p>
               )}
 
-              {/* 증상 탭: 일일 로그 입력 폼 */}
+              {/* ── 증상 탭: 오늘의 증상 요약 카드 + 입력 폼 ── */}
               {activeTab === 'symptom' && (
-                <SymptomLogForm profileId={profileId} onSaved={() => {}} />
+                <div className="mt-5 space-y-4">
+
+                  {/* 오늘의 증상 요약 카드 */}
+                  <div className="bg-orange-50/40 border border-orange-100 rounded-2xl p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-7 h-7 bg-orange-50 rounded-lg flex items-center justify-center text-orange-500">
+                        <Stethoscope size={14} />
+                      </div>
+                      <p className="text-xs font-black text-orange-700">오늘의 증상 요약</p>
+                    </div>
+
+                    {symptomsLoading ? (
+                      <div className="animate-pulse flex gap-2">
+                        <div className="h-7 bg-orange-100 rounded-full w-16" />
+                        <div className="h-7 bg-orange-100 rounded-full w-20" />
+                      </div>
+                    ) : todaySymptoms.length > 0 ? (
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap gap-1.5">
+                          {todaySymptoms.map((s, idx) => (
+                            <span
+                              key={idx}
+                              className="px-3 py-1.5 bg-white text-orange-700 rounded-full text-xs font-bold border border-orange-100"
+                            >
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                        {todayNote && (
+                          <p className="text-gray-500 text-xs leading-relaxed bg-white/70 p-3 rounded-xl border border-dashed border-orange-100">
+                            "{todayNote}"
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-orange-400">
+                        아직 오늘 기록된 증상이 없어요. 아래에서 입력해보세요.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* 증상 입력 폼 — 저장 후 요약 카드 자동 갱신 */}
+                  <SymptomLogForm
+                    profileId={profileId}
+                    onSaved={() => fetchTodaySymptoms()}
+                  />
+                </div>
               )}
             </div>
 
-            {/* 이 가이드의 전체 챌린지 목록 (배너 외) */}
+            {/* ── 챌린지 목록 ── */}
             {guideChallenges.length > 0 && (() => {
-              // BE 가 한 번에 만들어둔 15개 중 사용자에게 노출된 수.
-              // 응답에 필드가 없는 옛 row(DB 마이그레이션 #26 이전) 는 5 로 fallback.
               const revealed = selectedGuide.revealed_challenge_count ?? 5
               const reachedLimit = revealed >= MAX_REVEALED_CHALLENGES
               return (
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-50 p-4">
-                <div className="flex items-center justify-between mb-3 gap-2">
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-gray-400">🎯 이 가이드에서 생성된 챌린지</p>
-                    <p className="text-[11px] text-gray-400 mt-0.5 break-keep">
-                      한 가이드에서 최대 {MAX_REVEALED_CHALLENGES}개까지 추천받을 수 있어요 ({revealed}/{MAX_REVEALED_CHALLENGES})
-                    </p>
-                  </div>
-                  {!isViewingHistory && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (isRevealing) return
-                        if (reachedLimit) {
-                          showError(`더 이상 추천받을 수 없어요. 최대 ${MAX_REVEALED_CHALLENGES}개까지 추천받을 수 있어요.`)
-                          return
-                        }
-                        setIsRevealing(true)
-                        try {
-                          await revealMoreChallenges(selectedGuide.id)
-                          toast.success('추천 챌린지 5개를 추가로 보여드려요!')
-                        } catch (err) {
-                          const detail = err.response?.data?.detail
-                          if (err.response?.status === 409 && detail?.code === 'REVEAL_LIMIT_REACHED') {
-                            showError(detail.message || `최대 ${MAX_REVEALED_CHALLENGES}개까지 추천받을 수 있어요.`)
-                          } else {
-                            showError('챌린지 더 보기를 처리하지 못했어요. 잠시 후 다시 시도해주세요.')
-                          }
-                        } finally {
-                          setIsRevealing(false)
-                        }
-                      }}
-                      disabled={reachedLimit || isRevealing}
-                      title={reachedLimit ? `최대 ${MAX_REVEALED_CHALLENGES}개까지 추천받을 수 있어요.` : undefined}
-                      className={`shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border transition-colors ${
-                        reachedLimit
-                          ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-                          : isRevealing
-                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-wait'
-                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 cursor-pointer'
-                      }`}
-                    >
-                      {isRevealing ? '...' : '추천 챌린지 더 보기'}
-                    </button>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  {isLoadingChallenges ? (
-                    <div className="animate-pulse space-y-2">
-                      {[1, 2].map((i) => <div key={i} className="h-10 bg-gray-100 rounded-xl" />)}
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-50 p-4">
+                  <div className="flex items-center justify-between mb-3 gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-gray-400">🎯 이 가이드에서 생성된 챌린지</p>
+                      <p className="text-[11px] text-gray-400 mt-0.5 break-keep">
+                        한 가이드에서 최대 {MAX_REVEALED_CHALLENGES}개까지 추천받을 수 있어요 ({revealed}/{MAX_REVEALED_CHALLENGES})
+                      </p>
                     </div>
-                  ) : (
-                    guideChallenges.map((c) => {
-                      const tabMeta = TABS.find((t) => t.key === c.category)
-                      const diffStyle = c.difficulty ? (DIFFICULTY_STYLE[c.difficulty] || DIFFICULTY_STYLE['보통']) : null
-                      const today = new Date().toISOString().split('T')[0]
-                      const checkedToday = c.completed_dates?.some(
-                        (d) => (typeof d === 'string' ? d : d.toISOString?.().split('T')[0]) === today
-                      )
-                      const isProcessing =
-                        (isStarting && startTarget?.id === c.id) || checkingId === c.id
+                    {!isViewingHistory && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (isRevealing) return
+                          if (reachedLimit) {
+                            showError(`더 이상 추천받을 수 없어요. 최대 ${MAX_REVEALED_CHALLENGES}개까지 추천받을 수 있어요.`)
+                            return
+                          }
+                          setIsRevealing(true)
+                          try {
+                            await revealMoreChallenges(selectedGuide.id)
+                            toast.success('추천 챌린지 5개를 추가로 보여드려요!')
+                          } catch (err) {
+                            const detail = err.response?.data?.detail
+                            if (err.response?.status === 409 && detail?.code === 'REVEAL_LIMIT_REACHED') {
+                              showError(detail.message || `최대 ${MAX_REVEALED_CHALLENGES}개까지 추천받을 수 있어요.`)
+                            } else {
+                              showError('챌린지 더 보기를 처리하지 못했어요. 잠시 후 다시 시도해주세요.')
+                            }
+                          } finally {
+                            setIsRevealing(false)
+                          }
+                        }}
+                        disabled={reachedLimit || isRevealing}
+                        title={reachedLimit ? `최대 ${MAX_REVEALED_CHALLENGES}개까지 추천받을 수 있어요.` : undefined}
+                        className={`shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border transition-colors ${
+                          reachedLimit
+                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                            : isRevealing
+                              ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-wait'
+                              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 cursor-pointer'
+                        }`}
+                      >
+                        {isRevealing ? '...' : '추천 챌린지 더 보기'}
+                      </button>
+                    )}
+                  </div>
 
-                      return (
-                        <div
-                          key={c.id}
-                          className="flex items-center justify-between gap-3 py-2 px-3 bg-gray-50 rounded-xl"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            {tabMeta && (
-                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${tabMeta.bg} ${tabMeta.color}`}>
-                                {tabMeta.icon}
-                              </span>
-                            )}
-                            <span className="text-sm font-bold text-gray-800 truncate">{c.title}</span>
-                            {diffStyle && (
-                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${diffStyle.bg} ${diffStyle.text}`}>
-                                {c.difficulty}
-                              </span>
-                            )}
-                          </div>
+                  <div className="space-y-2">
+                    {isLoadingChallenges ? (
+                      <div className="animate-pulse space-y-2">
+                        {[1, 2].map((i) => <div key={i} className="h-10 bg-gray-100 rounded-xl" />)}
+                      </div>
+                    ) : (
+                      guideChallenges.map((c) => {
+                        const tabMeta = TABS.find((t) => t.key === c.category)
+                        const diffStyle = c.difficulty ? (DIFFICULTY_STYLE[c.difficulty] || DIFFICULTY_STYLE['보통']) : null
+                        const today = new Date().toISOString().split('T')[0]
+                        const checkedToday = c.completed_dates?.some(
+                          (d) => (typeof d === 'string' ? d : d.toISOString?.().split('T')[0]) === today
+                        )
+                        const isProcessing =
+                          (isStarting && startTarget?.id === c.id) || checkingId === c.id
 
-                          <div className="shrink-0">
-                            {c.challenge_status === 'COMPLETED' ? (
-                              <span className="bg-green-50 text-green-500 text-[10px] font-bold px-2 py-1 rounded-full">완료</span>
-                            ) : !c.is_active ? (
-                              <button
-                                onClick={() => requestStart(c)}
-                                disabled={isViewingHistory || isProcessing}
-                                className={`text-[10px] font-bold px-3 py-1.5 rounded-full transition-colors ${
-                                  isViewingHistory
-                                    ? 'bg-gray-100 text-gray-400 cursor-default'
-                                    : isProcessing
-                                      ? 'bg-gray-100 text-gray-400 cursor-wait'
-                                      : 'bg-gray-900 text-white hover:bg-gray-700 cursor-pointer'
-                                }`}
-                              >
-                                {isProcessing ? '...' : '시작하기'}
-                              </button>
-                            ) : checkedToday ? (
-                              <span className="bg-green-50 text-green-500 text-[10px] font-bold px-2 py-1 rounded-full">오늘 완료</span>
-                            ) : (
-                              <button
-                                onClick={() => checkToday(c)}
-                                disabled={isViewingHistory || isProcessing}
-                                className={`text-[10px] font-bold px-3 py-1.5 rounded-full transition-colors ${
-                                  isViewingHistory
-                                    ? 'bg-gray-100 text-gray-400 cursor-default'
-                                    : isProcessing
-                                      ? 'bg-gray-100 text-gray-400 cursor-wait'
-                                      : 'bg-blue-500 text-white hover:bg-blue-600 cursor-pointer'
-                                }`}
-                              >
-                                {isProcessing ? '...' : '오늘 체크'}
-                              </button>
-                            )}
+                        return (
+                          <div
+                            key={c.id}
+                            className="flex items-center justify-between gap-3 py-2 px-3 bg-gray-50 rounded-xl"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              {tabMeta && (
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${tabMeta.bg} ${tabMeta.color}`}>
+                                  {tabMeta.icon}
+                                </span>
+                              )}
+                              <span className="text-sm font-bold text-gray-800 truncate">{c.title}</span>
+                              {diffStyle && (
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${diffStyle.bg} ${diffStyle.text}`}>
+                                  {c.difficulty}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="shrink-0">
+                              {c.challenge_status === 'COMPLETED' ? (
+                                <span className="bg-green-50 text-green-500 text-[10px] font-bold px-2 py-1 rounded-full">완료</span>
+                              ) : !c.is_active ? (
+                                <button
+                                  onClick={() => requestStart(c)}
+                                  disabled={isViewingHistory || isProcessing}
+                                  className={`text-[10px] font-bold px-3 py-1.5 rounded-full transition-colors ${
+                                    isViewingHistory
+                                      ? 'bg-gray-100 text-gray-400 cursor-default'
+                                      : isProcessing
+                                        ? 'bg-gray-100 text-gray-400 cursor-wait'
+                                        : 'bg-gray-900 text-white hover:bg-gray-700 cursor-pointer'
+                                  }`}
+                                >
+                                  {isProcessing ? '...' : '시작하기'}
+                                </button>
+                              ) : checkedToday ? (
+                                <span className="bg-green-50 text-green-500 text-[10px] font-bold px-2 py-1 rounded-full">오늘 완료</span>
+                              ) : (
+                                <button
+                                  onClick={() => checkToday(c)}
+                                  disabled={isViewingHistory || isProcessing}
+                                  className={`text-[10px] font-bold px-3 py-1.5 rounded-full transition-colors ${
+                                    isViewingHistory
+                                      ? 'bg-gray-100 text-gray-400 cursor-default'
+                                      : isProcessing
+                                        ? 'bg-gray-100 text-gray-400 cursor-wait'
+                                        : 'bg-gray-900 text-white hover:bg-gray-800 active:scale-95 cursor-pointer'
+                                  }`}
+                                >
+                                  {isProcessing ? '...' : '오늘 체크'}
+                                </button>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )
-                    })
-                  )}
+                        )
+                      })
+                    )}
+                  </div>
                 </div>
-              </div>
               )
             })()}
           </>
         )}
       </div>
 
-      {/* (lifestyle-guide 하단 챌린지 배너 제거 — main PR 의도. 챌린지 시작은
-          가이드 내 추천 카드의 "시작하기" 버튼이 useChallengeStart hook 으로 직접
-          처리, 별도 floating banner 는 화면을 가려 제거됨.) */}
-
       <BottomNav />
 
-      {/* ── 챌린지 시작 모달 (난이도·기간 선택 바텀시트) ── */}
+      {/* ── 챌린지 시작 모달 ── */}
       {startTarget && (
         <StartChallengeModal
           challenge={startTarget}
@@ -823,7 +832,7 @@ export default function LifestyleGuidePage() {
         />
       )}
 
-      {/* ── 처방전 선택 모달 ("+ 새 가이드" 클릭 시) ── */}
+      {/* ── 처방전 선택 모달 ── */}
       {isPickerOpen && (
         <PrescriptionPickerModal
           onConfirm={handleConfirmPickGroup}

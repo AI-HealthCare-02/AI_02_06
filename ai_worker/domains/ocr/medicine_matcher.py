@@ -1,105 +1,65 @@
-"""OCR 후보 토큰을 medicine_info DB 와 매칭한다.
+# ruff: noqa: E501 — 팀원 (PR #116) 한국어 prompt 의 자연 줄 보존
+"""OCR 후보 토큰을 medicine_info DB 와 매칭한다. (아키텍트 패러다임 시프트 버전)
 
-3단계 매칭 전략:
-1. **정확/부분 일치 (ILIKE)** — 빠르고 깨끗한 OCR 텍스트에 효과적
-2. **트라이그램 유사도 (pg_trgm)** — OCR 오타 보정 ("다이레놀" → "타이레놀")
-3. **Fallback (raw 후보)** — DB 매칭 실패 시 약품명 패턴 휴리스틱 통과한
-   원본 토큰을 그대로 ``ExtractedMedicine`` 으로 추가. 사용자가 검수 화면에서
-   직접 수정·삭제할 수 있도록 정보를 잃지 않는 정책.
-
-LLM 은 사용하지 않는다. 모든 매칭은 문자열 수준에서 끝난다.
-
-ai-worker 프로세스는 부팅 시 Tortoise ORM 을 init 하지 않으므로 (FastAPI
-lifespan 과 별개), 매 RQ job 마다 본 모듈이 직접 init -> 검색 -> close 로
-짧게 connection lifecycle 을 관리한다.
+기존의 단어별 쪼개기 매칭을 버리고, 전체 텍스트를 LLM에게 넘겨 문맥을 통해
+노이즈(홍길동, 병원명)를 제거하고 진짜 약품명만 교정하여 추출하는 혁신 파이프라인.
 """
 
 import asyncio
+import json
 import logging
 
 from tortoise import Tortoise
 
+from ai_worker.core.openai_client import get_openai_client
 from app.db.databases import TORTOISE_ORM
 from app.dtos.ocr import ExtractedMedicine
-from app.models.medicine_info import MedicineInfo
 from app.repositories.medicine_info_repository import MedicineInfoRepository
 
 logger = logging.getLogger(__name__)
 
+# LLM이 1차로 예쁘게 정제해 주므로, 퍼지 매칭은 0.3으로 넉넉하게 잡습니다.
 _FUZZY_THRESHOLD = 0.3
 _FUZZY_LIMIT = 1
-_EXACT_LIMIT = 1
-
-# 약품명 패턴 종결어 — 한국 의약품 명명 관례.
-# Fallback 단계에서 raw OCR 토큰을 추가할지 결정하는 휴리스틱 기준.
-_MEDICINE_NAME_SUFFIXES: tuple[str, ...] = (
-    "정",
-    "캡슐",
-    "캅셀",
-    "시럽",
-    "액",
-    "주",
-    "환",
-    "산",
-    "연고",
-    "겔",
-    "크림",
-    "패치",
-    "분말",
-    "좌제",
-    "주사",
-    "주입",
-)
-_FALLBACK_MIN_LENGTH = 3
 
 
 async def search_candidates_in_open_db(candidates: list[str]) -> list[ExtractedMedicine]:
-    """후보 토큰 리스트를 약품 매칭한다 — Tortoise 가 이미 init 된 상태 가정.
+    if not candidates:
+        return []
 
-    호출자가 lifecycle 을 관리하므로 (예: jobs.py 의 ``_async_db_part``) 본 함수는
-    init/close 를 하지 않는다. ai-worker 안의 RQ task 가 1회 init 으로 매칭 +
-    ``ocr_drafts`` UPDATE 를 모두 묶어 처리하기 위함.
+    # 1. 87개로 산산조각 난 토큰을 다시 하나의 긴 문장으로 이어 붙인다 (문맥 복원!)
+    full_text = " ".join(candidates)
+    logger.info("Reconstructed OCR Text Length: %d", len(full_text))
 
-    DB 매칭 실패한 후보 중 약품명 패턴 (정/캡슐/시럽/...) 을 가진 토큰은 raw
-    상태로 추가한다.
+    # 2. LLM에게 노이즈 필터링 및 약품명 교정을 통째로 맡긴다
+    clean_names = await _extract_medicines_with_llm(full_text)
+    logger.info("LLM Extracted Clean Names: %s", clean_names)
 
-    Args:
-        candidates: ``extract_medicine_candidates`` 가 반환한 토큰 리스트.
-
-    Returns:
-        중복 제거된 ``ExtractedMedicine`` 리스트 (DB 매칭 우선, fallback 후순).
-    """
     matched: list[ExtractedMedicine] = []
-    db_match_count = await _search_into(candidates, matched)
-    fallback_count = len(matched) - db_match_count
-    logger.info(
-        "DB matching: %d candidates -> %d matched (db=%d, fallback=%d)",
-        len(candidates),
-        len(matched),
-        db_match_count,
-        fallback_count,
-    )
+    seen_names: set[str] = set()
+    repo = MedicineInfoRepository()
+    await repo.ensure_pg_trgm()
+
+    db_match_count = 0
+    for name in clean_names:
+        if await _match_clean_name(repo, name, matched, seen_names):
+            db_match_count += 1
+        # DB 매칭에 실패해도 LLM이 뽑은 이름은 신뢰성이 높으므로 Fallback으로 추가
+        elif name not in seen_names:
+            seen_names.add(name)
+            matched.append(
+                ExtractedMedicine(medicine_name=name, raw_ocr_name=name, is_llm_corrected=True, match_score=0.5)
+            )
+
+    logger.info("Final Matching: %d LLM names -> %d matched to DB", len(clean_names), db_match_count)
     return matched
 
 
 def match_candidates_to_medicines(candidates: list[str]) -> list[ExtractedMedicine]:
-    """후보 토큰 리스트를 약품 객체로 매핑한다 — 자체 Tortoise lifecycle 포함.
-
-    스크립트·테스트 등 Tortoise 가 init 되지 않은 환경에서도 안전하게 호출할
-    수 있도록 init/close 를 직접 관리한다. RQ task 안에서는 lifecycle 중복을
-    피하기 위해 ``search_candidates_in_open_db`` 를 직접 호출하는 게 권장된다.
-
-    Args:
-        candidates: ``extract_medicine_candidates`` 가 반환한 토큰 리스트.
-
-    Returns:
-        중복 제거된 ``ExtractedMedicine`` 리스트.
-    """
     return asyncio.run(_run_with_db_lifecycle(candidates))
 
 
 async def _run_with_db_lifecycle(candidates: list[str]) -> list[ExtractedMedicine]:
-    """Tortoise init -> 검색 -> close 를 묶어 한 번의 lifecycle 로 실행."""
     await Tortoise.init(config=TORTOISE_ORM)
     try:
         return await search_candidates_in_open_db(candidates)
@@ -107,105 +67,82 @@ async def _run_with_db_lifecycle(candidates: list[str]) -> list[ExtractedMedicin
         await Tortoise.close_connections()
 
 
-async def _search_into(candidates: list[str], matched: list[ExtractedMedicine]) -> int:
-    """비동기 검색을 수행해 ``matched`` 리스트를 채운다 (in-place).
-
-    DB 매칭 실패한 후보는 _add_fallback_if_likely 로 raw 추가 시도.
-
-    Returns:
-        DB 매칭에 성공한 후보 개수.
-    """
-    repo = MedicineInfoRepository()
-    await repo.ensure_pg_trgm()
-    seen_names: set[str] = set()
-    db_match_count = 0
-    unmatched: list[str] = []
-    for candidate in candidates:
-        if await _match_one(repo, candidate, matched, seen_names):
-            db_match_count += 1
-        else:
-            unmatched.append(candidate)
-    _append_raw_fallbacks(unmatched, matched, seen_names)
-    return db_match_count
-
-
-async def _match_one(
-    repo: MedicineInfoRepository,
-    candidate: str,
-    matched: list[ExtractedMedicine],
-    seen_names: set[str],
+async def _match_clean_name(
+    repo: MedicineInfoRepository, name: str, matched: list[ExtractedMedicine], seen_names: set[str]
 ) -> bool:
-    """단일 후보에 대해 정확 매칭 → 실패 시 fuzzy 매칭. 매칭 성공 시 True."""
-    exact_results = await repo.search_by_name(candidate, limit=_EXACT_LIMIT)
+    # 1. 정확 일치 검사
+    exact_results = await repo.search_by_name(name, limit=1)
     if exact_results:
-        _append_unique(exact_results[0], matched, seen_names)
+        med = exact_results[0]
+        if med.medicine_name not in seen_names:
+            seen_names.add(med.medicine_name)
+            matched.append(
+                ExtractedMedicine(
+                    medicine_name=med.medicine_name,
+                    category=med.category,
+                    raw_ocr_name=name,
+                    is_llm_corrected=True,
+                    match_score=1.0,
+                )
+            )
         return True
 
-    fuzzy_match = await _try_fuzzy(repo, candidate)
-    if fuzzy_match is not None:
-        _append_unique(fuzzy_match, matched, seen_names)
+    # 2. 퍼지 매칭 검사 (LLM이 교정했지만 띄어쓰기 등이 다를 수 있음)
+    fuzzy_results = await repo.fuzzy_search_by_name(name, threshold=_FUZZY_THRESHOLD, limit=_FUZZY_LIMIT)
+    if fuzzy_results:
+        best = fuzzy_results[0]
+        med = await repo.get_by_id(best["id"])
+        if med and med.medicine_name not in seen_names:
+            seen_names.add(med.medicine_name)
+            matched.append(
+                ExtractedMedicine(
+                    medicine_name=med.medicine_name,
+                    category=med.category,
+                    raw_ocr_name=name,
+                    is_llm_corrected=True,
+                    match_score=best["score"],
+                )
+            )
         return True
+
     return False
 
 
-async def _try_fuzzy(repo: MedicineInfoRepository, candidate: str) -> MedicineInfo | None:
-    """pg_trgm 유사도 검색 — score 가 임계치 이상인 1건을 반환."""
-    fuzzy_results = await repo.fuzzy_search_by_name(
-        candidate,
-        threshold=_FUZZY_THRESHOLD,
-        limit=_FUZZY_LIMIT,
-    )
-    if not fuzzy_results:
-        return None
-    best = fuzzy_results[0]
-    logger.info(
-        "Fuzzy matched: '%s' -> '%s' (score: %.2f)",
-        candidate,
-        best["medicine_name"],
-        best["score"],
-    )
-    return await repo.get_by_id(best["id"])
+async def _extract_medicines_with_llm(raw_text: str) -> list[str]:
+    """LLM을 호출하여 노이즈를 날리고 약품명만 JSON 배열로 추출한다."""
+    client = get_openai_client()
+    if not client:
+        logger.error("OPENAI_API_KEY 미설정. LLM 동작 불가.")
+        return []
 
+    prompt = f"""
+    너는 대한민국 최고 수준의 약사 AI야.
+    다음은 처방전 사진을 OCR로 읽어낸 텍스트야. 의미 없는 단어(병원명, 환자명, 주소, 무작위 글자)와 약품명이 뒤섞여 있어.
 
-def _append_unique(
-    medicine: MedicineInfo | None,
-    matched: list[ExtractedMedicine],
-    seen_names: set[str],
-) -> None:
-    """이미 본 약품이면 skip, 새로 발견하면 ``matched`` 에 추가."""
-    if medicine is None or medicine.medicine_name in seen_names:
-        return
-    seen_names.add(medicine.medicine_name)
-    matched.append(
-        ExtractedMedicine(
-            medicine_name=medicine.medicine_name,
-            category=medicine.category,
-        )
-    )
+    [OCR 전체 문맥 텍스트]
+    "{raw_text}"
 
+    [지시사항]
+    1. 환자명(홍길동 등), 병원명(SEOUL 등), 주소, 성별, 나이 등 약품과 관련 없는 '노이즈'는 완전히 무시해! 절대 결과에 포함하지 마.
+    2. 텍스트 중에서 1일 N회, 식후 등 용법과 같이 적혀있는 실제 '약품'만 추출해.
+    3. '다이레놀', '우류사' 처럼 명백한 오타가 있다면 올바른 정식 약품명(타이레놀정500밀리그램, 우루사정100밀리그램 등)으로 반드시 교정해.
+    4. 응답은 오직 교정된 약품명 문자열들만 포함된 JSON 배열 형태로 반환해.
 
-def _append_raw_fallbacks(
-    unmatched: list[str],
-    matched: list[ExtractedMedicine],
-    seen_names: set[str],
-) -> None:
-    """DB 매칭 실패 토큰 중 약품명 패턴을 통과한 것을 raw 로 추가한다.
-
-    사용자가 검수 화면에서 직접 수정·삭제할 수 있도록 OCR 결과를 잃지 않는
-    정책. 약품명 종결어 (정/캡슐/시럽/...) 와 최소 길이 휴리스틱으로 노이즈
-    토큰 (병원명·환자명·날짜 잔재) 을 1차 차단한다.
+    [출력 예시]
+    {{
+        "medicines": ["타이레놀정500밀리그램", "아스피린장용정100밀리그램", "우루사정100밀리그램"]
+    }}
     """
-    for token in unmatched:
-        if not _looks_like_medicine_name(token):
-            continue
-        if token in seen_names:
-            continue
-        seen_names.add(token)
-        matched.append(ExtractedMedicine(medicine_name=token))
 
-
-def _looks_like_medicine_name(token: str) -> bool:
-    """약품명 패턴 휴리스틱 — 종결어 + 최소 길이."""
-    if len(token) < _FALLBACK_MIN_LENGTH:
-        return False
-    return token.endswith(_MEDICINE_NAME_SUFFIXES)
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0.0,
+        )
+        result = json.loads(response.choices[0].message.content)
+        return result.get("medicines", [])
+    except Exception as e:
+        logger.error(f"LLM 텍스트 추출 실패: {e}")
+        return []

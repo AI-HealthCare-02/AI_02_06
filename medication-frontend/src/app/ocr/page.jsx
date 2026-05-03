@@ -124,10 +124,19 @@ export default function OcrPage() {
           </label>
         </div>
 
-        {/* 직접 약품 추가하기 버튼 (신규 추가) */}
+        {/* [신규 추가] 직접 입력 안내 배너 */}
+        <div className="mt-8 bg-blue-50 rounded-2xl p-4 flex items-center gap-3 shadow-sm border border-blue-100">
+          <span className="text-2xl">💡</span>
+          <div className="flex-1">
+            <p className="font-bold text-blue-800 text-sm mb-1">사진 촬영이 어렵다면?</p>
+            <p className="text-blue-700 text-xs">처방전이 없거나 인식이 어려운 약품은 아래 버튼을 눌러 직접 입력할 수 있어요.</p>
+          </div>
+        </div>
+
+        {/* 직접 약품 추가하기 버튼 */}
         <button
           onClick={() => router.push('/ocr/result?draft_id=manual')}
-          className="w-full mt-6 bg-white rounded-2xl p-4 border-2 border-dashed border-blue-300 text-blue-500 font-bold hover:bg-blue-50 hover:border-blue-400 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+          className="w-full mt-3 bg-white rounded-2xl p-4 border-2 border-dashed border-blue-300 text-blue-500 font-bold hover:bg-blue-50 hover:border-blue-400 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-sm"
         >
           <span className="text-xl">+</span> 직접 약품 추가하기
         </button>

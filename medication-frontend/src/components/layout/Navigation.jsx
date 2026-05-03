@@ -15,7 +15,7 @@ export default function Navigation() {
   const [showChat, setShowChat] = useState(false)
   const [scrolled, setScrolled] = useState(false)
 
-  const isLanding = pathname === '/' || pathname === '/login'
+  const isLanding = pathname === '/'
   const isAuthPage = pathname === '/login' || pathname.startsWith('/auth/')
 
   const { selectedProfileId } = useProfile()
@@ -60,7 +60,7 @@ export default function Navigation() {
             {/* 앱 내부 페이지 데스크탑 네비게이션.
                 "처방전 등록" 메뉴는 활성 draft 가 있으면 result 로 보내야 하므로
                 정적 Link 가 아닌 useOcrEntryNavigator 훅 사용. */}
-            {!isLanding && (
+            {!isLanding && !isAuthPage && (
               <div className="hidden md:flex items-center gap-1">
                 {menus.map((menu) => {
                   const isActive = menu.path === '/ocr'
