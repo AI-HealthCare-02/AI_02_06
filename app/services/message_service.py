@@ -4,16 +4,18 @@ This module provides business logic for chat message management operations
 including creation, AI response generation, and ownership verification.
 """
 
+from datetime import UTC, datetime
 import json
 import logging
 import math
 from typing import Any
+import uuid
 from uuid import UUID
 
 from fastapi import HTTPException, status
 
-from app.dtos.query_rewriter import IntentType
-from app.dtos.tools import AskResult, PendingTurn, ToolCall
+from app.dtos.query_rewriter import IntentType, LocationMode, LocationQuery
+from app.dtos.tools import AskPending, AskResult, PendingTurn, ToolCall
 from app.models.messages import ChatMessage
 from app.repositories.chat_session_repository import ChatSessionRepository
 from app.repositories.message_repository import MessageRepository
@@ -21,13 +23,19 @@ from app.services.chat.intent_orchestrator import classify_user_turn
 from app.services.chat.rag_context_assembler import assemble_rag_section
 from app.services.rag.openai_embedding import encode_query
 from app.services.rag.retrievers.hybrid_metadata import retrieve_with_metadata
-from app.services.tools.pending import PendingTurnStore
+from app.services.tools.pending import DEFAULT_TTL_SEC, PendingTurnStore
 from app.services.tools.rq_adapters import (
     generate_chat_response_via_rq,
     run_tool_calls_via_rq,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def uuid_token() -> str:
+    """짧은 tool_call_id 생성용 — uuid4 hex 앞 8자리."""
+    return uuid.uuid4().hex[:8]
+
 
 # PLAN.md (feature/RAG) §0 결정 — recent history = 6 messages (3 user + 3 assistant).
 # 6 turn 마다 chat_sessions.summary 갱신 (옵션 D) 와 정확히 일치 → token 절감.
@@ -362,7 +370,25 @@ class MessageService:
                 )
                 return await self._persist_direct_answer_turn(session_id, user_msg, rewriter_output.direct_answer)
 
-            # 분기 2: domain_question (RAG 4단 retrieval + 4o)
+            # 분기 2: location_search (카카오 Local API — keyword 즉시 / gps PendingTurn)
+            if rewriter_output.intent == IntentType.LOCATION_SEARCH:
+                if rewriter_output.location_query is None:
+                    logger.warning(
+                        "[Chat] session=%s location_search but location_query 누락 - fallback",
+                        sid,
+                    )
+                    fallback = "검색하실 약국 또는 병원 위치를 더 구체적으로 알려주세요."
+                    return await self._persist_direct_answer_turn(session_id, user_msg, fallback)
+                return await self._handle_location_search(
+                    session_id=session_id,
+                    account_id=account_id,
+                    user_msg=user_msg,
+                    history=history,
+                    content=content,
+                    location_query=rewriter_output.location_query,
+                )
+
+            # 분기 3: domain_question (RAG 4단 retrieval + 4o)
             if (
                 rewriter_output.intent != IntentType.DOMAIN_QUESTION
                 or not rewriter_output.rewritten_query
@@ -526,6 +552,193 @@ class MessageService:
         total = await self.repository.count_by_session(session_id)
         self._maybe_enqueue_compact(session_id, total)
         return AskResult(user_message=user_msg, assistant_message=assistant_msg, pending=None)
+
+    # ── 위치 검색 분기 (카카오 Local API + 2nd LLM) ─────────────────────
+    # 흐름: mode 분기
+    #       (keyword) ToolCall 생성 -> run_tool_calls_via_rq 즉시 호출
+    #                 -> tool 결과를 messages 에 prepend -> 2nd LLM (4o)
+    #                 -> assistant message persist
+    #       (gps)     ToolCall 생성 (needs_geolocation=True) -> PendingTurn 저장
+    #                 -> AskPending(turn_id, ttl_sec) 반환 -> FE 좌표 콜백 대기
+    async def _handle_location_search(
+        self,
+        *,
+        session_id: UUID,
+        account_id: UUID,
+        user_msg: ChatMessage,
+        history: list[dict[str, str]],
+        content: str,
+        location_query: LocationQuery,
+    ) -> AskResult:
+        """카카오 Local API 호출 분기 (keyword 즉시 / gps PendingTurn).
+
+        Args:
+            session_id: Chat session UUID.
+            account_id: Caller account UUID — PendingTurn 소유 검증용.
+            user_msg: 이미 영속화된 user 메시지.
+            history: 시간순 대화 history (system role 제외).
+            content: 사용자 raw 질의.
+            location_query: Query Rewriter 가 채운 검색 파라미터.
+
+        Returns:
+            ``AskResult`` — keyword 면 ``assistant_message`` 채움, gps 면
+            ``pending`` 채움.
+        """
+        sid = str(session_id)[:8]
+
+        if location_query.mode == LocationMode.KEYWORD:
+            return await self._run_keyword_location_turn(
+                session_id=session_id,
+                user_msg=user_msg,
+                history=history,
+                content=content,
+                location_query=location_query,
+            )
+
+        # mode == LocationMode.GPS — PendingTurn 으로 좌표 콜백 대기
+        if location_query.category is None:
+            logger.warning("[Chat] session=%s gps location_search but category 누락 - fallback", sid)
+            fallback = "약국 또는 병원 중 어느 쪽을 찾아드릴까요?"
+            return await self._persist_direct_answer_turn(session_id, user_msg, fallback)
+
+        return await self._enqueue_gps_pending_turn(
+            session_id=session_id,
+            account_id=account_id,
+            user_msg=user_msg,
+            history=history,
+            content=content,
+            location_query=location_query,
+        )
+
+    async def _run_keyword_location_turn(
+        self,
+        *,
+        session_id: UUID,
+        user_msg: ChatMessage,
+        history: list[dict[str, str]],
+        content: str,
+        location_query: LocationQuery,
+    ) -> AskResult:
+        """mode=keyword — 즉시 카카오 호출 + 2nd LLM 응답."""
+        sid = str(session_id)[:8]
+        if not location_query.query or not location_query.query.strip():
+            logger.warning("[Chat] session=%s keyword location_search but query 누락 - fallback", sid)
+            fallback = "어느 지역의 약국 또는 병원을 찾아드릴까요?"
+            return await self._persist_direct_answer_turn(session_id, user_msg, fallback)
+
+        tool_call = ToolCall(
+            tool_call_id=f"loc_kw_{uuid_token()}",
+            name="search_hospitals_by_keyword",
+            arguments={"query": location_query.query.strip()},
+            needs_geolocation=False,
+        )
+        worker_calls = [_tool_call_to_worker_dict(tool_call)]
+        logger.info("[Chat] session=%s location_search keyword=%r", sid, location_query.query)
+        results = await run_tool_calls_via_rq(calls=worker_calls, queue=self._get_queue())
+
+        assistant_with_tool = {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": tool_call.tool_call_id,
+                    "type": "function",
+                    "function": {
+                        "name": tool_call.name,
+                        "arguments": json.dumps(tool_call.arguments, ensure_ascii=False),
+                    },
+                }
+            ],
+        }
+        tool_message = _tool_result_message(
+            tool_call.tool_call_id,
+            results.get(tool_call.tool_call_id, {"error": "no result"}),
+        )
+        second_messages = [
+            *history,
+            {"role": "user", "content": content},
+            assistant_with_tool,
+            tool_message,
+        ]
+        completion = await generate_chat_response_via_rq(
+            messages=second_messages,
+            queue=self._get_queue(),
+        )
+        answer = completion.get("answer", "")
+        logger.info("[Chat] session=%s location keyword reply=%r len=%d", sid, _preview(answer), len(answer))
+
+        assistant_msg = await self.repository.create_assistant_message(session_id, answer)
+        total = await self.repository.count_by_session(session_id)
+        self._maybe_enqueue_compact(session_id, total)
+        return AskResult(user_message=user_msg, assistant_message=assistant_msg, pending=None)
+
+    async def _enqueue_gps_pending_turn(
+        self,
+        *,
+        session_id: UUID,
+        account_id: UUID,
+        user_msg: ChatMessage,
+        history: list[dict[str, str]],
+        content: str,
+        location_query: LocationQuery,
+    ) -> AskResult:
+        """mode=gps — PendingTurn 저장 후 AskPending 핸드오프 반환."""
+        sid = str(session_id)[:8]
+        category_value = location_query.category.value if location_query.category else "약국"
+        arguments: dict[str, Any] = {
+            "category": category_value,
+            "radius_m": location_query.radius_m,
+        }
+        tool_call = ToolCall(
+            tool_call_id=f"loc_gps_{uuid_token()}",
+            name="search_hospitals_by_location",
+            arguments=arguments,
+            needs_geolocation=True,
+        )
+
+        assistant_with_tool = {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": tool_call.tool_call_id,
+                    "type": "function",
+                    "function": {
+                        "name": tool_call.name,
+                        "arguments": json.dumps(tool_call.arguments, ensure_ascii=False),
+                    },
+                }
+            ],
+        }
+        messages_snapshot: list[dict[str, Any]] = [
+            *history,
+            {"role": "user", "content": content},
+            assistant_with_tool,
+        ]
+
+        pending = PendingTurn(
+            turn_id="",
+            session_id=str(session_id),
+            account_id=str(account_id),
+            messages_snapshot=messages_snapshot,
+            tool_calls=[tool_call],
+            eager_results={},
+            created_at=datetime.now(UTC),
+        )
+        store = self._get_pending_store()
+        turn_id = await store.create(pending)
+        logger.info(
+            "[Chat] session=%s location_search gps category=%s radius=%dm pending=%s",
+            sid,
+            category_value,
+            location_query.radius_m,
+            turn_id,
+        )
+        return AskResult(
+            user_message=user_msg,
+            assistant_message=None,
+            pending=AskPending(turn_id=turn_id, ttl_sec=DEFAULT_TTL_SEC),
+        )
 
     # ── pending GPS 턴 마무리 (오케스트레이션) ───────────────────────────
     # 흐름: 입력 검증 -> claim+ownership -> geo 결과 수집
