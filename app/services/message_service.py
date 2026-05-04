@@ -293,10 +293,12 @@ class MessageService:
         """
         return await self.repository.create_assistant_message(session_id, content)
 
-    # ── RAG 4단 파이프라인 진입점 ────────────────────────────────────────
-    # 흐름: ownership -> Step 0 (medical_context) + Step 1+2 (IntentClassifier 4o-mini)
-    #       -> direct_answer 분기 (greeting/out_of_scope/ambiguous) 즉시 응답
-    #       -> domain_question 이면 Step 3 (fanout → tool_calls 병렬) -> Step 4 (2nd LLM)
+    # ── 채팅 턴 진입점 (RAG 4단 + 위치 검색 분기 예정) ──────────────────
+    # 흐름: ownership -> history+summary -> Query Rewriter (4o-mini)
+    #       -> intent 분기:
+    #          (1) direct_answer (greeting/out_of_scope/ambiguous) 즉시 응답
+    #          (2) domain_question -> _finalize_rag_turn (RAG 4단 retrieval + 4o)
+    #          (3) location_search -> 추후 _handle_location_search 추가 예정
     async def ask_with_tools(
         self,
         *,
@@ -304,15 +306,15 @@ class MessageService:
         account_id: UUID,
         content: str,
     ) -> AskResult:
-        """Route one user turn through the RAG 4-stage pipeline.
+        """Route one user turn through the chat pipeline.
 
-        분기:
-        - **direct_answer** — IntentClassifier 가 즉시 답변
-          (greeting / out_of_scope / ambiguous). Persist 후 종료.
-        - **domain_question, all eager** — fanout queries 를 RAG tool_calls
-          로 변환 + 병렬 실행 + RAG context inject 후 2nd LLM (4o) 호출.
-        - **domain_question, any geo** — (현재 RAG 4단은 GPS tool 안 씀.
-          향후 hospital_search 통합 시 PendingTurn 분기 추가 가능).
+        Intent 분기 (Query Rewriter 의 단일 호출 결과 기반):
+        - **greeting / out_of_scope / ambiguous** — ``direct_answer`` 를 그대로
+          응답으로 영속화 후 종료.
+        - **domain_question** — ``_finalize_rag_turn`` 으로 hybrid metadata
+          retrieval + 2nd LLM (4o) 답변 생성.
+        - **location_search** — (예정) 카카오 Local API + 2nd LLM 답변. 핫픽스
+          PR 의 Step 3 에서 분기 추가.
 
         Args:
             session_id: Chat session UUID.
@@ -320,7 +322,7 @@ class MessageService:
             content: User message content.
 
         Returns:
-            ``AskResult`` — direct/tool 분기에 따라 다름.
+            ``AskResult`` — direct/RAG 분기에 따라 다름.
 
         Raises:
             HTTPException: Session ownership violations.
@@ -351,7 +353,7 @@ class MessageService:
                 classify_messages,
             )
 
-            # 분기 1: direct_answer (greeting/out_of_scope/ambiguous)
+            # 분기 1: direct_answer (greeting / out_of_scope / ambiguous)
             if rewriter_output.direct_answer:
                 logger.info(
                     "[Chat] session=%s intent=%s direct_answer (no RAG)",
@@ -360,7 +362,7 @@ class MessageService:
                 )
                 return await self._persist_direct_answer_turn(session_id, user_msg, rewriter_output.direct_answer)
 
-            # 분기 2: domain_question - rewritten_query + metadata 로 retrieval
+            # 분기 2: domain_question (RAG 4단 retrieval + 4o)
             if (
                 rewriter_output.intent != IntentType.DOMAIN_QUESTION
                 or not rewriter_output.rewritten_query
