@@ -33,8 +33,10 @@ import asyncio
 import hashlib
 import json
 import logging
+from pathlib import Path
 import re
 import time
+from typing import Any
 
 from openai import AsyncOpenAI
 from tortoise import Tortoise
@@ -558,6 +560,206 @@ async def _embed_with_retry(client: AsyncOpenAI, texts: list[str]) -> list[list[
     raise RuntimeError("unreachable")
 
 
+# ── OpenAI Batch API 통합 (50% 할인, 24h 내 완료) ─────────────────────
+# https://platform.openai.com/docs/guides/batch
+# 흐름: chunks 모두 빌드 -> JSONL 파일 작성 -> /v1/files 업로드
+#       -> /v1/batches 제출 -> polling (60s 간격) -> 결과 다운로드 + INSERT.
+# custom_id format: "{medicine_info_id}_{section}_{chunk_index}" — 결과 매칭용.
+
+_BATCH_POLL_INTERVAL = 60.0  # sec — completed 까지 polling 간격
+_BATCH_TERMINAL_STATES = ("completed", "failed", "expired", "cancelled")
+
+
+def _custom_id_for(med_id: int, section: MedicineChunkSection, chunk_index: int) -> str:
+    """Batch API custom_id (max 64 chars) — 결과 line 매칭용 unique key."""
+    return f"{med_id}_{section.value}_{chunk_index}"
+
+
+async def _submit_batch_and_wait(
+    client: AsyncOpenAI,
+    requests: list[dict[str, Any]],
+) -> dict[str, list[float]]:
+    """Batch API 제출 + 완료 대기 + custom_id -> embedding dict 반환.
+
+    Args:
+        client: AsyncOpenAI 인스턴스 (이미 초기화된 OpenAI 클라이언트).
+        requests: JSONL 줄 dict 리스트. 각 줄은 OpenAI batch input format.
+
+    Returns:
+        dict: custom_id -> 3072d embedding vector. 실패 item 은 dict 에서 제외.
+    """
+    if not requests:
+        return {}
+
+    # 1. JSONL 파일 작성 (file IO — async 안에서 sync open 사용은 1회성 short-lived 라 OK)
+    jsonl_path = Path("/tmp/embed_batch_input.jsonl")
+    body = "\n".join(json.dumps(req, ensure_ascii=False) for req in requests) + "\n"
+    jsonl_path.write_text(body, encoding="utf-8")  # noqa: ASYNC240  # 1회성 short-lived
+    logger.info("[Batch] JSONL written: %d requests, path=%s", len(requests), jsonl_path)
+
+    # 2. 파일 업로드
+    with jsonl_path.open("rb") as f:  # noqa: ASYNC230  # 1회성 short-lived
+        upload = await client.files.create(file=f, purpose="batch")
+    logger.info("[Batch] file uploaded: id=%s bytes=%d", upload.id, upload.bytes)
+
+    # 3. Batch job 제출
+    batch = await client.batches.create(
+        input_file_id=upload.id,
+        endpoint="/v1/embeddings",
+        completion_window="24h",
+        metadata={"purpose": "medicine_chunk_embedding"},
+    )
+    logger.info("[Batch] submitted: id=%s status=%s", batch.id, batch.status)
+
+    # 4. polling — completed/failed/expired/cancelled 까지
+    while batch.status not in _BATCH_TERMINAL_STATES:
+        await asyncio.sleep(_BATCH_POLL_INTERVAL)
+        batch = await client.batches.retrieve(batch.id)
+        rc = batch.request_counts
+        logger.info(
+            "[Batch] status=%s completed=%d/%d failed=%d",
+            batch.status,
+            rc.completed if rc else 0,
+            rc.total if rc else len(requests),
+            rc.failed if rc else 0,
+        )
+
+    if batch.status != "completed":
+        msg = f"Batch terminal state={batch.status} errors={getattr(batch, 'errors', None)}"
+        raise RuntimeError(msg)
+
+    # 5. 결과 다운로드
+    if not batch.output_file_id:
+        raise RuntimeError("Batch completed but output_file_id is empty")
+    response = await client.files.content(batch.output_file_id)
+    text = response.text if hasattr(response, "text") else response.read().decode("utf-8")
+
+    results: dict[str, list[float]] = {}
+    failed_count = 0
+    for line in text.split("\n"):
+        if not line.strip():
+            continue
+        obj = json.loads(line)
+        cid = obj.get("custom_id")
+        if obj.get("error") or obj.get("response", {}).get("status_code") != 200:
+            failed_count += 1
+            logger.warning("[Batch] item failed cid=%s err=%s", cid, obj.get("error"))
+            continue
+        embedding = obj["response"]["body"]["data"][0]["embedding"]
+        results[cid] = embedding
+
+    logger.info("[Batch] results: ok=%d failed=%d", len(results), failed_count)
+    return results
+
+
+async def process_medicines_batch_api(
+    *,
+    batch_size: int,
+    medicine_ids: list[int] | None,
+    resume_from: int,
+) -> None:
+    """Batch API 모드 — 모든 chunks 한 번에 빌드 + cache miss 만 batch 제출.
+
+    표준 모드 (process_medicines) 와 동일한 chunks 빌드 + cache 흐름이지만,
+    OpenAI Embedding 호출을 한 번의 Batch API submit 으로 통합. 50% 할인 +
+    24h 내 완료 (보통 1-3시간).
+    """
+    api_key = config.OPENAI_API_KEY
+    if not api_key:
+        msg = "OPENAI_API_KEY 미설정 — Batch API 호출 필수"
+        raise SystemExit(msg)
+    client = AsyncOpenAI(api_key=api_key)
+
+    # 1. medicines + chunks 빌드 (cache miss 만 collect)
+    if medicine_ids is not None:
+        meds_query = MedicineInfo.filter(id__in=medicine_ids).order_by("id")
+        total = len(medicine_ids)
+    else:
+        meds_query = MedicineInfo.filter(id__gte=resume_from).order_by("id")
+        total = await MedicineInfo.filter(id__gte=resume_from).count()
+
+    logger.info("[Batch] scope: %d medicines, scanning chunks…", total)
+
+    requests: list[dict[str, Any]] = []
+    pending_rows: list[tuple[int, MedicineChunkSection, int, str, int, list[str]]] = []
+    cache_hits = 0
+    seen_meds = 0
+
+    offset = 0
+    while True:
+        page = await meds_query.offset(offset).limit(batch_size).all()
+        if not page:
+            break
+        for med in page:
+            ingredients = await _load_ingredients_for_medicine(med.id)
+            chunks = _build_chunks_for_medicine(med, ingredients)
+            if not chunks:
+                continue
+            existing = await _load_existing_chunk_hashes(med.id)
+            for sec, idx, content, tok in chunks:
+                if existing.get((sec.value, idx)) == _content_hash(content):
+                    cache_hits += 1
+                    continue
+                custom_id = _custom_id_for(med.id, sec, idx)
+                requests.append({
+                    "custom_id": custom_id,
+                    "method": "POST",
+                    "url": "/v1/embeddings",
+                    "body": {
+                        "model": EMBEDDING_MODEL,
+                        "input": content,
+                        "dimensions": EMBEDDING_DIMENSIONS,
+                    },
+                })
+                pending_rows.append((med.id, sec, idx, content, tok, ingredients))
+        seen_meds += len(page)
+        logger.info(
+            "[Batch] scan: %d/%d cache_hits=%d pending=%d",
+            seen_meds,
+            total,
+            cache_hits,
+            len(requests),
+        )
+        offset += batch_size
+
+    if not requests:
+        logger.info("[Batch] 모든 chunks cache hit — Batch API 호출 skip")
+        return
+
+    # 2. Batch API 제출 + 결과 수신
+    logger.info("[Batch] submitting %d embedding requests (cache_hits=%d)", len(requests), cache_hits)
+    embeddings_by_cid = await _submit_batch_and_wait(client, requests)
+
+    # 3. INSERT — pending_rows 의 custom_id 와 매칭
+    insert_rows: list[tuple[int, MedicineChunkSection, int, str, int, list[float], list[str]]] = []
+    for mid, sec, idx, content, tok, ingredients in pending_rows:
+        cid = _custom_id_for(mid, sec, idx)
+        emb = embeddings_by_cid.get(cid)
+        if emb is None:
+            continue  # batch item failed
+        insert_rows.append((mid, sec, idx, content, tok, emb, ingredients))
+
+    # INSERT 도 batch 단위로 (postgres parameter limit 회피)
+    inserted_total = 0
+    insert_batch = 50
+    for off in range(0, len(insert_rows), insert_batch):
+        sub = insert_rows[off : off + insert_batch]
+        async with in_transaction("default"):
+            inserted_total += await _insert_chunks_batch(sub)
+
+    tokens_total = sum(r[4] for r in pending_rows if _custom_id_for(r[0], r[1], r[2]) in embeddings_by_cid)
+    cost_batch = tokens_total / 1_000_000 * EMBEDDING_PRICE_PER_1M * 0.5
+    cost_std = tokens_total / 1_000_000 * EMBEDDING_PRICE_PER_1M
+    logger.info(
+        "[Batch] DONE inserted=%d cache_hits=%d tokens=%dK cost_batch=$%.2f cost_std=$%.2f",
+        inserted_total,
+        cache_hits,
+        tokens_total // 1000,
+        cost_batch,
+        cost_std,
+    )
+
+
 # ── INSERT (raw SQL, vector pgvector 형식) ──────────────────────────
 def _vector_literal(embedding: list[float]) -> str:
     """Pgvector 의 vector(N) 입력 형식 — '[v1,v2,...]' 문자열."""
@@ -792,6 +994,12 @@ def parse_args() -> argparse.Namespace:
         default=10,
         help="--curated 모드에서 성분당 brand 상한 (default: 10). raw doc 길이 desc 정렬 후 top-N.",
     )
+    parser.add_argument(
+        "--use-batch-api",
+        action="store_true",
+        help="OpenAI Batch API 모드 (50%% 할인, 24h 내 완료). 모든 cache miss chunks 를 "
+        "한 번의 batch 로 제출 + polling. concurrency 옵션은 무시됨.",
+    )
     return parser.parse_args()
 
 
@@ -824,12 +1032,19 @@ async def main_async(args: argparse.Namespace) -> None:
             ids = list(matched)
             logger.info("name-like 매칭 — %d medicines (patterns=%s)", len(ids), patterns)
 
-        await process_medicines(
-            batch_size=args.batch,
-            concurrency=args.concurrency,
-            resume_from=args.resume_from,
-            medicine_ids=ids,
-        )
+        if args.use_batch_api:
+            await process_medicines_batch_api(
+                batch_size=args.batch,
+                medicine_ids=ids,
+                resume_from=args.resume_from,
+            )
+        else:
+            await process_medicines(
+                batch_size=args.batch,
+                concurrency=args.concurrency,
+                resume_from=args.resume_from,
+                medicine_ids=ids,
+            )
     finally:
         await Tortoise.close_connections()
 
