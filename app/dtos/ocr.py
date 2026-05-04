@@ -6,7 +6,6 @@ operations including medicine extraction, draft persistence, and confirmation.
 
 from datetime import date, datetime
 from enum import StrEnum
-
 from pydantic import BaseModel, Field
 
 
@@ -42,6 +41,7 @@ class ExtractedMedicine(BaseModel):
     daily_intake_count: int | None = Field(None, description="1일 복용 횟수 (예: 3)")
     total_intake_days: int | None = Field(None, description="총 복용 일수 (예: 5, daily_intake_count와 다른 값)")
     intake_instruction: str | None = Field(None, description="복용 시점 지시사항 (예: 식후 30분, 취침 전)")
+
     # =========================================================================
     # [AI OCR 파이프라인 트래킹 추가]
     # =========================================================================
