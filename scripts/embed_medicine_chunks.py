@@ -454,7 +454,7 @@ async def _load_curated_medicine_ids(top_n: int) -> list[int]:
     같은 ingredient 안에서는 doc_total_len DESC 로 ranking, top-N 만.
     """
     conn = Tortoise.get_connection("default")
-    sql = """
+    sql = r"""
         WITH filtered AS (
             SELECT mi.id,
                    ing.mtral_name AS ingredient,
@@ -471,7 +471,11 @@ async def _load_curated_medicine_ids(top_n: int) -> list[int]:
               AND mi.medicine_name NOT ILIKE '%수의%'
               AND mi.medicine_name NOT ILIKE '%동물%'
               AND mi.medicine_name NOT ILIKE '%조영%'
-              AND mi.medicine_name !~ '주$'
+              -- 주사제 제외 — 다음 패턴 모두 잡음:
+              --   "...주"        ('주' 끝)
+              --   "...주(...)"   ('프리브로펜주(이부프로펜)' 같이 괄호 성분 표기)
+              --   "...주 ..."    ('주' 뒤 공백 — 드물지만 안전)
+              AND mi.medicine_name !~ '주(\([^)]*\))?\s*$'
               AND LENGTH(COALESCE(mi.ee_doc_data,'') ||
                          COALESCE(mi.ud_doc_data,'') ||
                          COALESCE(mi.nb_doc_data,'')) >= 1000
