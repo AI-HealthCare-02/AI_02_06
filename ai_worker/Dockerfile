@@ -20,10 +20,6 @@ RUN uv sync --group ai --group app --group dev --frozen
 COPY ai_worker/ ./ai_worker/
 COPY app/ ./app/
 
-# ko-sroberta 모델 pre-download → 첫 기동 시 네트워크 의존 제거
-ENV HF_HOME=/app/.cache/huggingface
-RUN uv run --no-sync python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('jhgan/ko-sroberta-multitask')"
-
 RUN chown -R appuser:appgroup /app
 USER appuser
 

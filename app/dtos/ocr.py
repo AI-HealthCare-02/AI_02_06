@@ -49,6 +49,7 @@ class ExtractedMedicine(BaseModel):
     is_llm_corrected: bool = Field(False, description="LLM을 통해 교정되었는지 여부")
     match_score: float | None = Field(None, description="퍼지/LLM 신뢰도 점수 (0.0~1.0)")
 
+
 class OcrExtractResponse(BaseModel):
     """OCR extraction enqueue response — 즉시 200 응답.
 

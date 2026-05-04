@@ -26,9 +26,11 @@ from typing import TYPE_CHECKING, Any
 from app.models.drug_recall import DrugRecall
 from app.models.medicine_info import MedicineInfo
 from app.utils.company_name_normalizer import normalize_company_name
+from app.utils.product_name_normalizer import normalize_product_name
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Iterable
+    from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +132,105 @@ class DrugRecallRepository:
         return await DrugRecall.filter(created_at__gt=since).all()
 
     # ── F3 / cron 알림 매칭 (item_seq 1순위 → product_name ILIKE 2순위) ──
+
+    # ── A.5.1: 단건 등록 매칭 (item_seq 우선, product_name 정규화 fallback) ──
+    # 흐름: item_seq 존재 -> 그 대로 매칭
+    #       -> 없으면 product_name 정규화 후 후보 행들과 메모리 비교
+    # 의약외품(is_non_drug)·병원전용(is_hospital_only) 행은 항상 제외.
+
+    async def find_by_item_seq_or_name(
+        self,
+        item_seq: str | None = None,
+        product_name: str | None = None,
+    ) -> list[DrugRecall]:
+        """Match a single medication against ``drug_recalls`` for registration time.
+
+        Args:
+            item_seq: Exact ``item_seq`` to match. When provided this takes
+                precedence and ``product_name`` is ignored.
+            product_name: Fallback product name. Normalized via
+                ``normalize_product_name`` and compared in memory against
+                each candidate row's normalized ``product_name``.
+
+        Returns:
+            All matching rows (multiple reasons for the same product all
+            surface). Empty list when nothing matches or both arguments are
+            falsy. ``is_non_drug=True`` / ``is_hospital_only=True`` rows are
+            excluded so consumer-medication registration never surfaces
+            non-drug or hospital-only items.
+        """
+        if not item_seq and not product_name:
+            return []
+
+        if item_seq:
+            return await DrugRecall.filter(
+                item_seq=item_seq,
+                is_non_drug=False,
+                is_hospital_only=False,
+            ).all()
+
+        norm_input = normalize_product_name(product_name)
+        if not norm_input:
+            return []
+
+        candidates = await DrugRecall.filter(
+            is_non_drug=False,
+            is_hospital_only=False,
+        ).all()
+        return [c for c in candidates if normalize_product_name(c.product_name) == norm_input]
+
+    # ── A.5.4: 마이페이지 batch lookup (단일 쿼리 + 메모리 그룹핑) ──
+    # 흐름: medications 의 medicine_name 셋 정규화
+    #       -> DrugRecall 후보 SELECT 1회 (사전 필터 포함)
+    #       -> 정규화 비교로 medication_id 별 그룹핑
+
+    async def find_recalls_for_medications(
+        self,
+        medications: list[Any],
+    ) -> dict[UUID, list[DrugRecall]]:
+        """Return ``{medication_id: [matching DrugRecall, ...]}`` in 1 query.
+
+        Args:
+            medications: ORM ``Medication`` instances. Each must expose
+                ``id`` and ``medicine_name``.
+
+        Returns:
+            Dict keyed by ``medication.id``. Medications without a match
+            are *omitted* from the dict — callers should treat absence as
+            "no recall" (the service layer normalizes via ``dict.get``).
+            ``is_non_drug`` / ``is_hospital_only`` rows are excluded as in
+            ``find_by_item_seq_or_name``.
+        """
+        if not medications:
+            return {}
+
+        # 정규화된 medicine_name 별로 medication 들을 묶어 후보 매칭 시 O(1) lookup.
+        name_to_meds: dict[str, list[Any]] = {}
+        for med in medications:
+            raw_name = getattr(med, "medicine_name", None)
+            if not raw_name:
+                continue
+            normalized = normalize_product_name(raw_name)
+            if not normalized:
+                continue
+            name_to_meds.setdefault(normalized, []).append(med)
+
+        if not name_to_meds:
+            return {}
+
+        candidates = await DrugRecall.filter(
+            is_non_drug=False,
+            is_hospital_only=False,
+        ).all()
+
+        grouped: dict[UUID, list[DrugRecall]] = {}
+        for recall in candidates:
+            recall_norm = normalize_product_name(getattr(recall, "product_name", None))
+            if not recall_norm or recall_norm not in name_to_meds:
+                continue
+            for med in name_to_meds[recall_norm]:
+                grouped.setdefault(med.id, []).append(recall)
+        return grouped
 
     async def find_match(self, medication: Any) -> list[DrugRecall]:
         """Match a single medication against the recall table.

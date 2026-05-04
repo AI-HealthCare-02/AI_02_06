@@ -1,29 +1,13 @@
 """RAG RQ jobs — FastAPI 가 ``ai`` 큐로 enqueue 하는 진입점.
 
-옵션 C 이후의 두 RQ task (``rewrite_query_job`` 폐기됨):
+PR-D 이후 1개의 RQ task 만 노출 (RAG 재설계 후 retrieve_medicine_chunks 폐기):
 
-- ``embed_text_job`` → ``embedding_provider.encode_text``
 - ``generate_chat_response_job`` → ``response_generator.generate_response``
 
-각 job 함수 안에서 implementation 모듈을 lazy import 하는 이유:
-worker process 의 cold start latency (sentence-transformers / torch /
-transformers 같은 무거운 의존성 로드) 를 첫 task 시점까지 미루기 위함.
-CLAUDE.md §8.5 의 lazy import 금지 정책 예외 (성능 critical path).
+이전 ``embed_text_job`` (ko-sroberta) 폐기 — query 측 임베딩은 FastAPI 의
+``app.services.rag.openai_embedding`` 이 직접 OpenAI API 호출.
+이전 진단 로그 (``[LLM-Diag] INPUT/OUTPUT``) 제거 — PR-D cutover 완료.
 """
-
-
-async def embed_text_job(text: str) -> list[float]:
-    """[RQ Task] 쿼리 임베딩 (768차원 L2-정규화 벡터).
-
-    Args:
-        text: 임베딩 대상 문자열.
-
-    Returns:
-        768차원 float 리스트.
-    """
-    from ai_worker.domains.rag.embedding_provider import encode_text
-
-    return await encode_text(text)
 
 
 async def generate_chat_response_job(
@@ -34,7 +18,8 @@ async def generate_chat_response_job(
 
     Args:
         messages: 대화 턴 리스트 (마지막은 사용자 질문).
-        system_prompt: 검색 컨텍스트가 삽입된 system prompt (옵션).
+        system_prompt: persona + medical_context + 용어 매핑 + RAG context 가
+            합쳐진 system prompt.
 
     Returns:
         ``{"answer", "token_usage"}`` 형태 dict.

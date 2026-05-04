@@ -4,24 +4,42 @@ This module provides business logic for medication management operations
 including creation, updates, and ownership verification.
 """
 
+from dataclasses import dataclass
 import logging
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from tortoise.transactions import in_transaction
 
-from app.dtos.drug_info import DrugInfoResponse, PrecautionSection
+from app.dtos.drug_info import DrugInfoResponse, DrugInteraction, PrecautionSection
 from app.dtos.medication import MedicationBulkDeleteResponse, MedicationCreate, MedicationUpdate, PrescriptionDateItem
+from app.dtos.recall import RecallAlertDTO, RecallStatusDTO
 from app.models.medication import Medication
 from app.models.prescription_group import PrescriptionGroupSource
+from app.repositories.drug_recall_repository import DrugRecallRepository
 from app.repositories.medication_repository import MedicationRepository
 from app.repositories.medicine_info_repository import MedicineInfoRepository
 from app.repositories.prescription_group_repository import PrescriptionGroupRepository
 from app.repositories.profile_repository import ProfileRepository
 from app.services.lifestyle_guide_service import LifestyleGuideService
+from app.services.recall_alert_builder import build_alert, build_status
 from app.services.recall_notification_service import check_and_alert_on_medication_save
 
 logger = logging.getLogger(__name__)
+
+
+# ── 마이페이지 batch 응답 wrapper (§A.6.1) ────────────────────────────
+# medication 모델 자체엔 recall_status 컬럼이 없고 응답 시점에만 필요한
+# 메타 정보라 dataclass 로 묶어 전달한다. router 가 unpack 후 응답 스키마
+# 에 반영.
+
+
+@dataclass
+class MedicationWithRecallStatus:
+    """Service-level pair of (medication row, recall_status payload)."""
+
+    medication: Medication
+    recall_status: RecallStatusDTO | None
 
 
 class MedicationService:
@@ -115,6 +133,55 @@ class MedicationService:
         """
         await self._verify_profile_ownership(profile_id, account_id)
         return await self.repository.get_all_by_profile(profile_id)
+
+    # ── §A.2.2: 마이페이지 batch lookup (recall_status 첨부) ────────────
+    # 흐름: 소유 확인 -> medication 리스트 조회
+    #       -> drug_recall_repo.find_recalls_for_medications (단일 쿼리)
+    #       -> medication 마다 build_status 로 라벨 페이로드 생성
+    # N+1 회피: repository 쿼리 1회 + 메모리 그룹핑.
+
+    async def list_medications_with_recall_status_with_owner_check(
+        self,
+        profile_id: UUID,
+        account_id: UUID,
+    ) -> list[MedicationWithRecallStatus]:
+        """List a profile's medications, each paired with its recall_status.
+
+        Args:
+            profile_id: Profile UUID.
+            account_id: Account UUID for ownership check.
+
+        Returns:
+            list[MedicationWithRecallStatus]: One entry per medication row.
+                ``recall_status`` is ``None`` when no recall matches.
+        """
+        await self._verify_profile_ownership(profile_id, account_id)
+        medications = await self.repository.get_all_by_profile(profile_id)
+        if not medications:
+            return []
+
+        drug_recall_repo = DrugRecallRepository()
+        grouping = await drug_recall_repo.find_recalls_for_medications(medications)
+        return [
+            MedicationWithRecallStatus(
+                medication=med,
+                recall_status=build_status(grouping.get(med.id, [])),
+            )
+            for med in medications
+        ]
+
+    async def _build_recall_alert_for(self, medication: Medication) -> RecallAlertDTO | None:
+        """등록 시점 모달 페이로드 빌더 — find_by_item_seq_or_name → build_alert.
+
+        Returns:
+            ``RecallAlertDTO`` 또는 매칭 없을 시 ``None``.
+        """
+        drug_recall_repo = DrugRecallRepository()
+        rows = await drug_recall_repo.find_by_item_seq_or_name(
+            item_seq=getattr(medication, "item_seq", None),
+            product_name=getattr(medication, "medicine_name", None),
+        )
+        return build_alert(rows)
 
     async def get_active_medications(self, profile_id: UUID) -> list[Medication]:
         """Get active medications for a profile.
@@ -244,6 +311,21 @@ class MedicationService:
             await check_and_alert_on_medication_save(medication)
         except Exception:
             logger.exception("[F3] recall hook failed for medication=%s", getattr(medication, "id", "?"))
+
+        # ── §A.2.1: 등록 직후 회수 모달 페이로드 첨부 ──────────────────
+        # 흐름: drug_recall_repo.find_by_item_seq_or_name -> build_alert
+        #       -> medication 객체에 recall_alert 속성 attach
+        # MedicationResponse 의 from_attributes=True 가 자동 매핑한다.
+        # ORM 미초기화 같은 환경 문제로 매칭이 실패해도 medication 등록
+        # 자체는 망치지 않도록 격리한다 (recall_alert=None 으로 fallback).
+        try:
+            medication.recall_alert = await self._build_recall_alert_for(medication)
+        except Exception:
+            logger.exception(
+                "[recall] alert builder failed for medication=%s",
+                getattr(medication, "id", "?"),
+            )
+            medication.recall_alert = None
 
         return medication
 
@@ -443,10 +525,13 @@ class MedicationService:
         return await self._get_drug_info(medication.medicine_name)
 
     async def _get_drug_info(self, medicine_name: str) -> DrugInfoResponse:
-        """MedicineInfo 테이블에서 약품 정보 조회 — LLM 호출 없음.
+        """MedicineInfo + medicine_chunk 에서 약품 정보 조회 — LLM 호출 없음.
 
-        흐름: 정확 일치 (``get_by_name``) → 미일치 시 ILIKE fallback (``search_by_name``)
-              → 둘 다 miss 면 빈 응답. NULL 컬럼도 빈 list 반환.
+        흐름:
+          1) 정확 일치 (``get_by_name``) → 미일치 시 ILIKE fallback
+          2) MedicineInfo 의 precautions/side_effects/dosage 추출
+          3) medicine_chunk 의 ``section='drug_interaction'`` chunks 를
+             DrugInteraction list 로 변환 (각 chunk = 1 DrugInteraction)
 
         Args:
             medicine_name: 매칭할 약품명.
@@ -463,12 +548,14 @@ class MedicationService:
         if info is None:
             return DrugInfoResponse(medicine_name=medicine_name)
 
+        interactions = await _load_drug_interactions(info.id)
+
         return DrugInfoResponse(
             medicine_name=info.medicine_name,
             warnings=_to_precaution_sections(info.precautions),
             side_effects=info.side_effects or [],
             dosage=info.dosage or "",
-            interactions=[],
+            interactions=interactions,
         )
 
 
@@ -480,3 +567,51 @@ def _to_precaution_sections(precautions: dict | None) -> list[PrecautionSection]
     if not precautions or not isinstance(precautions, dict):
         return []
     return [PrecautionSection(category=cat, items=list(items or [])) for cat, items in precautions.items() if items]
+
+
+# ── medicine_chunk drug_interaction → DrugInteraction list ─────────
+# 흐름: medicine_info_id 매칭 + section='drug_interaction' chunks 조회 (chunk_index 순)
+#       -> 각 chunk 의 content 헤더 ([약: ...] [성분: ...] [약물 상호작용]) 제거
+#       -> 첫 줄 (또는 첫 번호 list) 을 drug 라벨, 나머지를 description 으로
+async def _load_drug_interactions(medicine_info_id: int) -> list[DrugInteraction]:
+    """medicine_chunk 의 drug_interaction section chunks 를 DrugInteraction list 로.
+
+    Args:
+        medicine_info_id: 부모 medicine_info.id.
+
+    Returns:
+        list[DrugInteraction] - chunk_index 오름차순. chunk 0건이면 빈 list.
+    """
+    from app.models.medicine_chunk import MedicineChunk, MedicineChunkSection
+
+    chunks = (
+        await MedicineChunk
+        .filter(
+            medicine_info_id=medicine_info_id,
+            section=MedicineChunkSection.DRUG_INTERACTION.value,
+        )
+        .order_by("chunk_index")
+        .all()
+    )
+    return [DrugInteraction(**_chunk_to_interaction(c.content, c.chunk_index)) for c in chunks if c.content]
+
+
+def _chunk_to_interaction(content: str, chunk_index: int) -> dict[str, str]:
+    r"""Chunk content 헤더 제거 + drug/description 분리.
+
+    헤더 패턴: ``[약: name] [성분: ...] [약물 상호작용]\n<제목>\n<본문>``
+    헤더가 있는 첫 줄 ``[`` 시작은 모두 제거, 그 다음 첫 비공백 줄을 drug 라벨,
+    나머지를 description 으로. 헤더가 없으면 chunk_index 기반 라벨.
+    """
+    raw_lines = [line for line in (content or "").split("\n") if line.strip()]
+    body_lines = [
+        line for line in raw_lines if not line.lstrip().startswith("[약:") and not line.lstrip().startswith("[성분:")
+    ]
+    if not body_lines:
+        return {"drug": f"상호작용 #{chunk_index + 1}", "description": content.strip()[:500]}
+    drug_label = body_lines[0].strip()
+    description = "\n".join(body_lines[1:]).strip() or drug_label
+    if len(drug_label) > 60:
+        # 첫 줄이 너무 길면 chunk_index 라벨로 fallback (가독성)
+        return {"drug": f"상호작용 #{chunk_index + 1}", "description": "\n".join(body_lines).strip()}
+    return {"drug": drug_label, "description": description}

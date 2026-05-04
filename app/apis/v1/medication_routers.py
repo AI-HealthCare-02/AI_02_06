@@ -96,7 +96,16 @@ async def list_medications(
         elif inactive_only:
             medications = await service.get_inactive_medications_with_owner_check(profile_id, current_account.id)
         else:
-            medications = await service.get_medications_by_profile_with_owner_check(profile_id, current_account.id)
+            # ── §A.2.2: 전체 medication 조회 시 recall_status 첨부 ──
+            # 흐름: service.list_medications_with_recall_status_* (batch lookup)
+            #       -> 각 행을 MedicationResponse + recall_status 로 직렬화
+            paired = await service.list_medications_with_recall_status_with_owner_check(profile_id, current_account.id)
+            responses: list[MedicationResponse] = []
+            for entry in paired:
+                response = MedicationResponse.model_validate(entry.medication)
+                response.recall_status = entry.recall_status
+                responses.append(response)
+            return responses
     else:
         # Retrieve medications for all profiles of the account
         medications = await service.get_medications_by_account(current_account.id)

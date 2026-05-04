@@ -24,6 +24,10 @@ _LLM_MODEL = "gpt-4o"
 # 일관성 우선 — 같은 처방전+건강정보 조합엔 거의 동일 출력.
 _LLM_TEMPERATURE = 0.0
 
+# LLM 응답이 recommended_challenges len != 15 인 경우 자동 재시도 횟수.
+# Pydantic schema 가 min/max=15 강제 -> ValidationError 시 본 retry 가 동작.
+_MAX_GENERATE_RETRIES = 3
+
 
 def _seed_for(medication_dicts: list[dict], health_profile: dict | None) -> int:
     """약물 + 건강정보 조합 기반 OpenAI seed 계산.
@@ -75,9 +79,33 @@ async def generate_guide_payload(
         ValueError: LLM call or JSON parse failure (caller decides terminal status).
     """
     prompt = build_guide_prompt(medication_dicts, health_profile)
-    seed = _seed_for(medication_dicts, health_profile)
-    raw_json = await _call_llm(prompt, client, seed=seed)
-    return _parse_response(raw_json)
+    base_seed = _seed_for(medication_dicts, health_profile)
+
+    # ── retry loop — LLM 이 recommended_challenges 15개 룰을 위반하면 (5개만
+    #    또는 12개 등) Pydantic schema (min/max=15) 가 ValidationError 발생.
+    #    seed 를 +1 씩 변동해 다른 sample 유도. 최대 _MAX_GENERATE_RETRIES 회.
+    last_error: ValueError | None = None
+    for attempt in range(_MAX_GENERATE_RETRIES):
+        seed = (base_seed + attempt) & 0x7FFFFFFF
+        raw_json = await _call_llm(prompt, client, seed=seed)
+        try:
+            parsed = _parse_response(raw_json)
+        except ValueError as exc:
+            last_error = exc
+            logger.warning(
+                "[GUIDE] attempt %d/%d 실패 — %s. 재시도 (seed=%d).",
+                attempt + 1,
+                _MAX_GENERATE_RETRIES,
+                exc,
+                seed,
+            )
+            continue
+        if attempt > 0:
+            logger.info("[GUIDE] retry 성공 attempt=%d/%d", attempt + 1, _MAX_GENERATE_RETRIES)
+        return parsed
+    # 모든 재시도 실패 — 마지막 에러를 그대로 raise (caller 가 fail 처리).
+    assert last_error is not None
+    raise last_error
 
 
 async def _call_llm(prompt: str, client: AsyncOpenAI, *, seed: int) -> str:

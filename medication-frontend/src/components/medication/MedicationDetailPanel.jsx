@@ -6,12 +6,79 @@
 
 import { useEffect, useState } from 'react'
 
-import { AlertCircle, AlertTriangle, Ban, Calendar, Clock, Pill, Trash2, Utensils } from 'lucide-react'
+import { AlertCircle, AlertTriangle, Ban, Calendar, ChevronDown, ChevronUp, Clock, Pill, Trash2, Utensils } from 'lucide-react'
 import toast from 'react-hot-toast'
+import Markdown from 'react-markdown'
 
 import api from '@/lib/api'
 import { useMedication } from '@/contexts/MedicationContext'
 import TimeSlotPicker from '@/components/medication/TimeSlotPicker'
+
+// react-markdown components — ChatModal 과 동일 패턴 (Tailwind Typography 없이
+// 가독성 확보). 약품 상세 panel 안에서 BE 응답의 plain text 또는 ** **, - 을
+// 자연스럽게 렌더.
+const MD_COMPONENTS = {
+  p: ({ children }) => <p className="text-sm text-gray-600 leading-relaxed mb-2 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="list-disc pl-5 mb-2 last:mb-0 space-y-1">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 last:mb-0 space-y-1">{children}</ol>,
+  li: ({ children }) => <li className="text-sm text-gray-600 leading-relaxed">{children}</li>,
+  strong: ({ children }) => <strong className="font-semibold text-gray-900">{children}</strong>,
+  em: ({ children }) => <em className="italic">{children}</em>,
+  h1: ({ children }) => <h1 className="font-bold text-sm mt-2 mb-1 first:mt-0 text-gray-900">{children}</h1>,
+  h2: ({ children }) => <h2 className="font-bold text-sm mt-2 mb-1 first:mt-0 text-gray-900">{children}</h2>,
+  h3: ({ children }) => <h3 className="font-semibold text-xs mt-1.5 mb-1 first:mt-0 text-gray-700">{children}</h3>,
+  a: ({ href, children }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="underline text-blue-600 hover:text-blue-800 break-all"
+    >
+      {children}
+    </a>
+  ),
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-4 border-gray-300 pl-3 my-2 text-gray-600 text-sm">{children}</blockquote>
+  ),
+}
+
+// ── Collapsible — 접기/펼치기 텍스트. 긴 항목 (주의사항/상호작용 등) 의 가독성
+//    개선을 위해 cap 자 이상이면 자동 collapsed 로 시작.
+const COLLAPSE_CHAR_THRESHOLD = 180
+
+function CollapsibleText({ children, initialCollapsed = true, label = '더 보기', collapseLabel = '접기' }) {
+  const [collapsed, setCollapsed] = useState(initialCollapsed)
+  const text = typeof children === 'string' ? children : String(children ?? '')
+  const needsCollapse = text.length > COLLAPSE_CHAR_THRESHOLD
+  if (!needsCollapse) {
+    return <Markdown components={MD_COMPONENTS}>{text}</Markdown>
+  }
+  return (
+    <div>
+      <div className={collapsed ? 'overflow-hidden max-h-24 relative' : ''}>
+        <Markdown components={MD_COMPONENTS}>{text}</Markdown>
+        {collapsed && (
+          <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-white to-transparent pointer-events-none" />
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className="mt-1 text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+      >
+        {collapsed ? (
+          <>
+            {label} <ChevronDown size={14} />
+          </>
+        ) : (
+          <>
+            {collapseLabel} <ChevronUp size={14} />
+          </>
+        )}
+      </button>
+    </div>
+  )
+}
 
 function DrugInfoSkeleton() {
   return (
@@ -64,7 +131,7 @@ function DeleteConfirmModal({ medicineName, onConfirm, onCancel, isDeleting }) {
  */
 export default function MedicationDetailPanel({ medicationId, onDeleted }) {
   const id = medicationId
-  const { medications, deleteMedication, deactivateMedication, getDrugInfo } = useMedication()
+  const { medications, deleteMedication, deactivateMedication, getDrugInfo, refetchMedications } = useMedication()
   const [isLoading, setIsLoading] = useState(true)
   const [isDrugInfoLoading, setIsDrugInfoLoading] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -121,6 +188,7 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
     setIsDeleting(true)
     try {
       await deleteMedication(id)
+      await refetchMedications() // 홈 화면 등에서 즉시 반영 위해 Context 재조회
       onDeleted?.()
     } catch (err) {
       console.error(err)
@@ -305,9 +373,7 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
                   <p className="text-xs font-black text-blue-600 mb-2 uppercase tracking-wide">
                     식약처 표준 용법
                   </p>
-                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">
-                    {drugInfo.dosage}
-                  </p>
+                  <CollapsibleText>{drugInfo.dosage}</CollapsibleText>
                 </div>
               )}
             </div>
@@ -327,7 +393,9 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
                       {section.items.map((item, i) => (
                         <div key={i} className="flex gap-3 p-4 bg-yellow-50 rounded-xl">
                           <AlertTriangle size={16} className="text-yellow-500 shrink-0 mt-0.5" />
-                          <p className="text-sm text-gray-600 leading-relaxed">{item}</p>
+                          <div className="min-w-0 flex-1">
+                            <CollapsibleText>{item}</CollapsibleText>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -357,7 +425,7 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
                       <AlertCircle size={14} />
                       이런 증상이 나타나면
                     </p>
-                    <p className="text-gray-500 text-xs leading-relaxed">{drugInfo.severe_reaction_advice}</p>
+                    <CollapsibleText>{drugInfo.severe_reaction_advice}</CollapsibleText>
                   </div>
                 </>
               ) : (
@@ -374,9 +442,9 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
                 drugInfo.interactions.map((item, i) => (
                   <div key={i} className="flex gap-3 p-4 bg-orange-50 rounded-xl">
                     <Ban size={16} className="text-orange-500 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-sm font-bold text-gray-800">{item.drug}</p>
-                      <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{item.description}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-gray-800 mb-1">{item.drug}</p>
+                      <CollapsibleText>{item.description}</CollapsibleText>
                     </div>
                   </div>
                 ))

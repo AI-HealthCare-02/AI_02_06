@@ -122,6 +122,90 @@ class MedicineInfoRepository:
             for row in rows
         ]
 
+    # ── 자동완성용 검색 (2-단계 fast path) ───────────────────────────
+    # 흐름: 1단계 prefix only -> limit 미달 시 2단계 trigram fallback -> 합쳐 반환
+    # 핵심: 대부분의 자동완성 typing 케이스는 prefix 만으로 종결 (~1ms).
+    #       오타 (예: "다이레놀") 는 trigram fallback 으로 보완 (~5-10ms).
+    async def autocomplete_by_name(
+        self,
+        query: str,
+        limit: int = 8,
+        threshold: float = 0.2,
+    ) -> list[dict]:
+        """약품명 자동완성 — prefix 1순위, trigram fallback 2순위 (2-단계 fast path).
+
+        OCR 결과 인라인 편집 / "+ 약 추가" 모달의 실시간 자동완성. 단일 OR 쿼리로
+        합치는 대신 2-단계로 나눠 일반 typing 케이스 (prefix 일치) 의 비용을 최소화.
+
+        성능 가이드:
+          - 1단계 (prefix): ``medicine_name ILIKE q || '%'`` — GIN trgm 인덱스 활용,
+            308K rows 에서 ~1ms.
+          - 2단계 (trigram): 1단계 결과가 ``limit`` 미만일 때만 실행. ``medicine_name % q``
+            연산자 (default ``pg_trgm.similarity_threshold`` 0.3 보다 완화된 0.2 적용)
+            로 인덱스 적중. ~5-10ms.
+
+        Args:
+            query: 사용자 입력 (공백 trim 가정, 호출 측에서 정규화).
+            limit: 최대 결과 수 (default 8 — dropdown 1 화면 수용).
+            threshold: trigram similarity 최소값 (자동완성용 완화 default 0.2).
+
+        Returns:
+            list[dict]: ``[{id, medicine_name, score}, ...]`` — prefix 결과(score=1.0)
+                먼저, trigram 결과(score<1.0) 가 score desc + name asc 로 뒤따른다.
+        """
+        conn = Tortoise.get_connection("default")
+
+        # ── 1단계: prefix only — 자동완성 hot path ──
+        # SELECT 절에 similarity 함수 호출이 없어 LIMIT 전까지 비용 최소화.
+        # score 1.0 은 placeholder (prefix 일치는 항상 trigram 보다 우선).
+        _, prefix_rows = await conn.execute_query(
+            "SELECT id, medicine_name "
+            "FROM medicine_info "
+            "WHERE medicine_name ILIKE $1 || '%' "
+            "ORDER BY medicine_name ASC "
+            "LIMIT $2",
+            [query, limit],
+        )
+        results = [{"id": row["id"], "medicine_name": row["medicine_name"], "score": 1.0} for row in prefix_rows]
+        if len(results) >= limit:
+            return results
+
+        # ── 2단계: trigram fallback — prefix 부족 시에만 ──
+        # `%` 연산자가 인덱스를 가장 잘 탄다. similarity 함수는 SELECT 절에서만
+        # 호출하여 ORDER BY 정렬 비용을 최소화. 1단계 hit 한 id 는 NOT IN 으로 중복 제거.
+        remaining = limit - len(results)
+        prefix_ids = [row["id"] for row in prefix_rows]
+        if prefix_ids:
+            _, trigram_rows = await conn.execute_query(
+                "SELECT id, medicine_name, similarity(medicine_name, $1) AS score "
+                "FROM medicine_info "
+                "WHERE medicine_name % $1 "
+                "  AND similarity(medicine_name, $1) >= $2 "
+                "  AND id <> ALL($3::int[]) "
+                "ORDER BY score DESC, medicine_name ASC "
+                "LIMIT $4",
+                [query, threshold, prefix_ids, remaining],
+            )
+        else:
+            _, trigram_rows = await conn.execute_query(
+                "SELECT id, medicine_name, similarity(medicine_name, $1) AS score "
+                "FROM medicine_info "
+                "WHERE medicine_name % $1 "
+                "  AND similarity(medicine_name, $1) >= $2 "
+                "ORDER BY score DESC, medicine_name ASC "
+                "LIMIT $3",
+                [query, threshold, remaining],
+            )
+        results.extend(
+            {
+                "id": row["id"],
+                "medicine_name": row["medicine_name"],
+                "score": float(row["score"]),
+            }
+            for row in trigram_rows
+        )
+        return results
+
     async def ensure_pg_trgm(self) -> None:
         """Ensure pg_trgm extension is available in the database.
 

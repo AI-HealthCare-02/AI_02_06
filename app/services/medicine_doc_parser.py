@@ -15,6 +15,7 @@ bad input returns an empty result instead of raising.
 """
 
 from dataclasses import dataclass
+import html
 import logging
 import re
 
@@ -23,6 +24,36 @@ import defusedxml.ElementTree as ET  # noqa: N817 — stdlib ET 와 동일한 al
 from app.models.medicine_chunk import MedicineChunkSection
 
 logger = logging.getLogger(__name__)
+
+
+# ── PARAGRAPH 본문 HTML 정제 ────────────────────────────────────────
+# 식약처 의약품 raw doc 의 PARAGRAPH 안에 종종 HTML 표 (`<table>`, `<tr>`,
+# `<td>`, `<p>` 등) + entity (`&gt;`, `&#x2022;`, `&amp;`) 가 그대로 들어
+# 있다. 임베딩 입력에 들어가면 토큰 낭비 + cosine 노이즈 → 정제 필수.
+#
+# 정제 흐름:
+#   1) html.unescape — &gt; &lt; &amp; &nbsp; &#x2022; 등 decode
+#   2) HTML 태그 strip — `<td style="...">` 등 모든 태그 제거
+#   3) 다중 공백 정리 — `\s+` → 단일 공백 (줄바꿈은 보존)
+_HTML_TAG_RE = re.compile(r"<[^>]+>", re.UNICODE)
+_MULTI_WS_RE = re.compile(r"[ \t]+", re.UNICODE)
+
+
+def _clean_paragraph_text(text: str) -> str:
+    """PARAGRAPH 본문에서 HTML 태그·entity 제거 + 공백 정리.
+
+    Args:
+        text: PARAGRAPH 의 raw text (CDATA 안에 HTML 포함 가능).
+
+    Returns:
+        정제된 평문. 빈 입력은 그대로 반환.
+    """
+    if not text:
+        return text
+    decoded = html.unescape(text)
+    stripped = _HTML_TAG_RE.sub(" ", decoded)
+    lines = [_MULTI_WS_RE.sub(" ", line).strip() for line in stripped.split("\n")]
+    return "\n".join(line for line in lines if line)
 
 
 @dataclass(frozen=True)
@@ -106,8 +137,8 @@ def parse_doc_articles(xml: str | None) -> list[Article]:
 
     articles: list[Article] = []
     for article_el in root.iter("ARTICLE"):
-        title = (article_el.get("title") or "").strip()
-        paragraphs = [(p.text or "").strip() for p in article_el.iter("PARAGRAPH") if p.text]
+        title = _clean_paragraph_text((article_el.get("title") or "").strip())
+        paragraphs = [_clean_paragraph_text((p.text or "").strip()) for p in article_el.iter("PARAGRAPH") if p.text]
         body = "\n".join(p for p in paragraphs if p)
         articles.append(Article(title=title, body=body))
 

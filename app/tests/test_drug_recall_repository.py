@@ -348,3 +348,212 @@ class TestFindMatch:
 
         assert result == []
         dr_filter.assert_not_called()
+
+
+# ── A.5.1: find_by_item_seq_or_name (단건 등록 매칭) ──────────────────
+
+
+class TestFindByItemSeqOrName:
+    """A.5.1 — 단건 등록 매칭 (item_seq 우선, product_name 정규화 fallback).
+
+    is_non_drug=True / is_hospital_only=True 행은 사전 필터에서 제외되어
+    일반 사용자 매칭 결과에 포함되지 않는다.
+    """
+
+    @pytest.mark.asyncio
+    async def test_match_by_exact_item_seq_returns_seed_section1_row(self, repo: Any) -> None:
+        """A.5.1 #1 — item_seq=202504001 → 시드 §1 NDMA 1건."""
+        recall = MagicMock(item_seq="202504001", product_name="데모라니티딘정150밀리그램", sale_stop_yn="Y")
+
+        with patch("app.repositories.drug_recall_repository.DrugRecall.filter") as m:
+            qs = MagicMock()
+            qs.all = AsyncMock(return_value=[recall])
+            m.return_value = qs
+            result = await repo.find_by_item_seq_or_name(item_seq="202504001")
+
+        assert len(result) == 1
+        assert result[0].item_seq == "202504001"
+        kwargs = m.call_args.kwargs
+        assert kwargs.get("item_seq") == "202504001"
+        # 일반 사용자 매칭에서 의약외품/병원전용은 항상 제외된다.
+        assert kwargs.get("is_non_drug") is False
+        assert kwargs.get("is_hospital_only") is False
+
+    @pytest.mark.asyncio
+    async def test_match_by_exact_product_name_returns_seed_section2_row(self, repo: Any) -> None:
+        """A.5.1 #2 — product_name=테스트솔정4밀리그램(메틸프레드니솔론) → §2 첫 행 1건."""
+        recall = MagicMock(
+            item_seq="202504003",
+            product_name="테스트솔정4밀리그램(메틸프레드니솔론)",
+            sale_stop_yn="Y",
+        )
+
+        with patch("app.repositories.drug_recall_repository.DrugRecall.filter") as m:
+            qs = MagicMock()
+            qs.all = AsyncMock(return_value=[recall])
+            m.return_value = qs
+            result = await repo.find_by_item_seq_or_name(product_name="테스트솔정4밀리그램(메틸프레드니솔론)")
+
+        assert len(result) == 1
+        assert result[0].item_seq == "202504003"
+
+    @pytest.mark.asyncio
+    async def test_returns_all_rows_for_same_item_seq_composite_unique(self, repo: Any) -> None:
+        """A.5.1 #3 — item_seq=202504018 → §8 동일 ITEM_SEQ 2 사유 모두 반환."""
+        rows = [
+            MagicMock(item_seq="202504018", recall_reason="포장재 불량(코팅 벗겨짐)"),
+            MagicMock(item_seq="202504018", recall_reason="안정성시험 일부항목(성상)"),
+        ]
+
+        with patch("app.repositories.drug_recall_repository.DrugRecall.filter") as m:
+            qs = MagicMock()
+            qs.all = AsyncMock(return_value=rows)
+            m.return_value = qs
+            result = await repo.find_by_item_seq_or_name(item_seq="202504018")
+
+        assert len(result) == 2
+        reasons = {r.recall_reason for r in result}
+        assert reasons == {"포장재 불량(코팅 벗겨짐)", "안정성시험 일부항목(성상)"}
+
+    @pytest.mark.asyncio
+    async def test_excludes_non_drug_rows_via_pre_filter(self, repo: Any) -> None:
+        """A.5.1 #4 — 의약외품(is_non_drug=True) 매칭 시 사전 필터로 빈 리스트.
+
+        시드 §4 감마손소독제 (item_seq=202504009) — 사용자에겐 노출되면 안 됨.
+        """
+        with patch("app.repositories.drug_recall_repository.DrugRecall.filter") as m:
+            qs = MagicMock()
+            qs.all = AsyncMock(return_value=[])
+            m.return_value = qs
+            result = await repo.find_by_item_seq_or_name(item_seq="202504009")
+
+        assert result == []
+        kwargs = m.call_args.kwargs
+        assert kwargs.get("is_non_drug") is False
+
+    @pytest.mark.asyncio
+    async def test_excludes_hospital_only_rows_via_pre_filter(self, repo: Any) -> None:
+        """A.5.1 #5 — 병원전용(is_hospital_only=True) 매칭 시 사전 필터로 빈 리스트.
+
+        시드 §5 제타미다졸람주사 (item_seq=202504012) — 일반 사용자 medication 등록
+        흐름에서 매칭되어선 안 됨.
+        """
+        with patch("app.repositories.drug_recall_repository.DrugRecall.filter") as m:
+            qs = MagicMock()
+            qs.all = AsyncMock(return_value=[])
+            m.return_value = qs
+            result = await repo.find_by_item_seq_or_name(item_seq="202504012")
+
+        assert result == []
+        kwargs = m.call_args.kwargs
+        assert kwargs.get("is_hospital_only") is False
+
+    @pytest.mark.asyncio
+    async def test_normalizes_product_name_with_whitespace_variant(self, repo: Any) -> None:
+        """A.5.1 #6 — 공백 변형 product_name 입력 ' 데모라니티딘정 150밀리그램 ' 도 정규화 매칭.
+
+        시드의 PRDUCT='데모라니티딘정150밀리그램' (공백 0). 입력 양 끝/중간 공백을
+        normalize_product_name 으로 통일한 뒤 비교해 §1 row 1건 반환.
+        """
+        target = MagicMock(item_seq="202504001", product_name="데모라니티딘정150밀리그램")
+        other = MagicMock(item_seq="999", product_name="다른약품")
+
+        with patch("app.repositories.drug_recall_repository.DrugRecall.filter") as m:
+            qs = MagicMock()
+            qs.all = AsyncMock(return_value=[target, other])
+            m.return_value = qs
+            result = await repo.find_by_item_seq_or_name(product_name=" 데모라니티딘정 150밀리그램 ")
+
+        # 정규화 후 메모리 비교로 §1 row 만 통과해야 한다.
+        assert len(result) == 1
+        assert result[0].item_seq == "202504001"
+
+
+# ── A.5.4 (repo 부분): find_recalls_for_medications (마이페이지 batch) ──
+
+
+class TestFindRecallsForMedications:
+    """A.5.4 (repo) — 등록된 medication N개에 대해 단일 쿼리로 batch 매칭."""
+
+    @pytest.mark.asyncio
+    async def test_empty_medications_skips_db_call(self, repo: Any) -> None:
+        """meds=[] → DB 호출 없이 빈 dict."""
+        with patch("app.repositories.drug_recall_repository.DrugRecall.filter") as m:
+            result = await repo.find_recalls_for_medications([])
+
+        assert result == {}
+        m.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_single_query_for_n_medications_avoids_n_plus_1(self, repo: Any) -> None:
+        """N=3 medication → DrugRecall.filter 정확히 1회 호출 (N+1 회피)."""
+        from uuid import uuid4
+
+        meds = [
+            MagicMock(id=uuid4(), medicine_name="데모라니티딘정150밀리그램"),
+            MagicMock(id=uuid4(), medicine_name="테스트솔정4밀리그램(메틸프레드니솔론)"),
+            MagicMock(id=uuid4(), medicine_name="이부프로펜정200밀리그램"),
+        ]
+
+        with patch("app.repositories.drug_recall_repository.DrugRecall.filter") as m:
+            qs = MagicMock()
+            qs.all = AsyncMock(return_value=[])
+            m.return_value = qs
+            await repo.find_recalls_for_medications(meds)
+
+        assert m.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_groups_recall_rows_by_medication_id(self, repo: Any) -> None:
+        """반환 dict 가 medication_id 키로 매칭 row list 를 그룹핑."""
+        from uuid import uuid4
+
+        med1_id = uuid4()
+        med2_id = uuid4()
+        meds = [
+            MagicMock(id=med1_id, medicine_name="데모라니티딘정150밀리그램"),
+            MagicMock(id=med2_id, medicine_name="오미크론케어연고"),
+        ]
+        recall_for_med1 = MagicMock(
+            item_seq="202504001",
+            product_name="데모라니티딘정150밀리그램",
+            recall_reason="NDMA",
+        )
+        recall_for_med2_a = MagicMock(
+            item_seq="202504018",
+            product_name="오미크론케어연고",
+            recall_reason="포장재 불량(코팅 벗겨짐)",
+        )
+        recall_for_med2_b = MagicMock(
+            item_seq="202504018",
+            product_name="오미크론케어연고",
+            recall_reason="안정성시험 일부항목(성상)",
+        )
+
+        with patch("app.repositories.drug_recall_repository.DrugRecall.filter") as m:
+            qs = MagicMock()
+            qs.all = AsyncMock(return_value=[recall_for_med1, recall_for_med2_a, recall_for_med2_b])
+            m.return_value = qs
+            result = await repo.find_recalls_for_medications(meds)
+
+        assert med1_id in result
+        assert med2_id in result
+        assert len(result[med1_id]) == 1
+        assert len(result[med2_id]) == 2
+
+    @pytest.mark.asyncio
+    async def test_pre_filters_non_drug_and_hospital_only(self, repo: Any) -> None:
+        """is_non_drug / is_hospital_only 사전 필터가 batch 쿼리에도 적용된다."""
+        from uuid import uuid4
+
+        meds = [MagicMock(id=uuid4(), medicine_name="데모라니티딘정150밀리그램")]
+
+        with patch("app.repositories.drug_recall_repository.DrugRecall.filter") as m:
+            qs = MagicMock()
+            qs.all = AsyncMock(return_value=[])
+            m.return_value = qs
+            await repo.find_recalls_for_medications(meds)
+
+        kwargs = m.call_args.kwargs
+        assert kwargs.get("is_non_drug") is False
+        assert kwargs.get("is_hospital_only") is False

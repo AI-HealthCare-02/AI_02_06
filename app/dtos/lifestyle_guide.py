@@ -67,7 +67,10 @@ class LlmGuideResponse(BaseModel):
     exercise: str
     symptom: str
     interaction: str
-    recommended_challenges: list[RecommendedChallenge] = Field(default_factory=list)
+    # 정확히 15개 강제 — prompt builder 의 "정확히 15개" 룰 (5개 set x 3 = 15)
+    # 을 schema 단계에서 검증. LLM 응답이 길이 위반 시 ValidationError →
+    # generate_guide_payload 의 retry loop 가 자동 재시도.
+    recommended_challenges: list[RecommendedChallenge] = Field(default_factory=list, min_length=15, max_length=15)
 
 
 # ── API response schemas ────────────────────────────────────────────────────
