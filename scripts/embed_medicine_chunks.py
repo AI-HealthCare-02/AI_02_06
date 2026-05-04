@@ -30,8 +30,10 @@ Cost (estimate):
 
 import argparse
 import asyncio
+import hashlib
 import json
 import logging
+import re
 import time
 
 from openai import AsyncOpenAI
@@ -40,7 +42,7 @@ from tortoise.transactions import in_transaction
 
 from app.core.config import config
 from app.db.databases import TORTOISE_ORM
-from app.models.medicine_chunk import MedicineChunkSection
+from app.models.medicine_chunk import MedicineChunk, MedicineChunkSection
 from app.models.medicine_info import MedicineInfo
 from app.models.medicine_ingredient import MedicineIngredient
 from app.services.medicine_doc_parser import (
@@ -77,6 +79,137 @@ EMBED_BATCH_SIZE = 100
 # Retry: rate limit / connection error 시 exponential backoff
 MAX_RETRIES = 4
 INITIAL_BACKOFF = 1.0  # sec
+
+# ── 큐레이션: 한국 외래 처방 빈도 상위 활성성분 86종 (수동 큐레이션) ─────
+# 진통/항생/고혈압/고지혈증/당뇨/위장/항히스타민/항응고/갑상선/정신건강/비뇨/호흡기/기타
+# 식약처 의약품안전나라 + DUR + 국민건강보험 진료비 통계 + 일반 임상 가이드 기반.
+# 임베딩 비용 최소화 — 옵션 B (성분당 top-N brand 만) 의 source.
+CORE_PRESCRIPTION_INGREDIENTS: tuple[str, ...] = (
+    # 진통·해열·NSAID
+    "아세트아미노펜",
+    "이부프로펜",
+    "나프록센",
+    "덱시부프로펜",
+    "록소프로펜나트륨수화물",
+    "아세클로페낙",
+    "셀레콕시브",
+    "트라마돌염산염",
+    "아스피린",
+    # 항생제 (외래 흔함)
+    "아목시실린",
+    "아목시실린수화물",
+    "세파클러수화물",
+    "세프디니르",
+    "세프포독심프록세틸",
+    "클래리스로마이신",
+    "아지트로마이신수화물",
+    "시프로플록사신염산염수화물",
+    "레보플록사신",
+    "메트로니다졸",
+    "독시사이클린수화물",
+    # 고혈압
+    "암로디핀베실산염",
+    "로사르탄칼륨",
+    "발사르탄",
+    "텔미사르탄",
+    "칸데사르탄실렉세틸",
+    "올메사르탄메독소밀",
+    "라미프릴",
+    "페린도프릴아르기닌",
+    "카르베딜롤",
+    "비소프롤롤푸마르산염",
+    "아테놀롤",
+    "히드로클로로티아지드",
+    # 고지혈증
+    "아토르바스타틴칼슘삼수화물",
+    "로수바스타틴칼슘",
+    "심바스타틴",
+    "프라바스타틴나트륨",
+    "피타바스타틴칼슘",
+    "에제티미브",
+    "페노피브레이트",
+    # 당뇨
+    "메트포르민염산염",
+    "글리메피리드",
+    "글리클라지드",
+    "시타글립틴인산염일수화물",
+    "빌다글립틴",
+    "엠파글리플로진",
+    "다파글리플로진",
+    "리나글립틴",
+    "리라글루티드",
+    # 위장
+    "오메프라졸",
+    "에소메프라졸",
+    "에소메프라졸마그네슘삼수화물",
+    "란소프라졸",
+    "라베프라졸나트륨",
+    "판토프라졸나트륨",
+    "라푸티딘",
+    "파모티딘",
+    "수크랄페이트수화물",
+    "모사프리드시트르산염",
+    # 항히스타민
+    "세티리진염산염",
+    "레보세티리진염산염",
+    "로라타딘",
+    "펙소페나딘염산염",
+    "클로르페니라민말레산염",
+    "베포타스틴베실산염",
+    "에바스틴",
+    # 항응고/항혈소판
+    "와파린나트륨",
+    "클로피도그렐황산수소염",
+    "리바록사반",
+    "아픽사반",
+    "다비가트란에텍실레이트메실산염",
+    # 갑상선
+    "레보티록신나트륨",
+    "메티마졸",
+    "프로필티오우라실",
+    # 정신건강
+    "에스시탈로프람옥살산염",
+    "설트랄린염산염",
+    "파록세틴염산염수화물",
+    "플루옥세틴염산염",
+    "알프라졸람",
+    "로라제팜",
+    "디아제팜",
+    "졸피뎀타르타르산염",
+    # 비뇨/전립선
+    "탐스로신염산염",
+    "솔리페나신숙신산염",
+    "두타스테리드",
+    "피나스테리드",
+    # 호흡기
+    "몬테루카스트나트륨",
+    "살부타몰황산염",
+    "부데소니드",
+    "플루티카손푸로에이트",
+    # 기타
+    "메틸프레드니솔론",
+    "프레드니솔론",
+    "트리메부틴말레산염",
+    "알로푸리놀",
+    "콜키친",
+)
+
+
+# 일반인 사용 부적합 — embed scope 에서 제외 (medicine_name ILIKE 매칭).
+# 주사제 / 수액 / 동물용 / 진단 / 수출용 — 일반인 외래 처방 거의 없음 + RAG 답변 부적합.
+EXCLUSION_PATTERNS: tuple[str, ...] = (
+    "%주사%",
+    "주",  # 주사제 — '주' 끝나는 medicine_name (정규식 ~ '주$' 와 등가)
+    "%수액%",
+    "%주입%",
+    "%수출%",
+    "%수의%",
+    "%동물%",
+    "%조영%",
+    "%진단%",
+    "%키트%",
+)
+
 
 # section 한국어 표시 (content prefix 용)
 _SECTION_KR: dict[MedicineChunkSection, str] = {
@@ -119,24 +252,34 @@ def _estimate_tokens(text: str) -> int:
     return int(len(text) / CHARS_PER_TOKEN) + 1
 
 
+def _build_base_header(
+    medicine_name: str,
+    section: MedicineChunkSection,
+    ingredients: list[str] | None,
+) -> str:
+    """청크 base 헤더 - sub-chunk 마다 동일하게 prepend.
+
+    PLAN.md (RAG 재설계) §A — 성분 단위 검색 정확도를 위해 brand 이름과 함께
+    [성분: ...] 헤더도 prepend. query 측 임베딩이 성분명을 포함하면 chunk
+    측과 cosine 매칭이 ↑ (메타필터로 후보 좁힌 후 ranking 정확도 ↑).
+    """
+    section_kr = _SECTION_KR.get(section, section.value)
+    parts = [f"[약: {medicine_name}]"]
+    if ingredients:
+        parts.append(f"[성분: {', '.join(ingredients)}]")
+    parts.append(f"[{section_kr}]")
+    return " ".join(parts)
+
+
 def _format_chunk_content(
     medicine_name: str,
     section: MedicineChunkSection,
     article: Article,
     ingredients: list[str] | None = None,
 ) -> str:
-    """청크 임베딩 입력 텍스트 - 헤더 prefix (약 + 성분 + section) + ARTICLE 본문.
-
-    PLAN.md (RAG 재설계) §A - 성분 단위 검색 정확도를 위해 brand 이름과 함께
-    [성분: ...] 헤더도 prepend. query 측 임베딩이 성분명을 포함하면 chunk
-    측과 cosine 매칭이 ↑ (메타필터로 후보 좁힌 후 ranking 정확도 ↑).
-    """
-    section_kr = _SECTION_KR.get(section, section.value)
-    header_parts = [f"[약: {medicine_name}]"]
-    if ingredients:
-        header_parts.append(f"[성분: {', '.join(ingredients)}]")
-    header_parts.append(f"[{section_kr}]")
-    parts = [" ".join(header_parts)]
+    """단일 청크 입력 텍스트 (분할 안 됨 가정) — base header + title + body."""
+    base_header = _build_base_header(medicine_name, section, ingredients)
+    parts = [base_header]
     if article.title:
         parts.append(article.title)
     if article.body:
@@ -144,53 +287,202 @@ def _format_chunk_content(
     return "\n".join(parts)
 
 
+# ── 의미 기반 splitter (Hierarchical: PARAGRAPH → list pattern → sentence → char) ──
+# 한국 식약처 의약품 raw doc 의 실제 구조를 모방.
+#
+# 자르기 우선순위 (큰 단위 → 작은 단위 fallback):
+#   Level 1: PARAGRAPH (`\n` 구분 — Article.body 가 이미 PARAGRAPH 들을 \n 으로 join)
+#   Level 2: list pattern (`1)`, `(1)`, `가)`, `1.` 같은 항목 시작 정규식)
+#   Level 3: 한국어 sentence (`다.`, `요.`, `이다.` 종결)
+#   Level 4: char hard truncate (최후 보루)
+#
+# 모든 sub-chunk 에 ARTICLE title 을 prepend → list head 보존 (chunk[1] 도
+# "5. 상호작용" 같은 헤더 유지) → retrieval 시 어느 sub-chunk 든 맥락 유지.
+
+_LIST_ITEM_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?m)(?=^\d+\)\s)", re.UNICODE),  # 1)
+    re.compile(r"(?m)(?=^\(\s*\d+\s*\)\s)", re.UNICODE),  # (1)
+    re.compile(r"(?m)(?=^[가-힣]\)\s)", re.UNICODE),  # 가)
+    re.compile(r"(?m)(?=^\d+\.\s)", re.UNICODE),  # 1.
+)
+
+# 한국어 평서문 종결어 — `(?<=다\.)\s+` 같은 lookbehind 로 종결어 직후 공백 위치에서 자름.
+_KR_SENTENCE_BOUNDARY = re.compile(r"(?<=[다요]\.)\s+|(?<=다\.\n)|(?<=요\.\n)|(?<=이다\.)\s+", re.UNICODE)
+
+
 def _truncate_to_char_limit(text: str, max_chars: int) -> str:
-    """OpenAI 한도 (8192 tok) 안전 보장 — char 단위 hard cap.
-
-    한 줄이 max_tokens 초과하는 케이스 (긴 PARAGRAPH 단일 줄) 도 최후 잘라낸다.
-    """
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars]
+    """Char 단위 hard cap — 마지막 보루."""
+    return text if len(text) <= max_chars else text[:max_chars]
 
 
-def _split_long_content(content: str, max_tokens: int = MAX_TOKENS_PER_CHUNK) -> list[str]:
-    """토큰 한도 초과 시 줄바꿈 단위로 분할해 chunk_index 0,1,2... 로 사용."""
-    if _estimate_tokens(content) <= max_tokens:
-        return [content]
-
-    # 한도를 보장하는 char 상한 (CHARS_PER_TOKEN=0.5 면 max_tokens=4000 → 2000 chars)
+def _hard_split_chars(text: str, max_tokens: int) -> list[str]:
+    """모든 분할 시도 실패 시 char 단위로 자름."""
     max_chars = int(max_tokens * CHARS_PER_TOKEN)
+    return [text[i : i + max_chars] for i in range(0, len(text), max_chars)] or [text]
 
-    lines = content.split("\n")
+
+def _pack_units(units: list[str], max_tokens: int, joiner: str = "\n") -> list[str]:
+    """작은 단위 (PARAGRAPH/list item/sentence) 들을 max_tokens 안에서 packing.
+
+    한 단위 자체가 max_tokens 초과면 재귀적으로 더 작은 단위로 분할.
+    """
     chunks: list[str] = []
     current: list[str] = []
-    current_tokens = 0
-
-    for line in lines:
-        # 한 줄 자체가 한도 초과 시 hard truncate
-        if _estimate_tokens(line) > max_tokens:
-            if current:
-                chunks.append("\n".join(current))
-                current = []
-                current_tokens = 0
-            chunks.append(_truncate_to_char_limit(line, max_chars))
+    current_tok = 0
+    for raw in units:
+        unit = raw.strip()
+        if not unit:
             continue
-
-        line_tokens = _estimate_tokens(line)
-        if current_tokens + line_tokens > max_tokens and current:
-            chunks.append("\n".join(current))
-            current = [line]
-            current_tokens = line_tokens
+        unit_tok = _estimate_tokens(unit)
+        if unit_tok > max_tokens:
+            # 단위 자체가 큼 → 한 단계 더 자른다 (recursion).
+            if current:
+                chunks.append(joiner.join(current))
+                current, current_tok = [], 0
+            chunks.extend(_split_semantic(unit, max_tokens))
+            continue
+        if current_tok + unit_tok > max_tokens and current:
+            chunks.append(joiner.join(current))
+            current, current_tok = [unit], unit_tok
         else:
-            current.append(line)
-            current_tokens += line_tokens
-
+            current.append(unit)
+            current_tok += unit_tok
     if current:
-        chunks.append("\n".join(current))
+        chunks.append(joiner.join(current))
+    return chunks
 
-    # 최종 안전망: 어느 chunk 도 hard char limit 초과 안 하도록
-    return [_truncate_to_char_limit(c, max_chars * 2) for c in chunks]
+
+def _try_split_by_list_pattern(text: str, max_tokens: int) -> list[str] | None:
+    """List pattern (1), (1), 가), 1.) 으로 자르고 packing. 매칭 0 이면 None."""
+    for pattern in _LIST_ITEM_PATTERNS:
+        items = pattern.split(text)
+        items = [i for i in items if i.strip()]
+        if len(items) <= 1:
+            continue
+        return _pack_units(items, max_tokens, joiner="\n")
+    return None
+
+
+def _try_split_by_sentences(text: str, max_tokens: int) -> list[str] | None:
+    """한국어 종결어 (다./요./이다.) 기준 sentence 분할 + packing."""
+    sentences = _KR_SENTENCE_BOUNDARY.split(text)
+    sentences = [s for s in sentences if s and s.strip()]
+    if len(sentences) <= 1:
+        return None
+    return _pack_units(sentences, max_tokens, joiner=" ")
+
+
+def _split_semantic(text: str, max_tokens: int) -> list[str]:
+    r"""의미 기반 분할 (Hierarchical fallback chain).
+
+    Level 1: PARAGRAPH (`\n` 단위) -> 작은 paragraph 들 packing
+    Level 2: list pattern (1) (2) 가) 1.) - 항목 단위
+    Level 3: 한국어 sentence (다./요./이다.)
+    Level 4: char hard truncate (최후)
+    """
+    if _estimate_tokens(text) <= max_tokens:
+        return [text]
+
+    # Level 1: PARAGRAPH (Article.body 가 \n 로 PARAGRAPH 를 join 한 형태)
+    paragraphs = [p for p in text.split("\n") if p.strip()]
+    if len(paragraphs) > 1:
+        return _pack_units(paragraphs, max_tokens, joiner="\n")
+
+    # Level 2: list pattern (한 PARAGRAPH 안에 list 가 있는 경우)
+    sub = _try_split_by_list_pattern(text, max_tokens)
+    if sub:
+        return sub
+
+    # Level 3: 한국어 sentence
+    sub = _try_split_by_sentences(text, max_tokens)
+    if sub:
+        return sub
+
+    # Level 4: 마지막 보루 — char 단위
+    return _hard_split_chars(text, max_tokens)
+
+
+def _split_long_content(
+    base_header: str,
+    article_title: str,
+    body: str,
+    max_tokens: int = MAX_TOKENS_PER_CHUNK,
+) -> list[str]:
+    """ARTICLE → chunks. body 가 max_tokens 안이면 1 chunk, 아니면 의미 분할.
+
+    모든 sub-chunk 는 base_header + article_title 을 prepend — list head
+    보존 (예: 'X. 상호작용' 헤더가 모든 sub-chunk 에 들어가 retrieval 맥락 유지).
+    """
+    full = "\n".join(p for p in (base_header, article_title, body) if p)
+    if _estimate_tokens(full) <= max_tokens:
+        return [full]
+
+    # body 만 의미 분할. header + title 의 토큰 만큼 sub-chunk 한도에서 차감.
+    overhead = _estimate_tokens(base_header) + _estimate_tokens(article_title) + 5
+    body_max = max(max_tokens - overhead, 200)
+    sub_bodies = _split_semantic(body, body_max)
+
+    # 각 sub-body 에 base_header + title prepend (의미 보존)
+    return ["\n".join(p for p in (base_header, article_title, sub) if p) for sub in sub_bodies]
+
+
+# ── content hash cache ─────────────────────────────────────────────────
+# 재실행 시 동일 content 의 chunk 는 OpenAI 호출 skip — 비용 절감 + 재실행 안전.
+# medicine_chunk(medicine_info_id, section, chunk_index) 의 기존 content 와
+# SHA256 비교 → 동일하면 재임베딩 안 함.
+def _content_hash(content: str) -> str:
+    """SHA256 hex digest — chunk content 동일성 비교용."""
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+async def _load_existing_chunk_hashes(medicine_info_id: int) -> dict[tuple[str, int], str]:
+    """기존 chunk 의 (section, chunk_index) → content hash 맵.
+
+    재실행 시 unchanged chunk 의 OpenAI 호출 skip 용. content 가 같으면
+    재임베딩 안 하고 token_count 만 재산정 (DB 에 그대로 보존).
+    """
+    rows = await MedicineChunk.filter(medicine_info_id=medicine_info_id).values("section", "chunk_index", "content")
+    return {(r["section"], r["chunk_index"]): _content_hash(r["content"] or "") for r in rows}
+
+
+async def _load_curated_medicine_ids(top_n: int) -> list[int]:
+    """큐레이션 86 활성성분 x 성분당 top-N brand 의 medicine_info.id list.
+
+    raw doc 풍부 (≥1000 chars) + 일반인 사용 가능 (주사·수출·수의·진단 제외).
+    같은 ingredient 안에서는 doc_total_len DESC 로 ranking, top-N 만.
+    """
+    conn = Tortoise.get_connection("default")
+    sql = """
+        WITH filtered AS (
+            SELECT mi.id,
+                   ing.mtral_name AS ingredient,
+                   LENGTH(COALESCE(mi.ee_doc_data,'') ||
+                          COALESCE(mi.ud_doc_data,'') ||
+                          COALESCE(mi.nb_doc_data,'')) AS doc_len
+            FROM medicine_info mi
+            JOIN medicine_ingredient ing ON ing.medicine_info_id = mi.id
+            WHERE ing.mtral_name = ANY($1::text[])
+              AND mi.medicine_name NOT ILIKE '%주사%'
+              AND mi.medicine_name NOT ILIKE '%수액%'
+              AND mi.medicine_name NOT ILIKE '%주입%'
+              AND mi.medicine_name NOT ILIKE '%수출%'
+              AND mi.medicine_name NOT ILIKE '%수의%'
+              AND mi.medicine_name NOT ILIKE '%동물%'
+              AND mi.medicine_name NOT ILIKE '%조영%'
+              AND mi.medicine_name !~ '주$'
+              AND LENGTH(COALESCE(mi.ee_doc_data,'') ||
+                         COALESCE(mi.ud_doc_data,'') ||
+                         COALESCE(mi.nb_doc_data,'')) >= 1000
+        ),
+        ranked AS (
+            SELECT id, ingredient, doc_len,
+                   ROW_NUMBER() OVER (PARTITION BY ingredient ORDER BY doc_len DESC, id) AS rk
+            FROM filtered
+        )
+        SELECT DISTINCT id FROM ranked WHERE rk <= $2 ORDER BY id
+    """
+    _, rows = await conn.execute_query(sql, [list(CORE_PRESCRIPTION_INGREDIENTS), top_n])
+    return [int(r["id"]) for r in rows]
 
 
 async def _load_ingredients_for_medicine(medicine_info_id: int) -> list[str]:
@@ -217,18 +509,20 @@ def _build_chunks_for_medicine(
 ) -> list[tuple[MedicineChunkSection, int, str, int]]:
     """한 medicine 의 모든 (section, chunk_index, content, token_count) 리스트.
 
-    같은 section 의 ARTICLE 이 여러 개면 chunk_index 가 0, 1, 2... 로 순차.
-    한 ARTICLE 이 토큰 한도 초과면 _split_long_content 로 다시 분할 (이때도
-    chunk_index 가 그 section 내에서 계속 증가).
+    의미 기반 분할 (Hierarchical: PARAGRAPH → list pattern → sentence → char):
+      - 한 ARTICLE 이 토큰 한도 안이면 1 chunk 그대로 (의미 단위 유지)
+      - 큰 ARTICLE 만 의미 단위 분할 + 모든 sub-chunk 에 ARTICLE title prepend
+        → list head ('5. 상호작용') 가 보존되어 retrieval 시 어느 sub-chunk
+        든 맥락 유지 (이전 줄바꿈 단위 분할의 의미 누락 회귀 회피).
     """
-    section_counter: dict[MedicineChunkSection, int] = {}
+    base_section_counter: dict[MedicineChunkSection, int] = {}
     out: list[tuple[MedicineChunkSection, int, str, int]] = []
 
     for article, section in _articles_for_medicine(med):
-        full_content = _format_chunk_content(med.medicine_name, section, article, ingredients=ingredients)
-        for sub in _split_long_content(full_content):
-            idx = section_counter.get(section, 0)
-            section_counter[section] = idx + 1
+        base_header = _build_base_header(med.medicine_name, section, ingredients)
+        for sub in _split_long_content(base_header, article.title, article.body):
+            idx = base_section_counter.get(section, 0)
+            base_section_counter[section] = idx + 1
             out.append((section, idx, sub, _estimate_tokens(sub)))
 
     return out
@@ -321,7 +615,7 @@ async def _insert_chunks_batch(
 
 
 # ── 메인 처리 루프 ───────────────────────────────────────────────────
-async def process_medicines(
+async def process_medicines(  # noqa: PLR0915  # batch loop + per-medicine + progress 통합 — 분리 시 가독성 손해
     *,
     batch_size: int,
     concurrency: int,
@@ -362,30 +656,48 @@ async def process_medicines(
     processed = 0
     inserted_total = 0
     tokens_total = 0
+    cache_hits_total = 0
     start = time.time()
 
-    async def _process_one(med: MedicineInfo) -> tuple[int, int]:
+    async def _process_one(med: MedicineInfo) -> tuple[int, int, int]:
+        """Returns: (inserted, tokens_for_billing, cache_hits)."""
         async with semaphore:
             ingredients = await _load_ingredients_for_medicine(med.id)
             chunks = _build_chunks_for_medicine(med, ingredients)
             if not chunks:
-                return 0, 0
+                return 0, 0, 0
 
-            contents = [c[2] for c in chunks]
-            embeddings: list[list[float]] = []
-            # OpenAI batch 한도 안에서 분할 호출
-            for offset in range(0, len(contents), EMBED_BATCH_SIZE):
-                sub = contents[offset : offset + EMBED_BATCH_SIZE]
+            # ── content hash cache: 기존 chunk 와 동일하면 OpenAI 호출 skip ──
+            existing = await _load_existing_chunk_hashes(med.id)
+            new_indices: list[int] = []
+            new_contents: list[str] = []
+            cache_hits = 0
+            for i, (sec, idx, content, _tok) in enumerate(chunks):
+                if existing.get((sec.value, idx)) == _content_hash(content):
+                    cache_hits += 1
+                    continue
+                new_indices.append(i)
+                new_contents.append(content)
+
+            # 임베딩 호출 — cache miss 만
+            new_embeddings: list[list[float]] = []
+            for offset in range(0, len(new_contents), EMBED_BATCH_SIZE):
+                sub = new_contents[offset : offset + EMBED_BATCH_SIZE]
                 vecs = await _embed_with_retry(client, sub)
-                embeddings.extend(vecs)
+                new_embeddings.extend(vecs)
 
+            # cache miss 만 INSERT/UPDATE — cache hit 은 DB row 그대로 보존
             rows = [
-                (med.id, sec, idx, content, tok, emb, ingredients)
-                for (sec, idx, content, tok), emb in zip(chunks, embeddings, strict=True)
+                (med.id, chunks[i][0], chunks[i][1], chunks[i][2], chunks[i][3], emb, ingredients)
+                for i, emb in zip(new_indices, new_embeddings, strict=True)
             ]
-            async with in_transaction("default"):
-                affected = await _insert_chunks_batch(rows)
-            return affected, sum(tok for (_, _, _, tok) in chunks)
+            if rows:
+                async with in_transaction("default"):
+                    affected = await _insert_chunks_batch(rows)
+            else:
+                affected = 0
+            billed_tokens = sum(chunks[i][3] for i in new_indices)
+            return affected, billed_tokens, cache_hits
 
     offset = 0
     while True:
@@ -408,9 +720,10 @@ async def process_medicines(
             if isinstance(result, BaseException):
                 logger.error("medicine_info id=%d 처리 실패: %s: %s", med.id, type(result).__name__, result)
                 continue
-            inserted, tokens = result
+            inserted, tokens, cache_hits = result
             inserted_total += inserted
             tokens_total += tokens
+            cache_hits_total += cache_hits
 
         processed += len(page)
         elapsed = time.time() - start
@@ -418,11 +731,12 @@ async def process_medicines(
         eta_min = (total - processed) / max(rate, 0.001) / 60
         cost_est = tokens_total / 1_000_000 * EMBEDDING_PRICE_PER_1M
         logger.info(
-            "Progress: %d/%d (%.1f%%) chunks=%d tokens=%dK cost=$%.2f rate=%.1f/s eta=%.1fmin",
+            "Progress: %d/%d (%.1f%%) chunks=%d cache_hits=%d tokens=%dK cost=$%.2f rate=%.1f/s eta=%.1fmin",
             processed,
             total,
             processed / max(total, 1) * 100,
             inserted_total,
+            cache_hits_total,
             tokens_total // 1000,
             cost_est,
             rate,
@@ -432,9 +746,10 @@ async def process_medicines(
         offset += batch_size
 
     logger.info(
-        "Done — medicines processed=%d chunks_inserted=%d tokens=%dK cost=$%.2f elapsed=%.1fmin",
+        "Done — medicines=%d chunks_inserted=%d cache_hits=%d tokens=%dK cost=$%.2f elapsed=%.1fmin",
         processed,
         inserted_total,
+        cache_hits_total,
         tokens_total // 1000,
         tokens_total / 1_000_000 * EMBEDDING_PRICE_PER_1M,
         (time.time() - start) / 60,
@@ -465,6 +780,18 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="콤마 구분 ILIKE 패턴 (medicine_name + item_eng_name 매칭)",
     )
+    parser.add_argument(
+        "--curated",
+        action="store_true",
+        help="큐레이션 모드 — CORE_PRESCRIPTION_INGREDIENTS 86종 x 성분당 top-N brand 만 임베딩 "
+        "(일반인 사용 가능 + 처방 빈도 높은 brand 우선). 비용 최소화 (옵션 B).",
+    )
+    parser.add_argument(
+        "--top-n-per-ingredient",
+        type=int,
+        default=10,
+        help="--curated 모드에서 성분당 brand 상한 (default: 10). raw doc 길이 desc 정렬 후 top-N.",
+    )
     return parser.parse_args()
 
 
@@ -472,7 +799,14 @@ async def main_async(args: argparse.Namespace) -> None:
     await Tortoise.init(config=TORTOISE_ORM)
     try:
         ids: list[int] | None = None
-        if args.medicine_ids:
+        if args.curated:
+            ids = await _load_curated_medicine_ids(args.top_n_per_ingredient)
+            logger.info(
+                "큐레이션 모드 — 86 활성성분 x top-%d brand = %d medicines",
+                args.top_n_per_ingredient,
+                len(ids),
+            )
+        elif args.medicine_ids:
             ids = [int(x.strip()) for x in args.medicine_ids.split(",") if x.strip()]
             logger.info("ID 목록 모드 — %d medicines", len(ids))
         elif args.name_like:
