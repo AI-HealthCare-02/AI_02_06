@@ -295,10 +295,15 @@ export default function MyPage() {
 
   const handleSaveBasic = async (newData) => {
     try {
-      await updateProfile(userProfile.id, { name: newData.nickname })
+      // BasicInfoModal 호출자가 selectedFamilyMember 로 명시한 프로필을 우선
+      // 사용. 미지정이면 활성 프로필. (가족관리 탭 본인 카드 클릭 → SELF 강제,
+      // 기본정보 탭 수정 → 활성 프로필 — 흐름 분리)
+      const target = selectedFamilyMember ?? userProfile
+      await updateProfile(target.id, { name: newData.nickname })
       toast.success('닉네임이 수정되었습니다.')
       if (refetchProfiles) await refetchProfiles()
       setModalType(null)
+      setSelectedFamilyMember(null)
     } catch (err) { handleApiError(err) }
   }
 
@@ -432,7 +437,7 @@ export default function MyPage() {
               <div className="space-y-8 h-full flex flex-col">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="text-2xl font-black text-gray-900">계정 정보</h3>
-                  <button onClick={() => setModalType('basic')} className="text-xs font-bold text-gray-600 hover:bg-gray-100 px-4 py-2 rounded-xl transition-all border border-gray-200 cursor-pointer">정보 수정</button>
+                  <button onClick={() => { setSelectedFamilyMember(null); setModalType('basic') }} className="text-xs font-bold text-gray-600 hover:bg-gray-100 px-4 py-2 rounded-xl transition-all border border-gray-200 cursor-pointer">정보 수정</button>
                 </div>
                 <div className="space-y-4">
                   <div className="flex justify-between items-center p-6 bg-slate-50 rounded-[28px]">
@@ -490,9 +495,12 @@ export default function MyPage() {
                       }
                       // 본인(SELF) 은 관계 변경 불가 — 닉네임만 BasicInfoModal 로 수정.
                       // 가족(FATHER/MOTHER/...)은 기존 FamilyModal (관계+성별+이름).
+                      // 활성 프로필이 가족이라도 본인 카드 클릭 시엔 SELF row 를
+                      // 대상으로 — selectedFamilyMember 에 SELF member 명시.
                       const handleEdit = (e) => {
                         e.stopPropagation()
                         if (isSelf) {
+                          setSelectedFamilyMember(member)
                           setModalType('basic')
                         } else {
                           setSelectedFamilyMember(member)
@@ -561,7 +569,13 @@ export default function MyPage() {
         </div>
       </div>
 
-      {modalType === 'basic' && <BasicInfoModal info={userProfile} onClose={() => setModalType(null)} onSave={handleSaveBasic} />}
+      {modalType === 'basic' && (
+        <BasicInfoModal
+          info={selectedFamilyMember ?? userProfile}
+          onClose={() => { setModalType(null); setSelectedFamilyMember(null) }}
+          onSave={handleSaveBasic}
+        />
+      )}
       {modalType === 'health' && (
         <HealthSurveyModal
           info={userProfile?.health_survey}
