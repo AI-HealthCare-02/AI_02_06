@@ -15,6 +15,7 @@ import {
   Pill,
   Trash2,
   Pencil,
+  PencilLine,
   CircleCheck,
   Hospital,
 } from 'lucide-react'
@@ -279,6 +280,23 @@ export default function PrescriptionGroupDetailPage() {
           <h1 className="flex-1 text-base font-bold text-gray-900 truncate">처방전 상세</h1>
           {group && (
             <>
+              <button
+                type="button"
+                onClick={() => {
+                  const ids = (group.medications || []).map((m) => m.id).join(',')
+                  if (!ids) {
+                    showError('수정할 약품이 없어요.')
+                    return
+                  }
+                  router.push(`/medication/edit?ids=${ids}`)
+                }}
+                disabled={!group.medications?.length}
+                title="약 정보 수정"
+                className="p-2 rounded-lg hover:bg-blue-50 text-blue-500 cursor-pointer disabled:text-gray-300 disabled:cursor-default"
+                aria-label="약 정보 수정"
+              >
+                <PencilLine size={18} />
+              </button>
               <button
                 type="button"
                 onClick={handleComplete}
