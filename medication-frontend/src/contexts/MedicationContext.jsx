@@ -39,6 +39,23 @@ export function MedicationProvider({ children }) {
   const medications = listQuery.data || []
   const isLoading = listQuery.isLoading
 
+  // ── 처방전 그룹 detail cache 의 medications 배열을 직접 patch ────────
+  // PrescriptionGroupContext 의 groupsById 는 useQueries(enabled: false) 로
+  // cache 만 읽기 때문에 invalidate 만으로는 즉시 갱신되지 않는다. 약 개별
+  // mutation 직후 상세 페이지에서 즉시 반영되도록 detail cache 를 직접
+  // setQueryData 한다.
+  const patchPrescriptionGroupDetails = useCallback(
+    (mutator) => {
+      const entries = qc.getQueriesData({ queryKey: ['prescription-groups', 'detail'] })
+      for (const [key, group] of entries) {
+        if (!group?.medications) continue
+        const next = mutator(group)
+        if (next !== group) qc.setQueryData(key, next)
+      }
+    },
+    [qc],
+  )
+
   // ── 2) mutations ──────────────────────────────────────────────────
   const updateMutation = useMutation({
     mutationFn: async ({ id, patch }) => {
@@ -49,6 +66,13 @@ export function MedicationProvider({ children }) {
       qc.setQueryData(qk.medications.list(selectedProfileId), (prev = []) =>
         prev.map((m) => (m.id === id ? updated : m)),
       )
+      patchPrescriptionGroupDetails((group) => {
+        const idx = group.medications.findIndex((m) => m.id === id)
+        if (idx === -1) return group
+        const nextMeds = [...group.medications]
+        nextMeds[idx] = updated
+        return { ...group, medications: nextMeds }
+      })
       // medicine_name 변경 시 drug-info 도 stale → invalidate.
       qc.invalidateQueries({ queryKey: qk.medications.detail(id) })
       // active 변화 가능성 → prescription-groups 라벨 동기화.
@@ -65,6 +89,11 @@ export function MedicationProvider({ children }) {
       qc.setQueryData(qk.medications.list(selectedProfileId), (prev = []) =>
         prev.filter((m) => m.id !== id),
       )
+      patchPrescriptionGroupDetails((group) => {
+        const filtered = group.medications.filter((m) => m.id !== id)
+        if (filtered.length === group.medications.length) return group
+        return { ...group, medications: filtered }
+      })
       qc.removeQueries({ queryKey: qk.medications.detail(id) })
       qc.invalidateQueries({ queryKey: qk.prescriptionGroups.all() })
     },
@@ -80,6 +109,11 @@ export function MedicationProvider({ children }) {
       qc.setQueryData(qk.medications.list(selectedProfileId), (prev = []) =>
         prev.filter((m) => !idSet.has(m.id)),
       )
+      patchPrescriptionGroupDetails((group) => {
+        const filtered = group.medications.filter((m) => !idSet.has(m.id))
+        if (filtered.length === group.medications.length) return group
+        return { ...group, medications: filtered }
+      })
       ids.forEach((id) => qc.removeQueries({ queryKey: qk.medications.detail(id) }))
       qc.invalidateQueries({ queryKey: qk.prescriptionGroups.all() })
     },
