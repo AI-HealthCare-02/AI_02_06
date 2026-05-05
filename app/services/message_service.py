@@ -87,8 +87,19 @@ def _chat_messages_to_history(messages: list[ChatMessage]) -> list[dict[str, str
     return [{"role": "user" if m.sender_type == "USER" else "assistant", "content": m.content} for m in chronological]
 
 
-def _tool_call_to_worker_dict(call: ToolCall, *, geolocation: dict[str, float] | None = None) -> dict[str, Any]:
-    """Render a ``ToolCall`` DTO into the pickle-safe dict the worker expects."""
+def _tool_call_to_worker_dict(
+    call: ToolCall,
+    *,
+    geolocation: dict[str, float] | None = None,
+    profile_id: str | None = None,
+) -> dict[str, Any]:
+    """Render a ``ToolCall`` DTO into the pickle-safe dict the worker expects.
+
+    Args:
+        call: ToolCall DTO.
+        geolocation: 위치 검색 tool 의 사용자 좌표 (top-level 주입).
+        profile_id: 회수 조회 tool 의 사용자 식별자 (top-level 주입).
+    """
     payload: dict[str, Any] = {
         "tool_call_id": call.tool_call_id,
         "name": call.name,
@@ -96,6 +107,8 @@ def _tool_call_to_worker_dict(call: ToolCall, *, geolocation: dict[str, float] |
     }
     if geolocation is not None:
         payload["geolocation"] = geolocation
+    if profile_id is not None:
+        payload["profile_id"] = profile_id
     return payload
 
 
@@ -301,12 +314,13 @@ class MessageService:
         """
         return await self.repository.create_assistant_message(session_id, content)
 
-    # ── 채팅 턴 진입점 (RAG 4단 + 위치 검색 분기 예정) ──────────────────
+    # ── 채팅 턴 진입점 (RAG 4단 + 위치 검색 + 회수 조회) ────────────────
     # 흐름: ownership -> history+summary -> Query Rewriter (4o-mini)
     #       -> intent 분기:
     #          (1) direct_answer (greeting/out_of_scope/ambiguous) 즉시 응답
-    #          (2) domain_question -> _finalize_rag_turn (RAG 4단 retrieval + 4o)
-    #          (3) location_search -> 추후 _handle_location_search 추가 예정
+    #          (2) location_search -> _handle_location_search (카카오 + 4o)
+    #          (3) recall_check -> 추후 _handle_recall_check 추가 예정
+    #          (4) domain_question -> _finalize_rag_turn (RAG 4단 retrieval + 4o)
     async def ask_with_tools(
         self,
         *,
