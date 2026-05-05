@@ -149,6 +149,10 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
     /* eslint-disable react-hooks/set-state-in-effect -- id 변경 시 panel state reset */
     setDrugInfo(null)
     setActiveTab('용법')
+    // 직전 약에서 삭제 진행 중이었거나 confirm 모달이 열려 있던 상태가
+    // 새 약 panel 로 누수되어 'X 삭제 중...' 모달이 stuck 되는 회귀 차단.
+    setIsDeleting(false)
+    setShowDeleteModal(false)
     if (medications.find((m) => m.id === id)) {
       setIsLoading(false)
       return
@@ -191,6 +195,11 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
     try {
       await deleteMedication(id)
       await refetchMedications() // 홈 화면 등에서 즉시 반영 위해 Context 재조회
+      // 성공 시에도 모달/플래그 닫기. onDeleted 가 panel close 를 트리거하지만
+      // 외부에서 같은 panel 을 다음 약으로 재사용하는 흐름이라면 state 잔여를
+      // 남기지 않아야 함.
+      setIsDeleting(false)
+      setShowDeleteModal(false)
       onDeleted?.()
     } catch (err) {
       console.error(err)
