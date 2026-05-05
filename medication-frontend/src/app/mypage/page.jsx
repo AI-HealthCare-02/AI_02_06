@@ -75,8 +75,9 @@ function BasicInfoModal({ info, onClose, onSave }) {
 }
 
 // 가족 관계 선택지 — 7종 (SELF 제외, OTHER 포함). 라벨 = ProfileContext 의 RELATION_LABELS 와 일치.
+// SELF 는 본인 계정이므로 가족 추가 흐름에 절대 노출되면 안 됨 — zod 'familyProfileSchema'
+// 의 enum 에도 SELF 가 빠져 있어 validation 에러를 유발한다 (운영 검증 발견 이슈).
 const FAMILY_RELATION_OPTIONS = [
-  { value: 'SELF', label: '본인' },
   { value: 'FATHER', label: '아버지' },
   { value: 'MOTHER', label: '어머니' },
   { value: 'SON', label: '아들' },
@@ -487,10 +488,16 @@ export default function MyPage() {
                       const handleSwitchProfile = () => {
                         if (!isActive) setSelectedProfileId(member.id)
                       }
+                      // 본인(SELF) 은 관계 변경 불가 — 닉네임만 BasicInfoModal 로 수정.
+                      // 가족(FATHER/MOTHER/...)은 기존 FamilyModal (관계+성별+이름).
                       const handleEdit = (e) => {
                         e.stopPropagation()
-                        setSelectedFamilyMember(member)
-                        setModalType('family')
+                        if (isSelf) {
+                          setModalType('basic')
+                        } else {
+                          setSelectedFamilyMember(member)
+                          setModalType('family')
+                        }
                       }
                       // 상세 호칭 — relation_type enum 8종 단일 매핑 (gender 합성 없음)
                       const detailLabel = relationLabels[member.relation_type] ?? '가족'
@@ -500,23 +507,23 @@ export default function MyPage() {
                           onClick={handleSwitchProfile}
                           className={`relative rounded-[32px] p-8 transition-all flex justify-between items-center group cursor-pointer ${
                             isActive
-                              ? 'bg-white shadow-lg ring-2 ring-blue-500'
+                              ? 'bg-white shadow-lg ring-2 ring-gray-900'
                               : isSelf
-                                ? 'bg-blue-50 hover:bg-blue-100 border border-blue-200'
+                                ? 'bg-gray-100 hover:bg-gray-200 border border-gray-300'
                                 : 'bg-slate-50 hover:bg-white hover:shadow-md'
                           }`}
                         >
                           {isActive && (
-                            <span className="absolute top-3 right-3 bg-blue-500 text-white text-[10px] font-black px-2.5 py-1 rounded-full flex items-center gap-1">
+                            <span className="absolute top-3 right-3 bg-gray-900 text-white text-[10px] font-black px-2.5 py-1 rounded-full flex items-center gap-1">
                               <Check size={11} />현재 활성
                             </span>
                           )}
                           <div className="flex items-center gap-5">
-                            <div className={`w-16 h-16 rounded-[24px] flex items-center justify-center text-2xl font-black transition-all ${isSelf ? 'bg-blue-500 text-white' : 'bg-white text-gray-700 group-hover:bg-gray-900 group-hover:text-white'}`}>{member.name[0]}</div>
+                            <div className={`w-16 h-16 rounded-[24px] flex items-center justify-center text-2xl font-black transition-all ${isSelf ? 'bg-gray-900 text-white' : 'bg-white text-gray-700 group-hover:bg-gray-900 group-hover:text-white'}`}>{member.name[0]}</div>
                             <div>
                               <div className="flex items-center gap-2">
                                 <p className="text-lg font-black text-gray-800">{member.name}</p>
-                                {isSelf && <span className="bg-blue-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">본인</span>}
+                                {isSelf && <span className="bg-gray-900 text-white text-[10px] font-black px-2 py-0.5 rounded-full">본인</span>}
                               </div>
                               <p className="text-xs font-bold text-gray-400 uppercase">{detailLabel}</p>
                             </div>
