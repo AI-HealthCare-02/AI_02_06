@@ -104,11 +104,11 @@ class PrescriptionGroupService:
             prescription_group_id=group.id,
             deleted_at__isnull=True,
         ).count()
-        has_active = await Medication.filter(
+        active_count = await Medication.filter(
             prescription_group_id=group.id,
             deleted_at__isnull=True,
             is_active=True,
-        ).exists()
+        ).count()
         return PrescriptionGroupCard(
             id=group.id,
             hospital_name=group.hospital_name,
@@ -117,7 +117,8 @@ class PrescriptionGroupService:
             source=group.source,
             created_at=group.created_at,
             medications_count=meds_count,
-            has_active_medication=has_active,
+            active_medications_count=active_count,
+            has_active_medication=active_count > 0,
         )
 
     # ── drill-down: 단일 그룹 + 약 list ──────────────────────────────────
