@@ -38,6 +38,10 @@ async def search_candidates_in_open_db(candidates: list[str]) -> list[ExtractedM
         pure_name = item.get("name", "")
         strength = item.get("strength", "")  # 💡 잃어버린 용량 구출!
         item_type = item.get("type", "의약품")
+        dose = item.get("dose")
+        daily_count = item.get("daily_count")
+        total_days = item.get("total_days")
+        instruction = item.get("instruction", "식후 30분")
 
         if not pure_name:
             continue
@@ -62,8 +66,11 @@ async def search_candidates_in_open_db(candidates: list[str]) -> list[ExtractedM
                     raw_ocr_name=pure_name,
                     is_llm_corrected=True,
                     match_score=0.5,
-                )
-            )
+                    dose_per_intake = str(dose) if dose else "",
+                    daily_intake_count = int(daily_count) if daily_count else None,
+                    total_intake_days = int(total_days) if total_days else None,
+                    intake_instruction = instruction
+                ))
 
     logger.info("Final Matching: %d LLM names -> %d matched to DB", len(extracted_items), db_match_count)
     return matched
@@ -143,30 +150,33 @@ async def _extract_medicines_with_llm(raw_text: str) -> list[dict]:
 
     # 프롬프트 재진화: 이름과 용량을 강제로 분리시킨다.
     prompt = f"""
-    너는 대한민국 최고 수준의 약사 AI야.
-    다음은 처방전 사진을 OCR로 읽어낸 텍스트야.
+        너는 대한민국 최고 수준의 약사 AI야.
+        다음은 처방전 사진을 OCR로 읽어낸 텍스트야.
 
-    [OCR 전체 문맥 텍스트]
-    "{raw_text}"
+        [OCR 전체 문맥 텍스트]
+        "{raw_text}"
 
-    [지시사항]
-    1. 환자명(홍길동 등), 병원명(SEOUL 등), 주소, 성별, 나이 등 노이즈는 완전히 무시해.
-    2. 텍스트 중에서 '의약품'과 '영양제/보충제(마그네슘 등)'를 추출해.
-    3. 텍스트에 용량(예: 500mg, 100밀리그램, 0.5g 등)이 있다면, 반드시
-       약품명과 분리해서 추출해.
-       예: 타이레놀정500mg -> 이름: 타이레놀정, 용량: 500mg
-    4. 응답은 각 항목의 순수 이름(name), 용량(strength), 유형(type:
-       "의약품" 또는 "영양제")을 포함한 JSON 객체 배열 형태로 반환해.
-
-    [출력 예시]
-    {{
-        "items": [
-            {{"name": "타이레놀정", "strength": "500mg", "type": "의약품"}},
-            {{"name": "아스피린장용정", "strength": "100mg", "type": "의약품"}},
-            {{"name": "마그네슘", "strength": "", "type": "영양제"}}
-        ]
-    }}
-    """
+        [지시사항]
+        1. 노이즈는 완전히 무시하고 '의약품'과 '영양제'를 추출해.
+        2. 약품명과 용량(strength)을 분리해.
+        3. (신규) 텍스트 문맥을 분석하여 각 약품의 '1회 투약량(dose)', '1일 투약 횟수(daily_count)', '총 투약 일수(total_days)'를 숫자로 추출해. 만약 텍스트에 없다면 null로 반환해.
+        4. (신규) '식후 30분', '취침 전' 등 복용 방법(instruction)이 있다면 추출하고, 없으면 "식후 30분"을 기본값으로 줘.
+        5. 응답은 반드시 아래 형식의 JSON 객체 형태로 반환해. (JSON 포맷 필수)
+        [출력 예시]
+        {{
+            "items": [
+                {{
+                    "name": "타이레놀정", 
+                    "strength": "500mg", 
+                    "type": "의약품",
+                    "dose": 1, 
+                    "daily_count": 3, 
+                    "total_days": 5,
+                    "instruction": "식후 30분"
+                }}
+            ]
+        }}
+        """
 
     try:
         response = await client.chat.completions.create(
