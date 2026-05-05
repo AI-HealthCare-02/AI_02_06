@@ -105,10 +105,12 @@ function KakaoCallbackContent() {
         // 로그인 성공 — 이후 재접속자 판별용 힌트 기록
         markLoggedIn()
 
-        // 4. 신규 사용자거나 dev 사용자면 설문조사, 기존 사용자면 메인으로 리다이렉트
+        // 4. 신규 사용자면 메인 위에 설문 모달 팝업 (HealthSurveyModal SSOT 컴포넌트)
+        //    dev 로그인 흐름과 동일하게 ?showSurvey=true 로 진입 → 메인 페이지가
+        //    팝업 띄움. 별도 /survey 페이지로 가지 않음 (PR #134 통합 SSOT).
         const { show_survey } = response.data
         if (show_survey) {
-          router.replace('/survey')
+          router.replace('/main?showSurvey=true')
         } else {
           router.replace('/main')
         }
