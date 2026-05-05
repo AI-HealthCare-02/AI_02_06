@@ -14,7 +14,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 
-from app.dtos.query_rewriter import IntentType, LocationMode, LocationQuery
+from app.dtos.query_rewriter import IntentType, LocationMode, LocationQuery, RecallMode, RecallQuery
 from app.dtos.tools import AskPending, AskResult, PendingTurn, ToolCall
 from app.models.messages import ChatMessage
 from app.repositories.chat_session_repository import ChatSessionRepository
@@ -319,7 +319,7 @@ class MessageService:
     #       -> intent 분기:
     #          (1) direct_answer (greeting/out_of_scope/ambiguous) 즉시 응답
     #          (2) location_search -> _handle_location_search (카카오 + 4o)
-    #          (3) recall_check -> 추후 _handle_recall_check 추가 예정
+    #          (3) recall_check -> _handle_recall_check (식약처 회수 + 4o)
     #          (4) domain_question -> _finalize_rag_turn (RAG 4단 retrieval + 4o)
     async def ask_with_tools(
         self,
@@ -402,7 +402,25 @@ class MessageService:
                     location_query=rewriter_output.location_query,
                 )
 
-            # 분기 3: domain_question (RAG 4단 retrieval + 4o)
+            # 분기 3: recall_check (식약처 회수·판매중지 조회)
+            if rewriter_output.intent == IntentType.RECALL_CHECK:
+                if rewriter_output.recall_query is None:
+                    logger.warning(
+                        "[Chat] session=%s recall_check but recall_query 누락 - fallback",
+                        sid,
+                    )
+                    fallback = "어느 약 또는 어느 제조사의 회수 이력을 알려드릴까요?"
+                    return await self._persist_direct_answer_turn(session_id, user_msg, fallback)
+                return await self._handle_recall_check(
+                    session_id=session_id,
+                    profile_id=profile_id,
+                    user_msg=user_msg,
+                    history=history,
+                    content=content,
+                    recall_query=rewriter_output.recall_query,
+                )
+
+            # 분기 4: domain_question (RAG 4단 retrieval + 4o)
             if (
                 rewriter_output.intent != IntentType.DOMAIN_QUESTION
                 or not rewriter_output.rewritten_query
@@ -753,6 +771,89 @@ class MessageService:
             assistant_message=None,
             pending=AskPending(turn_id=turn_id, ttl_sec=DEFAULT_TTL_SEC),
         )
+
+    # ── 회수 조회 분기 (식약처 회수 매칭 + 2nd LLM) ─────────────────────
+    # 흐름: mode 분기
+    #       (user)         ToolCall(check_user_medications_recall) +
+    #                      profile_id top-level 주입 -> run_tool_calls_via_rq
+    #                      -> 결과를 messages 에 prepend -> 2nd LLM (4o)
+    #       (manufacturer) ToolCall(check_manufacturer_recalls) + profile_id +
+    #                      arguments.manufacturer (선택) -> 동일 흐름
+    async def _handle_recall_check(
+        self,
+        *,
+        session_id: UUID,
+        profile_id: UUID,
+        user_msg: ChatMessage,
+        history: list[dict[str, str]],
+        content: str,
+        recall_query: RecallQuery,
+    ) -> AskResult:
+        """식약처 회수·판매중지 매칭 분기 (mode=user / mode=manufacturer)."""
+        sid = str(session_id)[:8]
+
+        if recall_query.mode == RecallMode.USER:
+            tool_call = ToolCall(
+                tool_call_id=f"recall_user_{uuid_token()}",
+                name="check_user_medications_recall",
+                arguments={},
+                needs_geolocation=False,
+            )
+        else:  # MANUFACTURER
+            arguments: dict[str, Any] = {}
+            if recall_query.manufacturer:
+                arguments["manufacturer"] = recall_query.manufacturer
+            tool_call = ToolCall(
+                tool_call_id=f"recall_mfr_{uuid_token()}",
+                name="check_manufacturer_recalls",
+                arguments=arguments,
+                needs_geolocation=False,
+            )
+
+        worker_calls = [_tool_call_to_worker_dict(tool_call, profile_id=str(profile_id))]
+        logger.info(
+            "[Chat] session=%s recall_check mode=%s manufacturer=%r",
+            sid,
+            recall_query.mode.value,
+            recall_query.manufacturer,
+        )
+        results = await run_tool_calls_via_rq(calls=worker_calls, queue=self._get_queue())
+
+        assistant_with_tool = {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": tool_call.tool_call_id,
+                    "type": "function",
+                    "function": {
+                        "name": tool_call.name,
+                        "arguments": json.dumps(tool_call.arguments, ensure_ascii=False),
+                    },
+                }
+            ],
+        }
+        tool_message = _tool_result_message(
+            tool_call.tool_call_id,
+            results.get(tool_call.tool_call_id, {"error": "no result"}),
+        )
+        second_messages = [
+            *history,
+            {"role": "user", "content": content},
+            assistant_with_tool,
+            tool_message,
+        ]
+        completion = await generate_chat_response_via_rq(
+            messages=second_messages,
+            queue=self._get_queue(),
+        )
+        answer = completion.get("answer", "")
+        logger.info("[Chat] session=%s recall reply=%r len=%d", sid, _preview(answer), len(answer))
+
+        assistant_msg = await self.repository.create_assistant_message(session_id, answer)
+        total = await self.repository.count_by_session(session_id)
+        self._maybe_enqueue_compact(session_id, total)
+        return AskResult(user_message=user_msg, assistant_message=assistant_msg, pending=None)
 
     # ── pending GPS 턴 마무리 (오케스트레이션) ───────────────────────────
     # 흐름: 입력 검증 -> claim+ownership -> geo 결과 수집
