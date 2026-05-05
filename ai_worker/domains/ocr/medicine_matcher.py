@@ -35,13 +35,15 @@ async def search_candidates_in_open_db(candidates: list[str]) -> list[ExtractedM
 
     db_match_count = 0
     for item in extracted_items:
-        pure_name = item.get("name", "")
-        strength = item.get("strength", "")  # 💡 잃어버린 용량 구출!
-        item_type = item.get("type", "의약품")
+        # LLM 이 키 자체는 반환했지만 값이 None 인 경우도 있어 `or ""` 로 정리.
+        # 이전 구현은 `get(k, default)` 만 써서 None 이 그대로 흘러가 "None" 문자열 leak 발생.
+        pure_name = item.get("name") or ""
+        strength = item.get("strength") or ""
+        item_type = item.get("type") or "의약품"
         dose = item.get("dose")
         daily_count = item.get("daily_count")
         total_days = item.get("total_days")
-        instruction = item.get("instruction", "식후 30분")
+        instruction = item.get("instruction") or "식후 30분"
 
         if not pure_name:
             continue
@@ -66,11 +68,12 @@ async def search_candidates_in_open_db(candidates: list[str]) -> list[ExtractedM
                     raw_ocr_name=pure_name,
                     is_llm_corrected=True,
                     match_score=0.5,
-                    dose_per_intake = str(dose) if dose else "",
-                    daily_intake_count = int(daily_count) if daily_count else None,
-                    total_intake_days = int(total_days) if total_days else None,
-                    intake_instruction = instruction
-                ))
+                    dose_per_intake=str(dose) if dose else "",
+                    daily_intake_count=int(daily_count) if daily_count else None,
+                    total_intake_days=int(total_days) if total_days else None,
+                    intake_instruction=instruction,
+                )
+            )
 
     logger.info("Final Matching: %d LLM names -> %d matched to DB", len(extracted_items), db_match_count)
     return matched
@@ -159,18 +162,20 @@ async def _extract_medicines_with_llm(raw_text: str) -> list[dict]:
         [지시사항]
         1. 노이즈는 완전히 무시하고 '의약품'과 '영양제'를 추출해.
         2. 약품명과 용량(strength)을 분리해.
-        3. (신규) 텍스트 문맥을 분석하여 각 약품의 '1회 투약량(dose)', '1일 투약 횟수(daily_count)', '총 투약 일수(total_days)'를 숫자로 추출해. 만약 텍스트에 없다면 null로 반환해.
-        4. (신규) '식후 30분', '취침 전' 등 복용 방법(instruction)이 있다면 추출하고, 없으면 "식후 30분"을 기본값으로 줘.
+        3. (신규) 텍스트 문맥을 분석하여 각 약품의 '1회 투약량(dose)', '1일 투약 횟수(daily_count)',
+           '총 투약 일수(total_days)'를 숫자로 추출해. 만약 텍스트에 없다면 null로 반환해.
+        4. (신규) '식후 30분', '취침 전' 등 복용 방법(instruction)이 있다면 추출하고,
+           없으면 "식후 30분"을 기본값으로 줘.
         5. 응답은 반드시 아래 형식의 JSON 객체 형태로 반환해. (JSON 포맷 필수)
         [출력 예시]
         {{
             "items": [
                 {{
-                    "name": "타이레놀정", 
-                    "strength": "500mg", 
+                    "name": "타이레놀정",
+                    "strength": "500mg",
                     "type": "의약품",
-                    "dose": 1, 
-                    "daily_count": 3, 
+                    "dose": 1,
+                    "daily_count": 3,
                     "total_days": 5,
                     "instruction": "식후 30분"
                 }}
