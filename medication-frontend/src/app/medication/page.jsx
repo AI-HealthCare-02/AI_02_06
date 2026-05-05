@@ -97,7 +97,11 @@ function PrescriptionCard({ group, onClick, onDelete, isDeleting }) {
         </div>
         <div className="flex items-center gap-2 pt-1">
           <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${statusStyle}`}>{statusLabel}</span>
-          <span className="text-[11px] text-gray-400">약 {group.medications_count}개</span>
+          <span className="text-[11px] text-gray-400">
+            {group.has_active_medication
+              ? `복용 중 ${group.active_medications_count ?? 0}개 / 총 ${group.medications_count}개`
+              : `약 ${group.medications_count}개`}
+          </span>
         </div>
       </div>
 

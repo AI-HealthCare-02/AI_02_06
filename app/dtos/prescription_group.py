@@ -49,6 +49,10 @@ class PrescriptionGroupCard(BaseModel):
     source: str = Field(..., description="생성 경로 (OCR/MANUAL/MIGRATED)")
     created_at: datetime = Field(..., description="그룹 생성 시각")
     medications_count: int = Field(..., description="그룹에 속한 medication 수 (deleted 제외)")
+    active_medications_count: int = Field(
+        default=0,
+        description="그룹 안 is_active=True 인 medication 수 (= 현재 복용 중인 약 개수)",
+    )
     has_active_medication: bool = Field(
         ...,
         description="그룹 안 1개 이상 medication 이 is_active=True (= 복용 중)",

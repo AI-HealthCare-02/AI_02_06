@@ -56,7 +56,10 @@ _STREAM_TICK_SECONDS = 0.5
 # v2: 1일 챌린지 강제 + 일관성 instruction (Phase B 도입 시점)
 # v3: 처방전 그룹 단위 + health_survey fingerprint 합산 + 챌린지 15개 한 번에 생성
 #     (사용자 점진 노출 정책). 카테고리는 5개 유지 (symptom = 예상 증상/모니터링).
-_GUIDE_PROMPT_VERSION = "v3"
+# v4: health_survey FE/BE key 이름 매핑 fix (is_smoking/is_drinking/conditions
+#     등) — 기존 v3 가이드는 prompt 에 사용자 건강정보가 leak 되어 있었으므로
+#     v4 로 강제 재생성 트리거.
+_GUIDE_PROMPT_VERSION = "v4"
 
 
 def _compute_input_fingerprint(snapshot: list[dict], health_survey: dict | None) -> str:

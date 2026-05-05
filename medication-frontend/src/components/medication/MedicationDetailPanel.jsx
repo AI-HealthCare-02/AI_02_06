@@ -5,8 +5,9 @@
 // 책임지므로 본 컴포넌트는 본문만 렌더한다.
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 
-import { AlertCircle, AlertTriangle, Ban, Calendar, ChevronDown, ChevronUp, Clock, Pill, Trash2, Utensils } from 'lucide-react'
+import { AlertCircle, AlertTriangle, Ban, Calendar, ChevronDown, ChevronUp, Clock, PencilLine, Pill, Trash2, Utensils } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Markdown from 'react-markdown'
 
@@ -131,6 +132,7 @@ function DeleteConfirmModal({ medicineName, onConfirm, onCancel, isDeleting }) {
  */
 export default function MedicationDetailPanel({ medicationId, onDeleted }) {
   const id = medicationId
+  const router = useRouter()
   const { medications, deleteMedication, deactivateMedication, getDrugInfo, refetchMedications } = useMedication()
   const [isLoading, setIsLoading] = useState(true)
   const [isDrugInfoLoading, setIsDrugInfoLoading] = useState(false)
@@ -147,6 +149,10 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
     /* eslint-disable react-hooks/set-state-in-effect -- id 변경 시 panel state reset */
     setDrugInfo(null)
     setActiveTab('용법')
+    // 직전 약에서 삭제 진행 중이었거나 confirm 모달이 열려 있던 상태가
+    // 새 약 panel 로 누수되어 'X 삭제 중...' 모달이 stuck 되는 회귀 차단.
+    setIsDeleting(false)
+    setShowDeleteModal(false)
     if (medications.find((m) => m.id === id)) {
       setIsLoading(false)
       return
@@ -189,6 +195,11 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
     try {
       await deleteMedication(id)
       await refetchMedications() // 홈 화면 등에서 즉시 반영 위해 Context 재조회
+      // 성공 시에도 모달/플래그 닫기. onDeleted 가 panel close 를 트리거하지만
+      // 외부에서 같은 panel 을 다음 약으로 재사용하는 흐름이라면 state 잔여를
+      // 남기지 않아야 함.
+      setIsDeleting(false)
+      setShowDeleteModal(false)
       onDeleted?.()
     } catch (err) {
       console.error(err)
@@ -257,16 +268,26 @@ export default function MedicationDetailPanel({ medicationId, onDeleted }) {
 
   return (
     <div className="space-y-4">
-      {/* 약품명 카드 + 삭제 버튼 */}
+      {/* 약품명 카드 + 편집/삭제 버튼 */}
       <div className="bg-gray-900 rounded-2xl p-6 text-white relative">
-        <button
-          onClick={() => setShowDeleteModal(true)}
-          className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-400 hover:bg-gray-800 transition-colors cursor-pointer"
-          aria-label="약품 삭제"
-        >
-          <Trash2 size={16} />
-        </button>
-        <div className="flex items-start justify-between gap-4 pr-10">
+        <div className="absolute top-4 right-4 flex items-center gap-1">
+          <button
+            onClick={() => router.push(`/medication/edit?ids=${id}`)}
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-blue-300 hover:bg-gray-800 transition-colors cursor-pointer"
+            aria-label="약품 정보 수정"
+            title="이 약 정보 수정"
+          >
+            <PencilLine size={16} />
+          </button>
+          <button
+            onClick={() => setShowDeleteModal(true)}
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-400 hover:bg-gray-800 transition-colors cursor-pointer"
+            aria-label="약품 삭제"
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
+        <div className="flex items-start justify-between gap-4 pr-20">
           <div className="flex-1">
             {med.category && (
               <span className="text-xs font-bold text-gray-400 bg-gray-800 px-3 py-1 rounded-full mb-3 inline-block">

@@ -34,11 +34,17 @@ export default function MedicineNameAutocomplete({
   const abortRef = useRef(null)
   const debounceRef = useRef(null)
   const skipFetchRef = useRef(false)
+  const userTypedRef = useRef(false)
 
   // ── debounced fetch (입력 변경 시) ────────────────────────────────────
+  // 흐름: 사용자 typing 여부 확인 -> 최소 길이 검사 -> debounce -> API 호출
+  //       -> dropdown open. mount 시 prefilled value (OCR 결과 등) 는 fetch 스킵.
   useEffect(() => {
     if (skipFetchRef.current) {
       skipFetchRef.current = false
+      return
+    }
+    if (!userTypedRef.current) {
       return
     }
     const trimmed = (value || '').trim()
@@ -129,8 +135,11 @@ export default function MedicineNameAutocomplete({
         ref={inputRef}
         type="text"
         value={value || ''}
-        onChange={(e) => onChange?.(e.target.value)}
-        onFocus={() => suggestions.length > 0 && setIsOpen(true)}
+        onChange={(e) => {
+          userTypedRef.current = true
+          onChange?.(e.target.value)
+        }}
+        onFocus={() => userTypedRef.current && suggestions.length > 0 && setIsOpen(true)}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
         disabled={disabled}

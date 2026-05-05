@@ -39,6 +39,72 @@ export function MedicationProvider({ children }) {
   const medications = listQuery.data || []
   const isLoading = listQuery.isLoading
 
+  // ── 처방전 그룹 detail cache 의 medications 배열을 직접 patch ────────
+  // PrescriptionGroupContext 의 groupsById 는 useQueries(enabled: false) 로
+  // cache 만 읽기 때문에 invalidate 만으로는 즉시 갱신되지 않는다. 약 개별
+  // mutation 직후 상세 페이지에서 즉시 반영되도록 detail cache 를 직접
+  // setQueryData 한다.
+  const patchPrescriptionGroupDetails = useCallback(
+    (mutator) => {
+      const entries = qc.getQueriesData({ queryKey: ['prescription-groups', 'detail'] })
+      for (const [key, group] of entries) {
+        if (!group?.medications) continue
+        const next = mutator(group)
+        if (next !== group) qc.setQueryData(key, next)
+      }
+    },
+    [qc],
+  )
+
+  // 처방전 list cache 의 has_active_medication / active_medications_count /
+  // medications_count 를 즉시 재계산. 약 개별 deactivate / 삭제 / 활성화 직후
+  // 처방전 list 화면에서 "복용 중 N건" 라벨과 카운트가 바로 반영되도록 BE 의
+  // _build_card 와 동일한 집계를 client 에서 한다. invalidate 에 의한
+  // background refetch 가 끝나기 전에도 사용자가 즉시 변화를 본다.
+  const patchPrescriptionGroupListLabels = useCallback(
+    (groupIds) => {
+      if (!groupIds.size) return
+      const meds = qc.getQueryData(qk.medications.list(selectedProfileId)) || []
+      const activeCountByGroup = new Map()
+      const totalCountByGroup = new Map()
+      for (const m of meds) {
+        const gid = m.prescription_group_id
+        if (!gid) continue
+        totalCountByGroup.set(gid, (totalCountByGroup.get(gid) || 0) + 1)
+        if (m.is_active) {
+          activeCountByGroup.set(gid, (activeCountByGroup.get(gid) || 0) + 1)
+        }
+      }
+      const listEntries = qc.getQueriesData({ queryKey: ['prescription-groups', 'list'] })
+      for (const [key, list] of listEntries) {
+        if (!Array.isArray(list)) continue
+        let changed = false
+        const next = list.map((g) => {
+          if (!groupIds.has(g.id)) return g
+          const nextActiveCount = activeCountByGroup.get(g.id) || 0
+          const nextTotalCount = totalCountByGroup.get(g.id) ?? g.medications_count
+          const nextHasActive = nextActiveCount > 0
+          if (
+            g.has_active_medication === nextHasActive &&
+            g.active_medications_count === nextActiveCount &&
+            g.medications_count === nextTotalCount
+          ) {
+            return g
+          }
+          changed = true
+          return {
+            ...g,
+            has_active_medication: nextHasActive,
+            active_medications_count: nextActiveCount,
+            medications_count: nextTotalCount,
+          }
+        })
+        if (changed) qc.setQueryData(key, next)
+      }
+    },
+    [qc, selectedProfileId],
+  )
+
   // ── 2) mutations ──────────────────────────────────────────────────
   const updateMutation = useMutation({
     mutationFn: async ({ id, patch }) => {
@@ -49,9 +115,20 @@ export function MedicationProvider({ children }) {
       qc.setQueryData(qk.medications.list(selectedProfileId), (prev = []) =>
         prev.map((m) => (m.id === id ? updated : m)),
       )
+      patchPrescriptionGroupDetails((group) => {
+        const idx = group.medications.findIndex((m) => m.id === id)
+        if (idx === -1) return group
+        const nextMeds = [...group.medications]
+        nextMeds[idx] = updated
+        return { ...group, medications: nextMeds }
+      })
+      // 처방전 list cache 의 라벨/카운트 즉시 patch.
+      const groupIds = new Set()
+      if (updated?.prescription_group_id) groupIds.add(updated.prescription_group_id)
+      patchPrescriptionGroupListLabels(groupIds)
       // medicine_name 변경 시 drug-info 도 stale → invalidate.
       qc.invalidateQueries({ queryKey: qk.medications.detail(id) })
-      // active 변화 가능성 → prescription-groups 라벨 동기화.
+      // active 변화 가능성 → prescription-groups 라벨 동기화 (background refetch).
       qc.invalidateQueries({ queryKey: qk.prescriptionGroups.all() })
     },
   })
@@ -62,9 +139,21 @@ export function MedicationProvider({ children }) {
       return id
     },
     onSuccess: (id) => {
+      // 삭제 전 cache 에서 group_id 추출 (삭제 후엔 list 에 없음).
+      const prevMeds = qc.getQueryData(qk.medications.list(selectedProfileId)) || []
+      const deletedMed = prevMeds.find((m) => m.id === id)
+      const groupIds = new Set()
+      if (deletedMed?.prescription_group_id) groupIds.add(deletedMed.prescription_group_id)
+
       qc.setQueryData(qk.medications.list(selectedProfileId), (prev = []) =>
         prev.filter((m) => m.id !== id),
       )
+      patchPrescriptionGroupDetails((group) => {
+        const filtered = group.medications.filter((m) => m.id !== id)
+        if (filtered.length === group.medications.length) return group
+        return { ...group, medications: filtered }
+      })
+      patchPrescriptionGroupListLabels(groupIds)
       qc.removeQueries({ queryKey: qk.medications.detail(id) })
       qc.invalidateQueries({ queryKey: qk.prescriptionGroups.all() })
     },
@@ -77,9 +166,23 @@ export function MedicationProvider({ children }) {
     },
     onSuccess: (ids) => {
       const idSet = new Set(ids)
+      const prevMeds = qc.getQueryData(qk.medications.list(selectedProfileId)) || []
+      const groupIds = new Set()
+      for (const m of prevMeds) {
+        if (idSet.has(m.id) && m.prescription_group_id) {
+          groupIds.add(m.prescription_group_id)
+        }
+      }
+
       qc.setQueryData(qk.medications.list(selectedProfileId), (prev = []) =>
         prev.filter((m) => !idSet.has(m.id)),
       )
+      patchPrescriptionGroupDetails((group) => {
+        const filtered = group.medications.filter((m) => !idSet.has(m.id))
+        if (filtered.length === group.medications.length) return group
+        return { ...group, medications: filtered }
+      })
+      patchPrescriptionGroupListLabels(groupIds)
       ids.forEach((id) => qc.removeQueries({ queryKey: qk.medications.detail(id) }))
       qc.invalidateQueries({ queryKey: qk.prescriptionGroups.all() })
     },

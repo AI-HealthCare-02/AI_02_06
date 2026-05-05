@@ -666,18 +666,20 @@ export default function LifestyleGuidePage() {
                         <div className="h-7 bg-orange-100 rounded-full w-16" />
                         <div className="h-7 bg-orange-100 rounded-full w-20" />
                       </div>
-                    ) : todaySymptoms.length > 0 ? (
+                    ) : todaySymptoms.length > 0 || todayNote ? (
                       <div className="space-y-3">
-                        <div className="flex flex-wrap gap-1.5">
-                          {todaySymptoms.map((s, idx) => (
-                            <span
-                              key={idx}
-                              className="px-3 py-1.5 bg-white text-orange-700 rounded-full text-xs font-bold border border-orange-100"
-                            >
-                              {s}
-                            </span>
-                          ))}
-                        </div>
+                        {todaySymptoms.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {todaySymptoms.map((s, idx) => (
+                              <span
+                                key={idx}
+                                className="px-3 py-1.5 bg-white text-orange-700 rounded-full text-xs font-bold border border-orange-100"
+                              >
+                                {s}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         {todayNote && (
                           <p className="text-gray-500 text-xs leading-relaxed bg-white/70 p-3 rounded-xl border border-dashed border-orange-100">
                             "{todayNote}"
@@ -691,11 +693,38 @@ export default function LifestyleGuidePage() {
                     )}
                   </div>
 
-                  {/* 증상 입력 폼 — 저장 후 요약 카드 자동 갱신 */}
-                  <SymptomLogForm
-                    profileId={profileId}
-                    onSaved={() => fetchTodaySymptoms()}
-                  />
+                  {/* 증상 입력 폼 — 저장 후 요약 카드 자동 갱신.
+                      지난 가이드를 보고 있을 땐 폼을 숨기고 안내 배너 표시.
+                      증상 로그는 (profile_id, log_date) 단위라 가이드 무관 = 같은
+                      날 1건만. 지난 가이드에서 새 입력을 받으면 사용자 혼란 +
+                      upsert 로 기존 기록을 덮어쓸 수 있어 의도와 다를 수 있음. */}
+                  {isViewingHistory ? (
+                    <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4 flex items-center justify-between gap-3">
+                      <div className="text-xs text-gray-600 leading-relaxed">
+                        <p className="font-bold text-gray-800 mb-1">지난 가이드를 보고 계셔요</p>
+                        <p>오늘의 증상은 한 곳에서만 기록할 수 있어요. 최근 가이드에서 입력해주세요.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (firstReadyGuide) {
+                            setUserPickedGuideId(null)
+                            setSelectedGuide(firstReadyGuide)
+                          }
+                        }}
+                        className="shrink-0 px-3 py-2 text-xs font-bold rounded-xl bg-orange-500 text-white hover:bg-orange-600 cursor-pointer"
+                      >
+                        최근 가이드로
+                      </button>
+                    </div>
+                  ) : (
+                    <SymptomLogForm
+                      profileId={profileId}
+                      initialSymptoms={todaySymptoms}
+                      initialNote={todayNote}
+                      onSaved={() => fetchTodaySymptoms()}
+                    />
+                  )}
                 </div>
               )}
             </div>

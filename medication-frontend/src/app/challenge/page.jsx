@@ -10,11 +10,7 @@ import { useChallenge, useChallengeStart } from '@/contexts/ChallengeContext'
 import StartChallengeModal from '@/components/common/StartChallengeModal'
 import { useConfirm } from '@/components/common/ConfirmDialog'
 import { useLifestyleGuide } from '@/contexts/LifestyleGuideContext'
-import { usePrescriptionGroup } from '@/contexts/PrescriptionGroupContext'
 import toast from 'react-hot-toast'
-
-// 처방전 필터 — 챌린지의 prescription_group_id 매칭. 'all' 은 전체.
-const PRESCRIPTION_FILTER_ALL = 'all'
 
 // SVG 아이콘 컴포넌트 (진행중/완료 카드 아이콘 폴백용)
 const Icons = {
@@ -118,8 +114,6 @@ export default function ChallengePage() {
   const confirm = useConfirm()
   const [activeTab, setActiveTab] = useState('추천')
   const [processingIds, setProcessingIds] = useState([])
-  // 처방전 그룹 필터 (탭과 직교) — 'all' 또는 prescription_group_id.
-  const [groupFilter, setGroupFilter] = useState(PRESCRIPTION_FILTER_ALL)
 
   const { selectedProfileId: profileId } = useProfile()
   // 모든 server state 는 Context 가 단일 진실로 관리
@@ -134,16 +128,7 @@ export default function ChallengePage() {
   // 챌린지 시작은 어디서 호출하든 StartChallengeModal 확인 후 실행 (단일 정책)
   const { startTarget, isStarting, requestStart, cancelStart, confirmStart } = useChallengeStart()
   const { latestGuide, isLoading: guidesLoading } = useLifestyleGuide()
-  // 처방전 그룹 list — 필터 칩 라벨 SSOT.
-  const { groups: prescriptionGroups } = usePrescriptionGroup()
   const isLoading = challengesLoading || guidesLoading
-
-  // 필터 적용 — 'all' 이면 그대로, 아니면 챌린지의 prescription_group_id 매칭.
-  // legacy 챌린지(group_id NULL) 는 'all' 에서만 보이고 group 필터에는 안 잡힘.
-  const filterByGroup = (list) => {
-    if (groupFilter === PRESCRIPTION_FILTER_ALL) return list
-    return list.filter((c) => c.prescription_group_id === groupFilter)
-  }
 
   const getIconByTitle = (title) => {
     if (title.includes('금연')) return <Icons.NoSmoking />
@@ -160,30 +145,19 @@ export default function ChallengePage() {
   }
 
   // 추천 = 최신 가이드의 미시작 챌린지 (Context 의 unstartedByGuide selector)
-  // 그룹 필터가 켜져 있으면 그 그룹의 챌린지만.
-  const recommended = filterByGroup(latestGuide ? unstartedByGuide(latestGuide.id) : [])
+  const recommended = latestGuide ? unstartedByGuide(latestGuide.id) : []
   const noGuide = !guidesLoading && !latestGuide
 
   // ongoing/completed 는 derived (icon 추가만 페이지에서)
-  const ongoing = filterByGroup(activeChallenges).map(c => ({
+  const ongoing = activeChallenges.map(c => ({
     ...c,
     icon: getIconByTitle(c.title),
     current: c.completed_dates?.length || 0,
   }))
-  const completed = filterByGroup(completedChallenges).map(c => ({
+  const completed = completedChallenges.map(c => ({
     ...c,
     icon: getIconByTitle(c.title),
   }))
-
-  // 필터 칩 라벨 — 처방전 카드와 동일 컨벤션: 병원 미상이면 "병원 미상".
-  const filterChips = [
-    { id: PRESCRIPTION_FILTER_ALL, label: '전체' },
-    ...(prescriptionGroups || []).map((g) => ({
-      id: g.id,
-      label: g.hospital_name || '병원 미상',
-      sub: g.dispensed_date ? String(g.dispensed_date).slice(5, 10).replace('-', '/') : '',
-    })),
-  ]
 
   // 모달 onConfirm — useChallengeStart 의 confirmStart 가 PATCH /start 호출.
   // 성공 시 Context 가 응답으로 list 자동 갱신 (active 로 이동, recommended 에서 자동 제거).
@@ -266,36 +240,6 @@ export default function ChallengePage() {
       <Header title="생활습관 챌린지" subtitle="건강한 습관을 만들어보세요" showBack={true} />
 
       <div className="max-w-3xl mx-auto px-6 py-6">
-        {/* ── 처방전 필터 칩 ──
-            가이드/챌린지가 처방전 단위로 묶이므로 처방전별로 챌린지 list 를
-            필터링할 수 있다. 'all' = 모든 챌린지 (legacy 포함). */}
-        {filterChips.length > 1 && (
-          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide mb-4">
-            {filterChips.map((chip) => {
-              const isSelected = groupFilter === chip.id
-              return (
-                <button
-                  key={chip.id}
-                  type="button"
-                  onClick={() => setGroupFilter(chip.id)}
-                  className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all whitespace-nowrap cursor-pointer ${
-                    isSelected
-                      ? 'bg-gray-900 text-white border-gray-900'
-                      : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
-                  }`}
-                >
-                  {chip.label}
-                  {chip.sub && (
-                    <span className={`ml-1.5 text-[10px] font-normal ${isSelected ? 'text-gray-300' : 'text-gray-400'}`}>
-                      {chip.sub}
-                    </span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
-        )}
-
         <div className="flex gap-8 mb-8 border-b border-gray-200">
           {['추천', '진행중', '완료'].map((tab) => (
             <button

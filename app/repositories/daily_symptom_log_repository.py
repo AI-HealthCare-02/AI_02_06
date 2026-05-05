@@ -14,24 +14,36 @@ from app.models.daily_symptom_log import DailySymptomLog
 class DailySymptomLogRepository:
     """Daily symptom log database repository."""
 
-    async def create(
+    async def upsert(
         self,
         profile_id: UUID,
         log_date: date,
         symptoms: list[str],
         note: str | None = None,
     ) -> DailySymptomLog:
-        """Create a new daily symptom log entry.
+        """Create or update the daily symptom log for (profile_id, log_date).
+
+        증상 로그는 사용자의 그 날 신체 상태로 (profile_id, log_date) 단위 1건만
+        있어야 정합성 유지. 같은 키의 row 가 이미 존재하면 symptoms / note 를
+        교체하고, 없으면 새로 생성한다. 멱등성 — 같은 입력 반복 호출 안전.
 
         Args:
             profile_id: Owner profile UUID.
             log_date: Date of the symptom report.
-            symptoms: List of reported symptom strings.
-            note: Optional free-text note.
+            symptoms: List of reported symptom strings (replaces existing).
+            note: Optional free-text note (replaces existing; null 가능).
 
         Returns:
-            DailySymptomLog: Created log instance.
+            DailySymptomLog: Upserted log instance.
         """
+        existing = (
+            await DailySymptomLog.filter(profile_id=profile_id, log_date=log_date).order_by("-created_at").first()
+        )
+        if existing:
+            existing.symptoms = symptoms
+            existing.note = note
+            await existing.save(update_fields=["symptoms", "note"])
+            return existing
         return await DailySymptomLog.create(
             id=uuid4(),
             profile_id=profile_id,
@@ -39,6 +51,16 @@ class DailySymptomLogRepository:
             symptoms=symptoms,
             note=note,
         )
+
+    # 하위 호환 — 기존 호출지가 있을 수 있어 alias 유지. 신규 코드는 upsert 사용.
+    async def create(
+        self,
+        profile_id: UUID,
+        log_date: date,
+        symptoms: list[str],
+        note: str | None = None,
+    ) -> DailySymptomLog:
+        return await self.upsert(profile_id, log_date, symptoms, note)
 
     async def get_recent_by_profile(
         self,

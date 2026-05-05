@@ -63,13 +63,18 @@ class DailySymptomLogService:
             DailySymptomLog: Created log instance.
         """
         await self._verify_profile_ownership(profile_id, account_id)
-        log = await self.log_repo.create(
+        log = await self.log_repo.upsert(
             profile_id=profile_id,
             log_date=data.log_date,
             symptoms=data.symptoms,
             note=data.note,
         )
-        logger.info("[LOG] 증상 기록 생성 완료 profile_id=%s log_date=%s", profile_id, data.log_date)
+        logger.info(
+            "[LOG] 증상 기록 upsert 완료 profile_id=%s log_date=%s symptoms=%d",
+            profile_id,
+            data.log_date,
+            len(data.symptoms or []),
+        )
         return log
 
     async def get_recent_logs_with_owner_check(
