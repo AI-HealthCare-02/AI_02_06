@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 
 from app.dependencies.security import get_current_account
-from app.dtos.profile import ProfileCreate, ProfileResponse, ProfileSummaryResponse, ProfileUpdate
+from app.dtos.profile import ProfileCreate, ProfileResponse, ProfileUpdate
 from app.models.accounts import Account
 from app.services.profile_service import ProfileService
 
@@ -83,30 +83,32 @@ async def get_profile(
 
 @router.get(
     "",
-    response_model=list[ProfileSummaryResponse],
+    response_model=list[ProfileResponse],
     summary="List profiles",
 )
 async def list_profiles(
     current_account: CurrentAccount,
     service: ProfileServiceDep,
-) -> list[ProfileSummaryResponse]:
+) -> list[ProfileResponse]:
     """Get all profile list for the current account.
 
-    Returns lightweight summary (no health_survey) for profile switching UI.
-    Use GET /profiles/{id} to retrieve full profile including health survey data.
+    Returns full profile including health_survey — mypage 의 건강 정보 카드와
+    lifestyle guide / chatbot persona 가 health_survey 를 직접 사용하므로 list
+    응답에 포함시켜 cache refetch 시 데이터 누락 회귀 차단.
 
     Args:
         current_account: Current authenticated account.
         service: Profile service instance.
 
     Returns:
-        list[ProfileSummaryResponse]: Summary list of profiles for the account.
+        list[ProfileResponse]: Full profile list (with health_survey).
     """
-    # ProfileSummaryResponse(경량 요약 DTO)를 제거하고 ProfileResponse로 통일.
-    # 프론트엔드에서 프로필 전환 UI(ProfileSwitcher 컴포넌트, ProfileContext)를 삭제하면서
-    # 경량 DTO를 별도로 유지할 필요가 없어졌기 때문.
+    # 이전 ProfileSummaryResponse (health_survey 누락) 흐름의 절반 refactor 잔재
+    # 였으나, mypage 에서 list refetch 직후 health_survey 가 사라지는 회귀를
+    # 일으켜 ProfileResponse 로 통일. payload 약간 커지지만 list 길이 작음
+    # (가족 수 수준) 이라 영향 미미.
     profiles = await service.get_profiles_by_account(current_account.id)
-    return [ProfileSummaryResponse.model_validate(p) for p in profiles]
+    return [ProfileResponse.model_validate(p) for p in profiles]
 
 
 @router.patch(
