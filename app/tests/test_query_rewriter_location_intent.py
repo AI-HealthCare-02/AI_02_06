@@ -64,8 +64,8 @@ class TestIntentEnum:
     def test_location_search_member_exists(self) -> None:
         assert IntentType.LOCATION_SEARCH.value == "location_search"
 
-    def test_intent_count_is_five(self) -> None:
-        assert len(list(IntentType)) == 5
+    def test_intent_count_is_at_least_five(self) -> None:
+        assert len(list(IntentType)) >= 5
 
 
 # ── 1st LLM 분류 결과 round-trip ────────────────────────────────

@@ -38,6 +38,9 @@ class IntentType(StrEnum):
     LOCATION_SEARCH = "location_search"
     """약국·병원 위치 검색 — location_query 로 카카오 Local API 진입."""
 
+    RECALL_CHECK = "recall_check"
+    """약품 회수·판매중지·리콜 조회 — recall_query 로 식약처 회수 매칭 진입."""
+
 
 class LocationMode(StrEnum):
     """카카오 위치 검색 모드."""
@@ -73,6 +76,31 @@ class LocationQuery(BaseModel):
     query: str | None = Field(
         None,
         description="mode=keyword 검색어. 예: '강남역 약국', '서울대병원'. mode=gps 면 None.",
+    )
+
+
+class RecallMode(StrEnum):
+    """식약처 회수 조회 모드."""
+
+    USER = "user"
+    """사용자 복용약 전체 회수 매칭 (check_user_medications_recall)."""
+
+    MANUFACTURER = "manufacturer"
+    """제조사 단위 회수 이력 조회 (check_manufacturer_recalls)."""
+
+
+class RecallQuery(BaseModel):
+    """intent=recall_check 일 때만 채워지는 회수 조회 파라미터."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: RecallMode = Field(..., description="user (복용약 전체) 또는 manufacturer (제조사 단위).")
+    manufacturer: str | None = Field(
+        None,
+        description=(
+            "mode=manufacturer 일 때 특정 제조사명 (예: '동국제약', '한미약품'). "
+            "비우면 사용자 복용약의 제조사 셋 자동 추출. mode=user 면 None."
+        ),
     )
 
 
@@ -167,6 +195,15 @@ class QueryRewriterOutput(BaseModel):
             "intent 가 location_search 일 때 카카오 Local API 검색 파라미터. "
             "mode=gps 면 category 필수 + 사용자 좌표 콜백 대기, "
             "mode=keyword 면 query 필수 + 즉시 검색. 다른 intent 일 때 None."
+        ),
+    )
+    recall_query: RecallQuery | None = Field(
+        None,
+        description=(
+            "intent 가 recall_check 일 때 식약처 회수 조회 파라미터. "
+            "mode=user 면 사용자 복용약 전체 매칭, "
+            "mode=manufacturer 면 제조사 단위 (manufacturer 필드 선택적). "
+            "다른 intent 일 때 None."
         ),
     )
     referent_resolution: dict[str, str] | None = Field(
