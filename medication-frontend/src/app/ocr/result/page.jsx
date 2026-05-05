@@ -14,6 +14,7 @@ import api from '@/lib/api'
 import { streamSSE } from '@/lib/sseClient'
 import { useProfile } from '@/contexts/ProfileContext'
 import { useMedication } from '@/contexts/MedicationContext'
+import { useOcrDraft } from '@/contexts/OcrDraftContext'
 import { medicationEditPatchSchema } from '@/schemas'
 import FormError from '@/components/form/FormError'
 import MedicineNameAutocomplete from '@/components/medication/MedicineNameAutocomplete'
@@ -86,6 +87,7 @@ function OcrResultContent() {
   const draftId = searchParams.get('draft_id')
   const { selectedProfileId } = useProfile()
   const { refetchMedications } = useMedication()
+  const { removeDraftLocally, refetchDrafts } = useOcrDraft()
 
   // 💡 스트림 제어와 재시도 쿨다운을 위한 상태 추가
   const streamControllerRef = useRef(null)
@@ -309,6 +311,11 @@ function OcrResultContent() {
         sessionStorage.setItem('ocr_consumed_draft_id', draftId)
       }
 
+      // confirm 직후 draft cache 즉시 정리 — useOcrEntryNavigator 가 다음 진입 시
+      // stale 한 옛 draft 로 보내는 회귀 차단. sessionStorage marker 는 다음
+      // OcrDraftProvider 마운트 시점 백업이므로 여기서 immediate cleanup 우선.
+      if (draftId) removeDraftLocally(draftId)
+      refetchDrafts()
       await refetchMedications()
       toast.success('저장 완료! 복약 목록에서 확인해보세요.')
       router.push('/medication')
