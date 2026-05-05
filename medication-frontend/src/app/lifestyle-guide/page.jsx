@@ -666,18 +666,20 @@ export default function LifestyleGuidePage() {
                         <div className="h-7 bg-orange-100 rounded-full w-16" />
                         <div className="h-7 bg-orange-100 rounded-full w-20" />
                       </div>
-                    ) : todaySymptoms.length > 0 ? (
+                    ) : todaySymptoms.length > 0 || todayNote ? (
                       <div className="space-y-3">
-                        <div className="flex flex-wrap gap-1.5">
-                          {todaySymptoms.map((s, idx) => (
-                            <span
-                              key={idx}
-                              className="px-3 py-1.5 bg-white text-orange-700 rounded-full text-xs font-bold border border-orange-100"
-                            >
-                              {s}
-                            </span>
-                          ))}
-                        </div>
+                        {todaySymptoms.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {todaySymptoms.map((s, idx) => (
+                              <span
+                                key={idx}
+                                className="px-3 py-1.5 bg-white text-orange-700 rounded-full text-xs font-bold border border-orange-100"
+                              >
+                                {s}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         {todayNote && (
                           <p className="text-gray-500 text-xs leading-relaxed bg-white/70 p-3 rounded-xl border border-dashed border-orange-100">
                             "{todayNote}"
@@ -718,6 +720,8 @@ export default function LifestyleGuidePage() {
                   ) : (
                     <SymptomLogForm
                       profileId={profileId}
+                      initialSymptoms={todaySymptoms}
+                      initialNote={todayNote}
                       onSaved={() => fetchTodaySymptoms()}
                     />
                   )}
